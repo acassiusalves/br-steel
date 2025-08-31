@@ -1,7 +1,11 @@
 "use client";
 
 import * as React from 'react';
-import { KeyRound, Loader2, Copy, Save, CheckCircle, XCircle, FileJson, Send } from 'lucide-react';
+import { KeyRound, Loader2, Copy, Save, CheckCircle, XCircle, FileJson, Send, Calendar as CalendarIcon } from 'lucide-react';
+import { format } from "date-fns";
+import { ptBR } from "date-fns/locale";
+import type { DateRange } from "react-day-picker";
+
 
 import DashboardLayout from '@/components/dashboard-layout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -10,6 +14,9 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
 import { getBlingCredentials, saveBlingCredentials, getBlingSalesOrders } from '@/app/actions';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Calendar } from '@/components/ui/calendar';
+import { cn } from '@/lib/utils';
 
 export default function ApiPage() {
   const [credentials, setCredentials] = React.useState({ clientId: '', clientSecret: '', accessToken: '' });
@@ -20,13 +27,16 @@ export default function ApiPage() {
   const [authUrl, setAuthUrl] = React.useState('');
   const [isTesting, setIsTesting] = React.useState(false);
   const [apiResponse, setApiResponse] = React.useState<any>(null);
+  const [date, setDate] = React.useState<DateRange | undefined>();
   const { toast } = useToast();
 
   const isConnected = !!credentials.accessToken;
 
   React.useEffect(() => {
     // This code runs only on the client, after the component has mounted.
-    setCallbackUrl(`${window.location.origin}/api/callback/bling`);
+    if (typeof window !== 'undefined') {
+        setCallbackUrl(`${window.location.origin}/api/callback/bling`);
+    }
     
     // Carregar credenciais do servidor
     const fetchCredentials = async () => {
@@ -47,7 +57,7 @@ export default function ApiPage() {
     };
     fetchCredentials();
 
-  }, []);
+  }, [toast]);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { id, value } = e.target;
@@ -135,7 +145,7 @@ export default function ApiPage() {
     setIsTesting(true);
     setApiResponse(null);
     try {
-      const response = await getBlingSalesOrders();
+      const response = await getBlingSalesOrders({ from: date?.from, to: date?.to });
       setApiResponse(response);
        toast({
         title: "Sucesso!",
@@ -305,19 +315,61 @@ export default function ApiPage() {
                         </CardDescription>
                     </CardHeader>
                     <CardContent className="space-y-4">
-                        <Button onClick={handleTestApi} disabled={isTesting}>
-                            {isTesting ? (
-                                <>
-                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                Buscando...
-                                </>
-                            ) : (
-                                <>
-                                <Send className="mr-2 h-4 w-4" />
-                                Testar API (Listar Pedidos)
-                                </>
-                            )}
-                        </Button>
+                        <div className="flex flex-wrap items-end gap-4">
+                          <div className="grid gap-2 flex-1 min-w-[200px]">
+                            <Label htmlFor="date">Período de Importação</Label>
+                            <Popover>
+                              <PopoverTrigger asChild>
+                                <Button
+                                  id="date"
+                                  variant={"outline"}
+                                  className={cn(
+                                    "w-full justify-start text-left font-normal",
+                                    !date && "text-muted-foreground"
+                                  )}
+                                >
+                                  <CalendarIcon className="mr-2 h-4 w-4" />
+                                  {date?.from ? (
+                                    date.to ? (
+                                      <>
+                                        {format(date.from, "dd/MM/yy", { locale: ptBR })} -{" "}
+                                        {format(date.to, "dd/MM/yy", { locale: ptBR })}
+                                      </>
+                                    ) : (
+                                      format(date.from, "dd/MM/yy", { locale: ptBR })
+                                    )
+                                  ) : (
+                                    <span>Escolha um período</span>
+                                  )}
+                                </Button>
+                              </PopoverTrigger>
+                              <PopoverContent className="w-auto p-0" align="start">
+                                <Calendar
+                                  initialFocus
+                                  mode="range"
+                                  defaultMonth={date?.from}
+                                  selected={date}
+                                  onSelect={setDate}
+                                  numberOfMonths={2}
+                                  locale={ptBR}
+                                />
+                              </PopoverContent>
+                            </Popover>
+                          </div>
+                          <Button onClick={handleTestApi} disabled={isTesting}>
+                              {isTesting ? (
+                                  <>
+                                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                  Buscando...
+                                  </>
+                              ) : (
+                                  <>
+                                  <Send className="mr-2 h-4 w-4" />
+                                  Testar API (Listar Pedidos)
+                                  </>
+                              )}
+                          </Button>
+                        </div>
                         
                         {(isTesting || apiResponse) && (
                         <div className="space-y-2">

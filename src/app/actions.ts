@@ -2,6 +2,7 @@
 
 import * as fs from 'fs/promises';
 import * as path from 'path';
+import { format } from 'date-fns';
 
 import {
   predictSalesTrends,
@@ -97,7 +98,7 @@ export async function getBlingCredentials(): Promise<Partial<BlingCredentials>> 
     };
 }
 
-export async function getBlingSalesOrders(): Promise<any> {
+export async function getBlingSalesOrders({ from, to }: { from?: Date, to?: Date } = {}): Promise<any> {
     const envMap = await readEnvFile();
     const accessToken = envMap.get('BLING_ACCESS_TOKEN');
 
@@ -105,10 +106,20 @@ export async function getBlingSalesOrders(): Promise<any> {
         throw new Error('Access Token do Bling não encontrado. Por favor, conecte sua conta primeiro.');
     }
 
-    const url = 'https://api.bling.com.br/Api/v3/pedidos/vendas?pagina=1&limite=10';
+    const url = new URL('https://api.bling.com.br/Api/v3/pedidos/vendas');
+    url.searchParams.set('pagina', '1');
+    url.searchParams.set('limite', '100'); // Bling's max limit
+
+    if (from && to) {
+        // Bling API expects date in YYYY-MM-DD format
+        const dataInicial = format(from, 'yyyy-MM-dd');
+        const dataFinal = format(to, 'yyyy-MM-dd');
+        const filtro = `dataEmissao[${dataInicial} TO ${dataFinal}]`;
+        url.searchParams.set('filtros', filtro);
+    }
 
     try {
-        const response = await fetch(url, {
+        const response = await fetch(url.toString(), {
             method: 'GET',
             headers: {
                 'Authorization': `Bearer ${accessToken}`,
