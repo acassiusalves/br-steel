@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from 'react';
-import { KeyRound, Loader2, Copy, Save, CheckCircle, XCircle } from 'lucide-react';
+import { KeyRound, Loader2, Copy, Save, CheckCircle, XCircle, FileJson, Send } from 'lucide-react';
 
 import DashboardLayout from '@/components/dashboard-layout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -9,7 +9,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
-import { getBlingCredentials, saveBlingCredentials } from '@/app/actions';
+import { getBlingCredentials, saveBlingCredentials, getBlingSalesOrders } from '@/app/actions';
 
 export default function ApiPage() {
   const [credentials, setCredentials] = React.useState({ clientId: '', clientSecret: '', accessToken: '' });
@@ -18,6 +18,8 @@ export default function ApiPage() {
   const [isGenerating, setIsGenerating] = React.useState(false);
   const [callbackUrl, setCallbackUrl] = React.useState('');
   const [authUrl, setAuthUrl] = React.useState('');
+  const [isTesting, setIsTesting] = React.useState(false);
+  const [apiResponse, setApiResponse] = React.useState<any>(null);
   const { toast } = useToast();
 
   const isConnected = !!credentials.accessToken;
@@ -104,6 +106,7 @@ export default function ApiPage() {
     try {
         await saveBlingCredentials({ clientId: '', clientSecret: '', accessToken: '', refreshToken: '' });
         setCredentials({ clientId: '', clientSecret: '', accessToken: '' });
+        setApiResponse(null);
          toast({
             title: "Desconectado!",
             description: "A integração com o Bling foi removida.",
@@ -126,6 +129,28 @@ export default function ApiPage() {
       title: "Copiado!",
       description: "O texto foi copiado para sua área de transferência.",
     });
+  }
+
+  const handleTestApi = async () => {
+    setIsTesting(true);
+    setApiResponse(null);
+    try {
+      const response = await getBlingSalesOrders();
+      setApiResponse(response);
+       toast({
+        title: "Sucesso!",
+        description: "Os pedidos de venda foram buscados no Bling.",
+      });
+    } catch (error: any) {
+      setApiResponse({ error: "Falha na requisição", message: error.message });
+      toast({
+        variant: "destructive",
+        title: "Erro na Requisição",
+        description: "Não foi possível buscar os dados do Bling.",
+      });
+    } finally {
+      setIsTesting(false);
+    }
   }
 
   const renderContent = () => {
@@ -269,6 +294,46 @@ export default function ApiPage() {
               </CardContent>
             </Card>
         </section>
+
+        {isConnected && (
+            <section id="api-test">
+                <Card>
+                    <CardHeader>
+                        <CardTitle>Testar API</CardTitle>
+                        <CardDescription>
+                        Faça uma requisição de teste para a API do Bling para listar os últimos pedidos de venda.
+                        </CardDescription>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                        <Button onClick={handleTestApi} disabled={isTesting}>
+                            {isTesting ? (
+                                <>
+                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                Buscando...
+                                </>
+                            ) : (
+                                <>
+                                <Send className="mr-2 h-4 w-4" />
+                                Testar API (Listar Pedidos)
+                                </>
+                            )}
+                        </Button>
+                        
+                        {(isTesting || apiResponse) && (
+                        <div className="space-y-2">
+                            <Label>Resposta da API</Label>
+                            <div className="w-full rounded-md bg-muted p-4 text-sm max-h-96 overflow-auto">
+                                <pre className="whitespace-pre-wrap break-all">
+                                    {isTesting && !apiResponse ? "Carregando..." : JSON.stringify(apiResponse, null, 2)}
+                                </pre>
+                            </div>
+                        </div>
+                        )}
+
+                    </CardContent>
+                </Card>
+            </section>
+        )}
       </div>
     </DashboardLayout>
   );

@@ -96,3 +96,37 @@ export async function getBlingCredentials(): Promise<Partial<BlingCredentials>> 
         accessToken: envMap.get('BLING_ACCESS_TOKEN') ? '********' : '', // Only indicate presence
     };
 }
+
+export async function getBlingSalesOrders(): Promise<any> {
+    const envMap = await readEnvFile();
+    const accessToken = envMap.get('BLING_ACCESS_TOKEN');
+
+    if (!accessToken) {
+        throw new Error('Access Token do Bling não encontrado. Por favor, conecte sua conta primeiro.');
+    }
+
+    const url = 'https://api.bling.com.br/Api/v3/pedidos/vendas?pagina=1&limite=10';
+
+    try {
+        const response = await fetch(url, {
+            method: 'GET',
+            headers: {
+                'Authorization': `Bearer ${accessToken}`,
+                'Accept': 'application/json',
+            },
+        });
+
+        const data = await response.json();
+
+        if (!response.ok) {
+           throw new Error(`Erro do Bling: ${data.error.description || response.statusText}`);
+        }
+
+        return data;
+
+    } catch (error: any) {
+        // Here, we could also implement the refresh token logic if the token is expired
+        console.error('Falha ao buscar pedidos no Bling:', error);
+        throw new Error(`Falha na comunicação com a API do Bling: ${error.message}`);
+    }
+}
