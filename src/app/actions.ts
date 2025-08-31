@@ -24,6 +24,8 @@ export async function getSalesPrediction(
 type BlingCredentials = {
     clientId: string;
     clientSecret: string;
+    accessToken?: string;
+    refreshToken?: string;
 };
 
 const envPath = path.resolve(process.cwd(), '.env');
@@ -36,7 +38,7 @@ async function readEnvFile(): Promise<Map<string, string>> {
             if (line.trim() && !line.startsWith('#')) {
                 const [key, ...valueParts] = line.split('=');
                 if (key) {
-                    map.set(key.trim(), valueParts.join('='));
+                    map.set(key.trim(), valueParts.join('=').trim());
                 }
             }
         });
@@ -65,6 +67,12 @@ export async function saveBlingCredentials(credentials: BlingCredentials): Promi
     }
     if (credentials.clientSecret) {
         envMap.set('BLING_CLIENT_SECRET', credentials.clientSecret);
+    }
+     if (credentials.accessToken) {
+        envMap.set('BLING_ACCESS_TOKEN', credentials.accessToken);
+    }
+    if (credentials.refreshToken) {
+        envMap.set('BLING_REFRESH_TOKEN', credentials.refreshToken);
     }
     await writeEnvFile(envMap);
 }
