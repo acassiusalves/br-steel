@@ -15,6 +15,7 @@ export async function GET(request: Request) {
       <html>
         <head>
           <title>Conexão com Bling</title>
+          <meta charset="UTF-8">
           <style>
             body { 
               font-family: sans-serif; 
@@ -51,7 +52,7 @@ export async function GET(request: Request) {
       </html>
     `, {
       headers: {
-        'Content-Type': 'text/html',
+        'Content-Type': 'text/html; charset=utf-8',
       },
     });
   }
