@@ -1,10 +1,11 @@
 "use client";
 
 import * as React from 'react';
-import { KeyRound, Loader2, Copy, Save, CheckCircle, XCircle, FileJson, Send, Calendar as CalendarIcon, Plug, Sheet, Database } from 'lucide-react';
+import { KeyRound, Loader2, Copy, Save, CheckCircle, XCircle, FileJson, Send, Calendar as CalendarIcon, Plug, Sheet, Database, FileDown } from 'lucide-react';
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import type { DateRange } from "react-day-picker";
+import { startOfMonth, endOfMonth } from 'date-fns';
 
 import DashboardLayout from '@/components/dashboard-layout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -41,45 +42,49 @@ export default function ApiPage() {
   const [isGenerating, setIsGenerating] = React.useState(false);
   const [callbackUrl, setCallbackUrl] = React.useState('');
   const [authUrl, setAuthUrl] = React.useState('');
-  const [isTesting, setIsTesting] = React.useState(false);
+  const [isImporting, setIsImporting] = React.useState(false);
   const [apiResponse, setApiResponse] = React.useState<any>(null);
-  const [date, setDate] = React.useState<DateRange | undefined>();
+  const [date, setDate] = React.useState<DateRange | undefined>({
+    from: startOfMonth(new Date()),
+    to: endOfMonth(new Date()),
+  });
   const [apiStatus, setApiStatus] = React.useState<ApiStatus>('unchecked');
+  const [importedCount, setImportedCount] = React.useState(0);
 
   const { toast } = useToast();
   
+  // Combina o carregamento inicial de credenciais e a contagem de pedidos
+  const loadInitialData = React.useCallback(async () => {
+    setIsLoading(true);
+    try {
+        const savedCreds = await getBlingCredentials();
+        setCredentials(prev => ({...prev, ...savedCreds}));
+        if (savedCreds.accessToken) {
+            setApiStatus('valid');
+        } else {
+            setApiStatus('unchecked');
+        }
+
+    } catch (error) {
+        console.error("Failed to load Bling credentials:", error);
+        setApiStatus('invalid');
+        toast({
+            variant: "destructive",
+            title: "Erro ao Carregar",
+            description: "Não foi possível carregar as informações de conexão.",
+        });
+    } finally {
+        setIsLoading(false);
+    }
+  }, [toast]);
+
   React.useEffect(() => {
-    // This code runs only on the client, after the component has mounted.
     if (typeof window !== 'undefined') {
         setCallbackUrl(`${window.location.origin}/api/callback/bling`);
     }
-    
-    // Carregar credenciais do servidor
-    const fetchCredentials = async () => {
-        setIsLoading(true);
-        try {
-            const savedCreds = await getBlingCredentials();
-            setCredentials(prev => ({...prev, ...savedCreds}));
-            if (savedCreds.accessToken) {
-                setApiStatus('valid');
-            } else {
-                 setApiStatus('unchecked');
-            }
-        } catch (error) {
-            console.error("Failed to load Bling credentials:", error);
-            setApiStatus('invalid');
-            toast({
-                variant: "destructive",
-                title: "Erro ao Carregar",
-                description: "Não foi possível carregar as informações de conexão.",
-            });
-        } finally {
-            setIsLoading(false);
-        }
-    };
-    fetchCredentials();
+    loadInitialData();
+  }, [loadInitialData]);
 
-  }, [toast]);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { id, value } = e.target;
@@ -97,7 +102,6 @@ export default function ApiPage() {
             title: "Credenciais Salvas!",
             description: "Suas credenciais do Bling foram salvas com sucesso no servidor.",
         });
-        // Refetch to hide the secret
         const savedCreds = await getBlingCredentials();
         setCredentials(prev => ({...prev, ...savedCreds}));
 
@@ -122,9 +126,7 @@ export default function ApiPage() {
         return;
     }
     setIsGenerating(true);
-    // Gerar um 'state' aleatório para segurança
     const state = Math.random().toString(36).substring(7);
-    // Armazenar o state em localStorage para verificar no callback
     localStorage.setItem('bling_oauth_state', state);
 
     const authorizationUrl = `https://www.bling.com.br/Api/v3/oauth/authorize?response_type=code&client_id=${credentials.clientId}&state=${state}`;
@@ -139,7 +141,6 @@ export default function ApiPage() {
         await saveBlingCredentials({ clientId: '', clientSecret: '', accessToken: '', refreshToken: '' });
         setCredentials({ clientId: '', clientSecret: '', accessToken: '' });
         setApiStatus('unchecked');
-        setApiResponse(null);
         setAuthUrl("");
          toast({
             title: "Desconectado!",
@@ -165,25 +166,26 @@ export default function ApiPage() {
     });
   }
 
-  const handleTestApi = async () => {
-    setIsTesting(true);
+  const handleImportSales = async () => {
+    setIsImporting(true);
     setApiResponse(null);
     try {
       const response = await getBlingSalesOrders({ from: date?.from, to: date?.to });
-      setApiResponse(response);
+       const savedCount = response.firestore?.savedCount || 0;
+      setImportedCount(prev => prev + savedCount);
        toast({
-        title: "Sucesso!",
-        description: "Os pedidos de venda foram buscados no Bling.",
+        title: "Importação Concluída!",
+        description: `${savedCount} pedidos foram importados/atualizados do Bling.`,
       });
     } catch (error: any) {
       setApiResponse({ error: "Falha na requisição", message: error.message });
       toast({
         variant: "destructive",
-        title: "Erro na Requisição",
+        title: "Erro na Importação",
         description: `Não foi possível buscar os dados do Bling: ${error.message}`,
       });
     } finally {
-      setIsTesting(false);
+      setIsImporting(false);
     }
   }
 
@@ -195,34 +197,93 @@ export default function ApiPage() {
             </div>
         );
     }
-
+    
+    // Se estiver conectado, mostra a área de importação e desconexão
     if (apiStatus === 'valid') {
        return (
-            <div className="flex flex-col items-start gap-4 text-center sm:text-left">
-                <div className="flex items-center gap-3">
-                    <CheckCircle className="h-10 w-10 text-green-500" />
-                    <div>
-                        <p className="font-semibold">Conectado ao Bling</p>
-                        <p className="text-sm text-muted-foreground">A integração está ativa e funcionando.</p>
+            <div className="grid md:grid-cols-2 gap-6 items-start">
+                 <div className="space-y-4">
+                    <div className="flex items-center gap-3 text-left">
+                        <CheckCircle className="h-10 w-10 text-green-500 shrink-0" />
+                        <div>
+                            <p className="font-semibold">Conectado ao Bling</p>
+                            <p className="text-sm text-muted-foreground">A integração está ativa e funcionando.</p>
+                        </div>
+                    </div>
+                     <Button onClick={handleDisconnect} variant="destructive" disabled={isSaving}>
+                          {isSaving ? (
+                            <>
+                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                              Desconectando...
+                            </>
+                          ) : (
+                            <>
+                              <XCircle className="mr-2 h-4 w-4" />
+                              Desconectar
+                            </>
+                          )}
+                        </Button>
+                </div>
+
+                 <div className="space-y-4">
+                    <div className="space-y-2">
+                        <Label>Período de Importação</Label>
+                         <Popover>
+                          <PopoverTrigger asChild>
+                            <Button
+                              id="date"
+                              variant={"outline"}
+                              className={cn(
+                                "w-full justify-start text-left font-normal",
+                                !date && "text-muted-foreground"
+                              )}
+                            >
+                              <CalendarIcon className="mr-2 h-4 w-4" />
+                              {date?.from ? (
+                                date.to ? (
+                                  <>
+                                    {format(date.from, "dd/MM/yy")} -{" "}
+                                    {format(date.to, "dd/MM/yy")}
+                                  </>
+                                ) : (
+                                  format(date.from, "dd/MM/yy")
+                                )
+                              ) : (
+                                <span>Escolha um período</span>
+                              )}
+                            </Button>
+                          </PopoverTrigger>
+                          <PopoverContent className="w-auto p-0" align="end">
+                            <Calendar
+                              initialFocus
+                              mode="range"
+                              defaultMonth={date?.from}
+                              selected={date}
+                              onSelect={setDate}
+                              numberOfMonths={2}
+                              locale={ptBR}
+                            />
+                          </PopoverContent>
+                        </Popover>
+                    </div>
+                    <div className="flex flex-col gap-4">
+                        <div className="flex gap-2">
+                            <Button onClick={handleImportSales} disabled={isImporting} className="flex-1">
+                                {isImporting ? <Loader2 className="animate-spin" /> : <Sheet />}
+                                {isImporting ? "Importando..." : "Importar/Atualizar Vendas"}
+                            </Button>
+                             <Button variant="outline" disabled className="flex-1">
+                                <FileDown />
+                                Exportar Dados
+                            </Button>
+                        </div>
                     </div>
                 </div>
-                 <Button onClick={handleDisconnect} variant="destructive" disabled={isSaving}>
-                      {isSaving ? (
-                        <>
-                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                          Desconectando...
-                        </>
-                      ) : (
-                        <>
-                          <XCircle className="mr-2 h-4 w-4" />
-                          Desconectar
-                        </>
-                      )}
-                    </Button>
             </div>
         );
     }
     
+    // Se não estiver conectado, mostra o formulário de conexão
     return (
         <div className="flex flex-col items-start gap-6 max-w-lg">
             <div className="w-full space-y-2">
@@ -341,7 +402,15 @@ export default function ApiPage() {
                           Conecte sua conta do Bling para sincronizar seus pedidos de venda.
                         </CardDescription>
                     </div>
-                   <ApiStatusBadge status={apiStatus} />
+                     <div className="flex items-center gap-4">
+                        {importedCount > 0 && (
+                             <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground bg-muted p-2 rounded-md">
+                                <Database className="h-4 w-4" />
+                                <span>{importedCount} Pedidos já importados</span>
+                            </div>
+                        )}
+                        <ApiStatusBadge status={apiStatus} />
+                    </div>
                 </div>
               </CardHeader>
               <CardContent>
