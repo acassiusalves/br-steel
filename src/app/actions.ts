@@ -9,6 +9,7 @@ import {
   type PredictSalesTrendsInput,
   type PredictSalesTrendsOutput,
 } from "@/ai/flows/predict-sales-trends";
+import { saveSalesOrders } from '@/services/order-service';
 
 export async function getSalesPrediction(
   input: PredictSalesTrendsInput
@@ -130,6 +131,14 @@ export async function getBlingSalesOrders({ from, to }: { from?: Date, to?: Date
 
         if (!response.ok) {
            throw new Error(`Erro do Bling: ${data.error.description || response.statusText}`);
+        }
+        
+        // If the fetch was successful, save the orders to Firestore
+        if (data && data.data) {
+           const { count } = await saveSalesOrders(data.data);
+           console.log(`${count} orders processed.`);
+           // We can add the save count to the response if needed
+           return { ...data, firestore: { savedCount: count } };
         }
 
         return data;
