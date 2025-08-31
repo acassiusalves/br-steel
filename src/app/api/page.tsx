@@ -38,11 +38,11 @@ export default function ApiPage() {
     setIsLoading(false);
   };
 
-  const handleCopy = () => {
-    navigator.clipboard.writeText(authUrl);
+  const handleCopy = (text: string) => {
+    navigator.clipboard.writeText(text);
     toast({
-      title: "URL Copiada!",
-      description: "O link de autorização foi copiado para sua área de transferência.",
+      title: "Copiado!",
+      description: "O texto foi copiado para sua área de transferência.",
     });
   }
 
@@ -95,7 +95,7 @@ export default function ApiPage() {
 
                   {authUrl && (
                      <div className="w-full space-y-2">
-                      <Label htmlFor="auth-url">Link de Autorização</Label>
+                      <Label htmlFor="auth-url">1. Link de Autorização</Label>
                        <div className="flex items-center gap-2">
                           <Input 
                             id="auth-url" 
@@ -104,7 +104,7 @@ export default function ApiPage() {
                             value={authUrl}
                             className="bg-muted"
                           />
-                          <Button variant="outline" size="icon" onClick={handleCopy}>
+                          <Button variant="outline" size="icon" onClick={() => handleCopy(authUrl)}>
                             <Copy className="h-4 w-4" />
                           </Button>
                        </div>
@@ -114,9 +114,24 @@ export default function ApiPage() {
                     </div>
                   )}
 
-                   <p className="text-sm text-muted-foreground">
-                    Certifique-se de que a URL de callback no seu app do Bling está configurada para: <code className="bg-muted px-1 py-0.5 rounded-sm">{callbackUrl || 'Carregando...'}</code>
-                  </p>
+                  <div className="w-full space-y-2">
+                     <Label htmlFor="callback-url">2. URL de Callback</Label>
+                      <div className="flex items-center gap-2">
+                          <Input 
+                            id="callback-url" 
+                            type="text"
+                            readOnly
+                            value={callbackUrl || 'Carregando...'}
+                            className="bg-muted"
+                          />
+                           <Button variant="outline" size="icon" onClick={() => handleCopy(callbackUrl)}>
+                            <Copy className="h-4 w-4" />
+                          </Button>
+                       </div>
+                      <p className="text-sm text-muted-foreground">
+                        Certifique-se de que a URL de callback no seu app do Bling está configurada para o valor acima.
+                      </p>
+                  </div>
                 </div>
               </CardContent>
             </Card>
