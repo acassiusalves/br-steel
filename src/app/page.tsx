@@ -8,13 +8,13 @@ export default function Home() {
   return (
     <DashboardLayout>
       <div className="flex-1 space-y-12 p-4 pt-6 md:p-8">
-        <section id="painel">
+        <div id="painel" className="pt-16 -mt-16">
           <SalesDashboard />
-        </section>
-        <section id="analise">
+        </div>
+        <div id="analise" className="pt-16 -mt-16">
           <PredictiveAnalysis />
-        </section>
-        <section id="relatorios">
+        </div>
+        <div id="relatorios" className="pt-16 -mt-16">
            <Card>
               <CardHeader>
                 <CardTitle>Relatórios de Vendas</CardTitle>
@@ -31,7 +31,7 @@ export default function Home() {
                 </div>
               </CardContent>
             </Card>
-        </section>
+        </div>
       </div>
     </DashboardLayout>
   );

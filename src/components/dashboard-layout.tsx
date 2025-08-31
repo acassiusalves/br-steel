@@ -2,11 +2,13 @@
 
 import type { ReactNode } from "react";
 import Link from "next/link";
+import { usePathname } from 'next/navigation';
 import {
   BrainCircuit,
   FileText,
   LayoutDashboard,
   Settings,
+  Code,
 } from "lucide-react";
 import * as React from "react";
 
@@ -48,10 +50,17 @@ const Logo = () => (
 
 
 export default function DashboardLayout({ children }: { children: ReactNode }) {
-  const [activeMenu, setActiveMenu] = React.useState("painel");
+  const pathname = usePathname();
+
+  const getActiveMenu = () => {
+    if (pathname === '/api') return 'api';
+    if (pathname.startsWith('/#')) {
+        return pathname.substring(2);
+    }
+    return 'painel';
+  }
 
   const handleMenuClick = (menu: string) => {
-    setActiveMenu(menu);
     const element = document.getElementById(menu);
     if (element) {
         element.scrollIntoView({ behavior: 'smooth' });
@@ -68,26 +77,36 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
         </SidebarHeader>
         <SidebarMenu>
           <SidebarMenuItem>
-            <SidebarMenuButton
-              onClick={() => handleMenuClick('painel')}
-              isActive={activeMenu === 'painel'}
-              tooltip="Painel de Vendas"
-            >
-              <LayoutDashboard />
-              <span>Painel de Vendas</span>
-            </SidebarMenuButton>
+            <Button asChild variant="ghost" className="w-full justify-start">
+              <Link href="/#painel">
+                  <LayoutDashboard />
+                  <span>Painel de Vendas</span>
+              </Link>
+            </Button>
           </SidebarMenuItem>
           <SidebarMenuItem>
-            <SidebarMenuButton onClick={() => handleMenuClick('analise')} isActive={activeMenu === 'analise'} tooltip="Análise Preditiva">
-              <BrainCircuit />
-              <span>Análise Preditiva</span>
-            </SidebarMenuButton>
+            <Button asChild variant="ghost" className="w-full justify-start">
+              <Link href="/#analise">
+                <BrainCircuit />
+                <span>Análise Preditiva</span>
+              </Link>
+            </Button>
           </SidebarMenuItem>
           <SidebarMenuItem>
-            <SidebarMenuButton onClick={() => handleMenuClick('relatorios')} isActive={activeMenu === 'relatorios'} tooltip="Relatórios">
-              <FileText />
-              <span>Relatórios</span>
-            </SidebarMenuButton>
+            <Button asChild variant="ghost" className="w-full justify-start">
+              <Link href="/#relatorios">
+                <FileText />
+                <span>Relatórios</span>
+              </Link>
+            </Button>
+          </SidebarMenuItem>
+          <SidebarMenuItem>
+             <Button asChild variant="ghost" className="w-full justify-start">
+              <Link href="/api">
+                <Code />
+                <span>API</span>
+              </Link>
+            </Button>
           </SidebarMenuItem>
         </SidebarMenu>
         <SidebarFooter>
