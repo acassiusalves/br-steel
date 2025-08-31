@@ -60,20 +60,31 @@ async function writeEnvFile(envMap: Map<string, string>): Promise<void> {
 }
 
 
-export async function saveBlingCredentials(credentials: BlingCredentials): Promise<void> {
+export async function saveBlingCredentials(credentials: Partial<BlingCredentials>): Promise<void> {
     const envMap = await readEnvFile();
-    if (credentials.clientId) {
-        envMap.set('BLING_CLIENT_ID', credentials.clientId);
+
+    // The 'any' cast is a simple way to handle dynamic keys.
+    const credentialKeys: (keyof BlingCredentials)[] = ['clientId', 'clientSecret', 'accessToken', 'refreshToken'];
+    const envKeys: { [key in keyof BlingCredentials]: string } = {
+        clientId: 'BLING_CLIENT_ID',
+        clientSecret: 'BLING_CLIENT_SECRET',
+        accessToken: 'BLING_ACCESS_TOKEN',
+        refreshToken: 'BLING_REFRESH_TOKEN',
     }
-    if (credentials.clientSecret) {
-        envMap.set('BLING_CLIENT_SECRET', credentials.clientSecret);
+
+    for (const key of credentialKeys) {
+        const envVar = envKeys[key];
+        const value = credentials[key];
+
+        if (value !== undefined) {
+             if (value) {
+                envMap.set(envVar, value);
+            } else {
+                envMap.delete(envVar);
+            }
+        }
     }
-     if (credentials.accessToken) {
-        envMap.set('BLING_ACCESS_TOKEN', credentials.accessToken);
-    }
-    if (credentials.refreshToken) {
-        envMap.set('BLING_REFRESH_TOKEN', credentials.refreshToken);
-    }
+    
     await writeEnvFile(envMap);
 }
 
@@ -82,5 +93,6 @@ export async function getBlingCredentials(): Promise<Partial<BlingCredentials>> 
     return {
         clientId: envMap.get('BLING_CLIENT_ID') || '',
         clientSecret: envMap.get('BLING_CLIENT_SECRET') ? '********' : '', // Don't expose secret to client
+        accessToken: envMap.get('BLING_ACCESS_TOKEN') ? '********' : '', // Only indicate presence
     };
 }
