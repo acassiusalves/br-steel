@@ -110,12 +110,11 @@ export async function getBlingSalesOrders({ from, to }: { from?: Date, to?: Date
     url.searchParams.set('pagina', '1');
     url.searchParams.set('limite', '100'); // Bling's max limit
 
-    if (from && to) {
-        // Bling API expects date in YYYY-MM-DD format
-        const dataInicial = format(from, 'yyyy-MM-dd');
-        const dataFinal = format(to, 'yyyy-MM-dd');
-        const filtro = `dataEmissao[${dataInicial} TO ${dataFinal}]`;
-        url.searchParams.set('filtros', filtro);
+    if (from) {
+        url.searchParams.set('dataInicial', format(from, 'yyyy-MM-dd'));
+    }
+    if (to) {
+        url.searchParams.set('dataFinal', format(to, 'yyyy-MM-dd'));
     }
 
     try {
