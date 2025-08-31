@@ -327,9 +327,8 @@ export default function ApiPage() {
         </div>
 
         <Tabs defaultValue="bling-api" className="w-full mt-6">
-          <TabsList className="grid w-full grid-cols-2 max-w-lg">
+          <TabsList className="grid w-full grid-cols-1 max-w-lg">
             <TabsTrigger value="bling-api"><Database />Bling API (Base)</TabsTrigger>
-            <TabsTrigger value="testing"><Sheet />Testar API</TabsTrigger>
           </TabsList>
           
           <TabsContent value="bling-api" className="space-y-8 pt-6">
@@ -349,91 +348,6 @@ export default function ApiPage() {
                 {renderConnectionContent()}
               </CardContent>
             </Card>
-          </TabsContent>
-
-          <TabsContent value="testing" className="space-y-8 pt-6">
-             <Card>
-                    <CardHeader>
-                        <CardTitle>Testar API</CardTitle>
-                        <CardDescription>
-                         Faça uma requisição de teste para a API do Bling para listar os pedidos de venda de um período.
-                        </CardDescription>
-                    </CardHeader>
-                    <CardContent className="space-y-4">
-                        {apiStatus !== 'valid' ? (
-                            <p className='text-sm text-muted-foreground'>Você precisa estar conectado ao Bling para testar a API.</p>
-                        ) : (
-                        <>
-                        <div className="flex flex-wrap items-end gap-4">
-                          <div className="grid gap-2 flex-1 min-w-[200px]">
-                            <Label htmlFor="date">Período de Importação</Label>
-                            <Popover>
-                              <PopoverTrigger asChild>
-                                <Button
-                                  id="date"
-                                  variant={"outline"}
-                                  className={cn(
-                                    "w-full justify-start text-left font-normal",
-                                    !date && "text-muted-foreground"
-                                  )}
-                                >
-                                  <CalendarIcon className="mr-2 h-4 w-4" />
-                                  {date?.from ? (
-                                    date.to ? (
-                                      <>
-                                        {format(date.from, "dd/MM/yy", { locale: ptBR })} -{" "}
-                                        {format(date.to, "dd/MM/yy", { locale: ptBR })}
-                                      </>
-                                    ) : (
-                                      format(date.from, "dd/MM/yy", { locale: ptBR })
-                                    )
-                                  ) : (
-                                    <span>Escolha um período</span>
-                                  )}
-                                </Button>
-                              </PopoverTrigger>
-                              <PopoverContent className="w-auto p-0" align="start">
-                                <Calendar
-                                  initialFocus
-                                  mode="range"
-                                  defaultMonth={date?.from}
-                                  selected={date}
-                                  onSelect={setDate}
-                                  numberOfMonths={2}
-                                  locale={ptBR}
-                                />
-                              </PopoverContent>
-                            </Popover>
-                          </div>
-                          <Button onClick={handleTestApi} disabled={isTesting}>
-                              {isTesting ? (
-                                  <>
-                                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                  Buscando...
-                                  </>
-                              ) : (
-                                  <>
-                                  <Send className="mr-2 h-4 w-4" />
-                                  Buscar Pedidos
-                                  </>
-                              )}
-                          </Button>
-                        </div>
-                        
-                        {(isTesting || apiResponse) && (
-                        <div className="space-y-2">
-                            <Label>Resposta da API</Label>
-                            <div className="w-full rounded-md bg-muted p-4 text-sm max-h-96 overflow-auto">
-                                <pre className="whitespace-pre-wrap break-all">
-                                    {isTesting && !apiResponse ? "Carregando..." : JSON.stringify(apiResponse, null, 2)}
-                                </pre>
-                            </div>
-                        </div>
-                        )}
-                        </>
-                        )}
-                    </CardContent>
-                </Card>
           </TabsContent>
         </Tabs>
       </div>
