@@ -9,6 +9,7 @@ import {
   LayoutDashboard,
   Settings,
   Code,
+  ShoppingCart,
 } from "lucide-react";
 import * as React from "react";
 
@@ -78,9 +79,17 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
         <SidebarMenu>
           <SidebarMenuItem>
             <Button asChild variant="ghost" className="w-full justify-start">
-              <Link href="/#painel">
+              <Link href="/">
                   <LayoutDashboard />
                   <span>Painel de Vendas</span>
+              </Link>
+            </Button>
+          </SidebarMenuItem>
+          <SidebarMenuItem>
+            <Button asChild variant="ghost" className="w-full justify-start">
+              <Link href="/vendas">
+                  <ShoppingCart />
+                  <span>Vendas</span>
               </Link>
             </Button>
           </SidebarMenuItem>

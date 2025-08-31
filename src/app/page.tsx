@@ -3,6 +3,7 @@ import PredictiveAnalysis from '@/components/predictive-analysis';
 import SalesDashboard from '@/components/sales-dashboard';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import Link from 'next/link';
 
 export default function Home() {
   return (
