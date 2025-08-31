@@ -1,11 +1,10 @@
 "use client";
 
 import * as React from 'react';
-import { KeyRound, Loader2, Copy, Save, CheckCircle, XCircle, FileJson, Send, Calendar as CalendarIcon } from 'lucide-react';
+import { KeyRound, Loader2, Copy, Save, CheckCircle, XCircle, FileJson, Send, Calendar as CalendarIcon, Plug, Sheet, Database } from 'lucide-react';
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import type { DateRange } from "react-day-picker";
-
 
 import DashboardLayout from '@/components/dashboard-layout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -17,6 +16,23 @@ import { getBlingCredentials, saveBlingCredentials, getBlingSalesOrders } from '
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Calendar } from '@/components/ui/calendar';
 import { cn } from '@/lib/utils';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Badge } from '@/components/ui/badge';
+
+
+type ApiStatus = 'valid' | 'invalid' | 'unchecked';
+
+const ApiStatusBadge = ({ status }: { status: ApiStatus }) => {
+    switch (status) {
+        case 'valid':
+            return <Badge variant="default" className="bg-green-600 hover:bg-green-700"><CheckCircle className="mr-1 h-4 w-4" /> Conectado</Badge>;
+        case 'invalid':
+            return <Badge variant="destructive"><XCircle className="mr-1 h-4 w-4" /> Inválido</Badge>;
+        default:
+            return <Badge variant="secondary"><XCircle className="mr-1 h-4 w-4" /> Não Conectado</Badge>;
+    }
+};
+
 
 export default function ApiPage() {
   const [credentials, setCredentials] = React.useState({ clientId: '', clientSecret: '', accessToken: '' });
@@ -28,10 +44,10 @@ export default function ApiPage() {
   const [isTesting, setIsTesting] = React.useState(false);
   const [apiResponse, setApiResponse] = React.useState<any>(null);
   const [date, setDate] = React.useState<DateRange | undefined>();
+  const [apiStatus, setApiStatus] = React.useState<ApiStatus>('unchecked');
+
   const { toast } = useToast();
-
-  const isConnected = !!credentials.accessToken;
-
+  
   React.useEffect(() => {
     // This code runs only on the client, after the component has mounted.
     if (typeof window !== 'undefined') {
@@ -44,8 +60,14 @@ export default function ApiPage() {
         try {
             const savedCreds = await getBlingCredentials();
             setCredentials(prev => ({...prev, ...savedCreds}));
+            if (savedCreds.accessToken) {
+                setApiStatus('valid');
+            } else {
+                 setApiStatus('unchecked');
+            }
         } catch (error) {
             console.error("Failed to load Bling credentials:", error);
+            setApiStatus('invalid');
             toast({
                 variant: "destructive",
                 title: "Erro ao Carregar",
@@ -116,7 +138,9 @@ export default function ApiPage() {
     try {
         await saveBlingCredentials({ clientId: '', clientSecret: '', accessToken: '', refreshToken: '' });
         setCredentials({ clientId: '', clientSecret: '', accessToken: '' });
+        setApiStatus('unchecked');
         setApiResponse(null);
+        setAuthUrl("");
          toast({
             title: "Desconectado!",
             description: "A integração com o Bling foi removida.",
@@ -156,20 +180,24 @@ export default function ApiPage() {
       toast({
         variant: "destructive",
         title: "Erro na Requisição",
-        description: "Não foi possível buscar os dados do Bling.",
+        description: `Não foi possível buscar os dados do Bling: ${error.message}`,
       });
     } finally {
       setIsTesting(false);
     }
   }
 
-  const renderContent = () => {
+  const renderConnectionContent = () => {
     if (isLoading) {
-        return <Loader2 className="m-auto h-8 w-8 animate-spin" />;
+        return (
+            <div className="flex items-center justify-center p-8">
+                <Loader2 className="m-auto h-8 w-8 animate-spin" />
+            </div>
+        );
     }
 
-    if (isConnected) {
-        return (
+    if (apiStatus === 'valid') {
+       return (
             <div className="flex flex-col items-start gap-4 text-center sm:text-left">
                 <div className="flex items-center gap-3">
                     <CheckCircle className="h-10 w-10 text-green-500" />
@@ -238,7 +266,7 @@ export default function ApiPage() {
                 </>
                 ) : (
                 <>
-                    <KeyRound className="mr-2 h-4 w-4" />
+                    <Plug className="mr-2 h-4 w-4" />
                     Gerar Link de Conexão
                 </>
                 )}
@@ -290,31 +318,52 @@ export default function ApiPage() {
 
   return (
     <DashboardLayout>
-      <div className="flex-1 space-y-12 p-4 pt-6 md:p-8">
-        <section id="api">
-           <Card>
+      <div className="flex-1 flex-col gap-8 p-4 pt-6 md:p-8">
+        <div>
+          <h1 className="text-3xl font-bold">Mapeamento e Conexões</h1>
+          <p className="text-muted-foreground">
+            Conecte suas fontes de dados para começar a importar e analisar suas vendas.
+          </p>
+        </div>
+
+        <Tabs defaultValue="bling-api" className="w-full mt-6">
+          <TabsList className="grid w-full grid-cols-2 max-w-lg">
+            <TabsTrigger value="bling-api"><Database />Bling API (Base)</TabsTrigger>
+            <TabsTrigger value="testing"><Sheet />Testar API</TabsTrigger>
+          </TabsList>
+          
+          <TabsContent value="bling-api" className="space-y-8 pt-6">
+            <Card>
               <CardHeader>
-                <CardTitle>Integração com Bling</CardTitle>
-                <CardDescription>
-                  Conecte sua conta do Bling para sincronizar suas vendas. Suas credenciais são salvas de forma segura no servidor.
-                </CardDescription>
+                <div className="flex justify-between items-start">
+                    <div>
+                        <CardTitle>Fonte Principal: Bling API</CardTitle>
+                        <CardDescription>
+                          Conecte sua conta do Bling para sincronizar seus pedidos de venda.
+                        </CardDescription>
+                    </div>
+                   <ApiStatusBadge status={apiStatus} />
+                </div>
               </CardHeader>
               <CardContent>
-                {renderContent()}
+                {renderConnectionContent()}
               </CardContent>
             </Card>
-        </section>
+          </TabsContent>
 
-        {isConnected && (
-            <section id="api-test">
-                <Card>
+          <TabsContent value="testing" className="space-y-8 pt-6">
+             <Card>
                     <CardHeader>
                         <CardTitle>Testar API</CardTitle>
                         <CardDescription>
-                        Faça uma requisição de teste para a API do Bling para listar os últimos pedidos de venda.
+                         Faça uma requisição de teste para a API do Bling para listar os pedidos de venda de um período.
                         </CardDescription>
                     </CardHeader>
                     <CardContent className="space-y-4">
+                        {apiStatus !== 'valid' ? (
+                            <p className='text-sm text-muted-foreground'>Você precisa estar conectado ao Bling para testar a API.</p>
+                        ) : (
+                        <>
                         <div className="flex flex-wrap items-end gap-4">
                           <div className="grid gap-2 flex-1 min-w-[200px]">
                             <Label htmlFor="date">Período de Importação</Label>
@@ -365,7 +414,7 @@ export default function ApiPage() {
                               ) : (
                                   <>
                                   <Send className="mr-2 h-4 w-4" />
-                                  Testar API (Listar Pedidos)
+                                  Buscar Pedidos
                                   </>
                               )}
                           </Button>
@@ -381,11 +430,12 @@ export default function ApiPage() {
                             </div>
                         </div>
                         )}
-
+                        </>
+                        )}
                     </CardContent>
                 </Card>
-            </section>
-        )}
+          </TabsContent>
+        </Tabs>
       </div>
     </DashboardLayout>
   );
