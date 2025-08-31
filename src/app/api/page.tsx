@@ -13,6 +13,13 @@ export default function ApiPage() {
   const [clientId, setClientId] = React.useState('');
   const [clientSecret, setClientSecret] = React.useState('');
   const [isLoading, setIsLoading] = React.useState(false);
+  const [callbackUrl, setCallbackUrl] = React.useState('');
+
+  React.useEffect(() => {
+    // This code runs only on the client, after the component has mounted.
+    setCallbackUrl(`${window.location.origin}/api/callback/bling`);
+  }, []);
+
 
   const handleConnect = () => {
     setIsLoading(true);
@@ -74,7 +81,7 @@ export default function ApiPage() {
                     )}
                   </Button>
                    <p className="text-sm text-muted-foreground">
-                    Você será redirecionado para o Bling para autorizar a conexão. Certifique-se de que a URL de callback no seu app do Bling está configurada para: <code className="bg-muted px-1 py-0.5 rounded-sm">{typeof window !== 'undefined' && `${window.location.origin}/api/callback/bling`}</code>
+                    Você será redirecionado para o Bling para autorizar a conexão. Certifique-se de que a URL de callback no seu app do Bling está configurada para: <code className="bg-muted px-1 py-0.5 rounded-sm">{callbackUrl || 'Carregando...'}</code>
                   </p>
                 </div>
               </CardContent>
