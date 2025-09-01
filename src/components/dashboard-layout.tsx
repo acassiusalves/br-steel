@@ -10,6 +10,7 @@ import {
   Code,
   ShoppingCart,
   Factory,
+  Warehouse,
 } from "lucide-react";
 import * as React from "react";
 
@@ -98,6 +99,14 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
               <Link href="/producao">
                   <Factory />
                   <span>Produção</span>
+              </Link>
+            </Button>
+          </SidebarMenuItem>
+          <SidebarMenuItem>
+            <Button asChild variant="ghost" className="w-full justify-start">
+              <Link href="/estoque">
+                  <Warehouse />
+                  <span>Estoque</span>
               </Link>
             </Button>
           </SidebarMenuItem>
