@@ -185,17 +185,18 @@ export default function ApiPage() {
       const responseData = await getBlingSalesOrders({ from: date?.from, to: date?.to });
       setApiResponse(responseData);
 
-      const ordersToEnrich = responseData?.data || [];
-      const totalOrders = ordersToEnrich.length;
-      setImportStatus({ current: 0, total: totalOrders });
+      // Filtra pedidos que ainda não têm detalhes (verificando a ausência do campo 'itens')
+      const ordersToEnrich = (responseData?.data || []).filter((order: any) => !order.itens);
+      const totalOrdersToEnrich = ordersToEnrich.length;
+      setImportStatus({ current: 0, total: totalOrdersToEnrich });
 
-      if (totalOrders > 0) {
+      if (totalOrdersToEnrich > 0) {
           toast({
               title: "Enriquecendo Pedidos...",
-              description: `Buscando detalhes para ${totalOrders} pedido(s). Isso pode levar um momento.`,
+              description: `Buscando detalhes para ${totalOrdersToEnrich} novo(s) pedido(s). Isso pode levar um momento.`,
           });
 
-          for (let i = 0; i < totalOrders; i++) {
+          for (let i = 0; i < totalOrdersToEnrich; i++) {
               const order = ordersToEnrich[i];
               try {
                   await getBlingOrderDetails(String(order.id));
@@ -204,13 +205,18 @@ export default function ApiPage() {
                   console.error(`Falha ao buscar detalhes para o pedido ${order.id}:`, detailError.message);
                   // Opcional: notificar sobre falha em pedido específico
               }
-              const progress = ((i + 1) / totalOrders) * 100;
+              const progress = ((i + 1) / totalOrdersToEnrich) * 100;
               setImportProgress(progress);
               setImportStatus(prev => ({ ...prev, current: i + 1 }));
           }
            toast({
               title: "Enriquecimento Concluído!",
-              description: "Os detalhes de todos os novos pedidos foram salvos.",
+              description: `Os detalhes de ${totalOrdersToEnrich} pedido(s) foram salvos.`,
+          });
+      } else {
+           toast({
+              title: "Nenhuma Atualização Necessária",
+              description: "Todos os pedidos importados já possuem detalhes.",
           });
       }
      
@@ -502,3 +508,5 @@ export default function ApiPage() {
     </DashboardLayout>
   );
 }
+
+    
