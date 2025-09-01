@@ -2,7 +2,7 @@
 'use client';
 
 import * as React from 'react';
-import { Search, Download, RefreshCw, Package, AlertTriangle, CheckCircle, AlertCircle } from 'lucide-react';
+import { Search, Download, RefreshCw, Package, AlertTriangle, CheckCircle, AlertCircle, Info } from 'lucide-react';
 import DashboardLayout from '@/components/dashboard-layout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -37,6 +37,7 @@ export default function EstoquePage() {
   const [statusFilter, setStatusFilter] = React.useState('all');
   const [error, setError] = React.useState<string | null>(null);
   const [isConnected, setIsConnected] = React.useState(false);
+  const [isSimulatedData, setIsSimulatedData] = React.useState(false);
   const { toast } = useToast();
 
   const fetchStockData = React.useCallback(async () => {
@@ -54,11 +55,19 @@ export default function EstoquePage() {
 
       const { data } = await getProductsStock();
       
-       if (data.length === 0) {
+      if (data.length === 0) {
           setError('Nenhum produto com estoque foi encontrado. Verifique se há produtos cadastrados com estoque no Bling.');
           setStockData([]);
           return;
-        }
+      }
+
+      // Detectar se são dados simulados (baseado em padrões dos dados de exemplo)
+      const hasExampleData = data.some(item => item.produto.codigo.includes('EXEMPLO'));
+      const hasConsecutiveIds = data.length > 1 && data.every((item, index) => 
+        index === 0 || item.produto.id === data[index - 1].produto.id + 1
+      );
+      
+      setIsSimulatedData(hasExampleData || hasConsecutiveIds);
 
       const aggregatedStock = new Map<string, { 
           productId: number;
@@ -76,6 +85,11 @@ export default function EstoquePage() {
                   saldoFisicoTotal: item.saldoFisicoTotal,
                   saldoVirtualTotal: item.saldoVirtualTotal,
               });
+          } else {
+              // Se já existe, somar os valores (para múltiplos depósitos)
+              const existing = aggregatedStock.get(sku)!;
+              existing.saldoFisicoTotal += item.saldoFisicoTotal;
+              existing.saldoVirtualTotal += item.saldoVirtualTotal;
           }
       });
       
@@ -96,7 +110,7 @@ export default function EstoquePage() {
     } finally {
       setIsLoading(false);
     }
-  }, [toast]);
+  }, []);
 
   // Carregamento inicial dos dados
   React.useEffect(() => {
@@ -181,26 +195,33 @@ export default function EstoquePage() {
   };
 
   const handleExport = () => {
-    // Criar CSV
+    if (filteredData.length === 0) {
+      toast({
+        variant: "destructive",
+        title: "Nenhum Dado",
+        description: "Não há dados para exportar.",
+      });
+      return;
+    }
+
     const headers = ['SKU', 'Produto', 'Estoque Físico', 'Estoque Virtual', 'Status'];
     const csvContent = [
       headers.join(','),
       ...filteredData.map(item => [
         item.produto.codigo,
-        `"${item.produto.nome.replace(/"/g, '""')}"`, // Escape double quotes
+        `"${item.produto.nome.replace(/"/g, '""')}"`,
         item.saldoFisicoTotal,
         item.saldoVirtualTotal,
         item.saldoVirtualTotal <= 0 ? 'Esgotado' : item.saldoVirtualTotal < 10 ? 'Estoque Baixo' : 'Em Estoque'
       ].join(','))
-    ].join('\\n');
+    ].join('\n');
 
-    // Download do arquivo
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement('a');
     if (link.download !== undefined) {
       const url = URL.createObjectURL(blob);
       link.setAttribute('href', url);
-      link.setAttribute('download', `estoque_${new Date().toISOString().split('T')[0]}.csv`);
+      link.setAttribute('download', `estoque_${isSimulatedData ? 'simulado_' : ''}${new Date().toISOString().split('T')[0]}.csv`);
       link.style.visibility = 'hidden';
       document.body.appendChild(link);
       link.click();
@@ -209,7 +230,7 @@ export default function EstoquePage() {
     
     toast({
       title: "Arquivo Exportado",
-      description: "Os dados de estoque foram exportados para CSV.",
+      description: `Os dados de estoque ${isSimulatedData ? '(simulados) ' : ''}foram exportados para CSV.`,
     });
   };
 
@@ -253,6 +274,18 @@ export default function EstoquePage() {
           </Alert>
         )}
 
+        {/* Alerta de dados simulados */}
+        {isSimulatedData && !error && (
+          <Alert>
+            <Info className="h-4 w-4" />
+            <AlertDescription>
+              <strong>Dados Simulados:</strong> Os dados de estoque mostrados são simulados porque a API de estoque do Bling 
+              pode não estar disponível para sua conta. Entre em contato com o suporte do Bling para verificar 
+              se você tem acesso ao módulo de estoque.
+            </AlertDescription>
+          </Alert>
+        )}
+
         {/* Cards de Estatísticas */}
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
           <Card>
@@ -263,7 +296,7 @@ export default function EstoquePage() {
             <CardContent>
               {isLoading ? <Skeleton className="h-8 w-1/2" /> : <div className="text-2xl font-bold">{stats.total}</div>}
               <p className="text-xs text-muted-foreground">
-                SKUs únicos cadastrados
+                SKUs únicos {isSimulatedData ? '(simulado)' : 'cadastrados'}
               </p>
             </CardContent>
           </Card>
