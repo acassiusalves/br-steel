@@ -43,8 +43,8 @@ import {
 const Logo = () => (
     <svg width="120" height="30" viewBox="0 0 120 30" fill="none" xmlns="http://www.w3.org/2000/svg">
       <text x="0" y="22" fontFamily="Inter, sans-serif" fontSize="24" fontWeight="bold" fill="#534B4B">
-        Market
-        <tspan fill="#E33324">Flow</tspan>
+        BR
+        <tspan fill="#E33324">Steel</tspan>
       </text>
     </svg>
 );
