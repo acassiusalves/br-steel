@@ -1,4 +1,3 @@
-
 'use client';
 
 import * as React from 'react';
@@ -7,6 +6,7 @@ import DashboardLayout from '@/components/dashboard-layout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
+import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import {
   Table,
@@ -37,6 +37,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { getProductsStockWithFallback, getBlingCredentials } from '@/app/actions';
 import type { ProductStock } from '@/app/actions';
 import { useToast } from '@/hooks/use-toast';
+import { ScrollArea } from '@/components/ui/scroll-area';
 
 export default function EstoquePage() {
   const [stockData, setStockData] = React.useState<ProductStock[]>([]);
@@ -217,16 +218,37 @@ export default function EstoquePage() {
                   Alertas
                 </Button>
               </DialogTrigger>
-              <DialogContent>
+              <DialogContent className="sm:max-w-lg">
                 <DialogHeader>
                   <DialogTitle>Configurar Alertas de Estoque Mínimo</DialogTitle>
                   <DialogDescription>
                     Defina a quantidade mínima para cada produto para ser notificado quando o estoque estiver baixo.
                   </DialogDescription>
                 </DialogHeader>
-                <div className="py-4">
-                  <p className="text-sm text-center text-muted-foreground">(A funcionalidade de configuração de alertas será implementada aqui)</p>
-                </div>
+                <ScrollArea className="max-h-[50vh] pr-4">
+                  <div className="space-y-4 py-4">
+                    {stockData.length > 0 ? (
+                      stockData.map((item) => (
+                        <div key={item.produto.id} className="grid grid-cols-3 items-center gap-4">
+                          <Label htmlFor={`alert-${item.produto.id}`} className="col-span-2 truncate" title={item.produto.nome}>
+                            {item.produto.nome}
+                          </Label>
+                          <Input
+                            id={`alert-${item.produto.id}`}
+                            type="number"
+                            placeholder="Qtd."
+                            className="col-span-1"
+                            // Você pode gerenciar o estado desses inputs aqui
+                          />
+                        </div>
+                      ))
+                    ) : (
+                      <p className="text-sm text-center text-muted-foreground">
+                        {isLoading ? "Carregando produtos..." : "Nenhum produto para configurar."}
+                      </p>
+                    )}
+                  </div>
+                </ScrollArea>
                 <DialogFooter>
                   <Button onClick={() => setIsAlertsModalOpen(false)} type="submit">Salvar Configurações</Button>
                 </DialogFooter>
@@ -398,4 +420,3 @@ export default function EstoquePage() {
     </DashboardLayout>
   );
 }
-
