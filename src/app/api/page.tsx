@@ -3,7 +3,7 @@
 "use client";
 
 import * as React from 'react';
-import { KeyRound, Loader2, Copy, Save, CheckCircle, XCircle, FileJson, Send, Calendar as CalendarIcon, Plug, Sheet, Database, FileDown, Search, Truck, Package } from 'lucide-react';
+import { KeyRound, Loader2, Copy, Save, CheckCircle, XCircle, FileJson, Send, Calendar as CalendarIcon, Plug, Sheet, Database, FileDown, Search, Truck, Package, Store } from 'lucide-react';
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import type { DateRange } from "react-day-picker";
@@ -15,7 +15,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
-import { getBlingCredentials, saveBlingCredentials, getBlingSalesOrders, countImportedOrders, getBlingOrderDetails, getImportedOrderIds, getBlingProducts } from '@/app/actions';
+import { getBlingCredentials, saveBlingCredentials, getBlingSalesOrders, countImportedOrders, getBlingOrderDetails, getImportedOrderIds, getBlingProducts, getBlingChannelByOrderId } from '@/app/actions';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Calendar } from '@/components/ui/calendar';
 import { cn } from '@/lib/utils';
@@ -60,6 +60,10 @@ export default function ApiPage() {
   // New state for order details testing
   const [isFetchingOrderDetails, setIsFetchingOrderDetails] = React.useState(false);
   const [orderIdToTest, setOrderIdToTest] = React.useState('');
+
+  // New state for channel details testing
+  const [isFetchingChannel, setIsFetchingChannel] = React.useState(false);
+  const [orderIdForChannel, setOrderIdForChannel] = React.useState('');
 
 
   const { toast } = useToast();
@@ -299,6 +303,29 @@ export default function ApiPage() {
     }
   }
 
+    const handleFetchChannel = async () => {
+    if (!orderIdForChannel) {
+        toast({ variant: "destructive", title: "ID do Pedido Faltando", description: "Por favor, insira um ID de pedido para testar."});
+        return;
+    }
+    setIsFetchingChannel(true);
+    setApiResponse(null);
+    try {
+        const responseData = await getBlingChannelByOrderId(orderIdForChannel);
+        setApiResponse(responseData);
+        toast({ title: "Busca de Canal de Venda Concluída", description: "A resposta da API foi recebida."});
+    } catch (error: any) {
+        setApiResponse({ error: "Falha na requisição", message: error.message });
+        toast({
+            variant: "destructive",
+            title: "Erro na Busca",
+            description: `Não foi possível buscar os dados: ${error.message}`,
+        });
+    } finally {
+        setIsFetchingChannel(false);
+    }
+  }
+
   const renderConnectionContent = () => {
     if (isLoading) {
         return (
@@ -431,6 +458,34 @@ export default function ApiPage() {
                           <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Buscando...</>
                         ) : (
                           <><Search className="mr-2 h-4 w-4" /> Buscar Detalhes</>
+                        )}
+                      </Button>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                {/* Channel Details Test Section */}
+                 <Card className="bg-muted/40">
+                  <CardHeader>
+                    <CardTitle className="text-base">Detalhes do Canal de Venda (Marketplace)</CardTitle>
+                    <CardDescription>Busque o nome do marketplace associado a um pedido pelo ID do pedido.</CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="flex items-end gap-2">
+                      <div className="flex-1 space-y-1.5">
+                        <Label htmlFor="orderIdForChannel">ID do Pedido no Bling</Label>
+                        <Input 
+                            id="orderIdForChannel"
+                            value={orderIdForChannel}
+                            onChange={(e) => setOrderIdForChannel(e.target.value)}
+                            placeholder="Ex: 123456789"
+                        />
+                      </div>
+                      <Button onClick={handleFetchChannel} disabled={isFetchingChannel}>
+                        {isFetchingChannel ? (
+                          <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Buscando...</>
+                        ) : (
+                          <><Store className="mr-2 h-4 w-4" /> Buscar Canal de Venda</>
                         )}
                       </Button>
                     </div>

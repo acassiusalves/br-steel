@@ -198,6 +198,40 @@ export async function getBlingOrderDetails(orderId: string): Promise<any> {
     }
 }
 
+
+export async function getBlingChannelByOrderId(orderId: string): Promise<any> {
+    if (!orderId) {
+        throw new Error('O ID do pedido é obrigatório.');
+    }
+
+    const envMap = await readEnvFile();
+    const accessToken = envMap.get('BLING_ACCESS_TOKEN');
+
+    if (!accessToken) {
+        throw new Error('Access Token do Bling não encontrado. Por favor, conecte sua conta primeiro.');
+    }
+
+    try {
+        // Passo 1: Buscar o pedido para obter o loja.id
+        const orderDetails = await blingGet(`https://api.bling.com.br/Api/v3/pedidos/vendas/${orderId}`, accessToken);
+        const lojaId = orderDetails?.data?.loja?.id;
+
+        if (!lojaId) {
+            throw new Error('O pedido não contém um ID de loja (canal de venda).');
+        }
+
+        // Passo 2: Buscar os detalhes do canal de venda
+        const channelDetails = await blingGet(`https://api.bling.com.br/Api/v3/canais-de-venda/${lojaId}`, accessToken);
+        
+        return channelDetails;
+
+    } catch (error: any) {
+        console.error(`Falha ao buscar canal de venda para o pedido ${orderId}:`, error);
+        throw new Error(`Falha na comunicação com a API do Bling: ${error.message}`);
+    }
+}
+
+
 export async function getBlingProducts(limit: number = 100): Promise<any> {
     const envMap = await readEnvFile();
     const accessToken = envMap.get('BLING_ACCESS_TOKEN');
