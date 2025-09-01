@@ -11,6 +11,7 @@ import {
   ShoppingCart,
   Factory,
   Warehouse,
+  ClipboardList,
 } from "lucide-react";
 import * as React from "react";
 
@@ -99,6 +100,14 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
               <Link href="/producao">
                   <Factory />
                   <span>Produção</span>
+              </Link>
+            </Button>
+          </SidebarMenuItem>
+          <SidebarMenuItem>
+            <Button asChild variant="ghost" className="w-full justify-start">
+              <Link href="/insumos">
+                  <ClipboardList />
+                  <span>Insumos</span>
               </Link>
             </Button>
           </SidebarMenuItem>
