@@ -3,6 +3,8 @@
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import { format } from 'date-fns';
+import { collection, getDocs } from 'firebase/firestore';
+import { db } from '@/lib/firebase';
 
 import {
   predictSalesTrends,
@@ -147,5 +149,16 @@ export async function getBlingSalesOrders({ from, to }: { from?: Date, to?: Date
         // Here, we could also implement the refresh token logic if the token is expired
         console.error('Falha ao buscar pedidos no Bling:', error);
         throw new Error(`Falha na comunicação com a API do Bling: ${error.message}`);
+    }
+}
+
+export async function countImportedOrders(): Promise<number> {
+    try {
+        const ordersCollection = collection(db, 'salesOrders');
+        const snapshot = await getDocs(ordersCollection);
+        return snapshot.size;
+    } catch (error) {
+        console.error("Failed to count imported orders:", error);
+        return 0; // Return 0 if there's an error
     }
 }

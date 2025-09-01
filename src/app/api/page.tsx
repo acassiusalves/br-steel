@@ -13,7 +13,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
-import { getBlingCredentials, saveBlingCredentials, getBlingSalesOrders } from '@/app/actions';
+import { getBlingCredentials, saveBlingCredentials, getBlingSalesOrders, countImportedOrders } from '@/app/actions';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Calendar } from '@/components/ui/calendar';
 import { cn } from '@/lib/utils';
@@ -57,8 +57,12 @@ export default function ApiPage() {
   const loadInitialData = React.useCallback(async () => {
     setIsLoading(true);
     try {
-        const savedCreds = await getBlingCredentials();
+        const [savedCreds, count] = await Promise.all([
+            getBlingCredentials(),
+            countImportedOrders()
+        ]);
         setCredentials(prev => ({...prev, ...savedCreds}));
+        setImportedCount(count);
         if (savedCreds.accessToken) {
             setApiStatus('valid');
         } else {
@@ -170,12 +174,13 @@ export default function ApiPage() {
     setIsImporting(true);
     setApiResponse(null);
     try {
-      const response = await getBlingSalesOrders({ from: date?.from, to: date?.to });
-       const savedCount = response.firestore?.savedCount || 0;
-      setImportedCount(prev => prev + savedCount);
-       toast({
+      await getBlingSalesOrders({ from: date?.from, to: date?.to });
+      const totalCount = await countImportedOrders();
+      setImportedCount(totalCount);
+      
+      toast({
         title: "Importação Concluída!",
-        description: `${savedCount} pedidos foram importados/atualizados do Bling.`,
+        description: `Seus pedidos foram importados/atualizados. Total no banco de dados: ${totalCount}`,
       });
     } catch (error: any) {
       setApiResponse({ error: "Falha na requisição", message: error.message });
