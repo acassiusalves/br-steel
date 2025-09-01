@@ -133,16 +133,6 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
             </Button>
           </SidebarMenuItem>
         </SidebarMenu>
-        <SidebarFooter>
-           <SidebarMenu>
-             <SidebarMenuItem>
-                <SidebarMenuButton tooltip="Configurações">
-                    <Settings />
-                    <span>Configurações</span>
-                </SidebarMenuButton>
-            </SidebarMenuItem>
-           </SidebarMenu>
-        </SidebarFooter>
       </Sidebar>
       <SidebarInset>
         <header className="flex h-14 items-center justify-between border-b bg-background px-4 sticky top-0 z-20 md:justify-end">
