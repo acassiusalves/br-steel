@@ -1,4 +1,5 @@
 
+
 'use client';
 
 import * as React from 'react';
@@ -161,7 +162,7 @@ export default function VendasPage() {
                                 {sale.itens && sale.itens.length > 0 ? (
                                   <ul className="text-xs space-y-1">
                                     {sale.itens.map((item, index) => (
-                                      <li key={item.produto?.id || index} title={item.descricao} className="flex items-start gap-2">
+                                      <li key={item.id || index} title={item.descricao} className="flex items-start gap-2">
                                         <span>{item.descricao}</span>
                                       </li>
                                     ))}
