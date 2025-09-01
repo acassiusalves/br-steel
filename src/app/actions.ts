@@ -249,16 +249,16 @@ export async function getImportedOrderIds(): Promise<Set<string>> {
 export async function getSalesDashboardData(
   { from, to }: { from?: Date, to?: Date }
 ): Promise<{
-  totalRevenue: number,
-  totalSales: number,
-  averageTicket: number,
-  uniqueCustomers: number,
-  monthlyRevenue: { name: string, total: number }[],
+  totalRevenue: number;
+  totalSales: number;
+  averageTicket: number;
+  uniqueCustomers: number;
+  topProducts: { name: string, total: number }[];
   stats: {
-      totalRevenue: { value: number, change: number },
-      totalSales: { value: number, change: number },
-      averageTicket: { value: number, change: number },
-      uniqueCustomers: { value: number, change: number },
+      totalRevenue: { value: number, change: number };
+      totalSales: { value: number, change: number };
+      averageTicket: { value: number, change: number };
+      uniqueCustomers: { value: number, change: number };
   }
 }> {
   if (!from || !to) {
@@ -296,47 +296,22 @@ export async function getSalesDashboardData(
   const customerIds = new Set(orders.map(order => order.contato.id));
   const uniqueCustomers = customerIds.size;
 
-  // Monthly revenue calculation
-  const monthNames = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"];
-  const monthlyData: { [key: string]: number } = {};
-
-  // Initialize all months in the interval to 0
-  const monthsInInterval = eachMonthOfInterval({ start: from, end: to });
-  monthsInInterval.forEach(monthDate => {
-      const year = getYear(monthDate);
-      const month = getMonth(monthDate);
-      const key = `${year}-${month}`;
-      monthlyData[key] = 0;
-  });
+  // Product sales ranking calculation
+  const productSales = new Map<string, number>();
 
   orders.forEach(order => {
-    try {
-      // The date string from Bling is 'YYYY-MM-DD'
-      const orderDate = parseISO(order.data);
-      const year = getYear(orderDate);
-      const month = getMonth(orderDate);
-      const key = `${year}-${month}`;
-      if (key in monthlyData) {
-          monthlyData[key] += order.total || 0;
-      }
-    } catch(e) {
-      console.error(`Invalid date format for order ${order.id}: ${order.data}`);
-    }
+      order.itens?.forEach(item => {
+          const productName = item.descricao || 'Produto sem nome';
+          const currentQty = productSales.get(productName) || 0;
+          productSales.set(productName, currentQty + item.quantidade);
+      });
   });
 
-  const monthlyRevenue = Object.entries(monthlyData).map(([key, total]) => {
-      const [year, month] = key.split('-').map(Number);
-      return {
-          name: `${monthNames[month]}`,
-          total: total,
-      };
-  }).sort((a,b) => {
-      // We need to sort by month index to ensure correct order
-      const monthA = monthNames.indexOf(a.name);
-      const monthB = monthNames.indexOf(b.name);
-      return monthA - monthB;
-  });
-
+  const topProducts = Array.from(productSales.entries())
+      .map(([name, total]) => ({ name, total }))
+      .sort((a, b) => b.total - a.total)
+      .slice(0, 10);
+  
 
   // Mocking percentage changes for now as calculating them requires
   // fetching data from the previous period.
@@ -347,7 +322,7 @@ export async function getSalesDashboardData(
     totalSales,
     averageTicket,
     uniqueCustomers,
-    monthlyRevenue,
+    topProducts,
     stats: {
         totalRevenue: { value: totalRevenue, change: mockChange() },
         totalSales: { value: totalSales, change: mockChange() },

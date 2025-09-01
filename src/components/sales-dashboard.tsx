@@ -11,7 +11,7 @@ import {
   Users,
   Loader2,
 } from "lucide-react";
-import { Bar, BarChart, ResponsiveContainer, XAxis, YAxis, Tooltip } from "recharts";
+import { Bar, BarChart, ResponsiveContainer, XAxis, YAxis, Tooltip, CartesianGrid } from "recharts";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import type { DateRange } from "react-day-picker";
@@ -122,9 +122,10 @@ export default function SalesDashboard() {
   }, [toast]);
   
   React.useEffect(() => {
+    const today = new Date();
     const initialDate = {
-        from: new Date(new Date().getFullYear(), 0, 1),
-        to: new Date(),
+        from: new Date(today.getFullYear(), 0, 1),
+        to: today,
     };
     setDate(initialDate);
     fetchData(initialDate);
@@ -240,30 +241,32 @@ export default function SalesDashboard() {
       <div className="grid grid-cols-1 lg:grid-cols-7 gap-4">
         <Card className="lg:col-span-5">
             <CardHeader>
-              <CardTitle>Visão Geral das Vendas</CardTitle>
-              <CardDescription>Receita mensal no período selecionado.</CardDescription>
+              <CardTitle>Ranking de Produtos</CardTitle>
+              <CardDescription>Os 10 produtos mais vendidos no período.</CardDescription>
             </CardHeader>
             <CardContent className="pl-2">
             {isLoading ? (
               <div className="h-[350px] w-full flex items-center justify-center">
                 <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
               </div>
-            ) : data && data.monthlyRevenue.length > 0 ? (
+            ) : data && data.topProducts.length > 0 ? (
                 <ResponsiveContainer width="100%" height={350}>
-                    <BarChart data={data?.monthlyRevenue}>
-                      <XAxis
+                    <BarChart 
+                      data={data?.topProducts}
+                      layout="vertical"
+                      margin={{ top: 5, right: 30, left: 20, bottom: 5 }}
+                    >
+                      <CartesianGrid strokeDasharray="3 3" horizontal={false} />
+                      <XAxis type="number" stroke="hsl(var(--muted-foreground))" fontSize={12} tickLine={false} axisLine={false} />
+                      <YAxis
+                          type="category"
                           dataKey="name"
                           stroke="hsl(var(--muted-foreground))"
                           fontSize={12}
                           tickLine={false}
                           axisLine={false}
-                      />
-                      <YAxis
-                          stroke="hsl(var(--muted-foreground))"
-                          fontSize={12}
-                          tickLine={false}
-                          axisLine={false}
-                          tickFormatter={(value) => formatCurrency(Number(value))}
+                          tickFormatter={(value) => value.length > 30 ? `${value.substring(0, 30)}...` : value}
+                          width={200}
                       />
                       <Tooltip 
                         cursor={{ fill: 'hsl(var(--accent))' }}
@@ -272,12 +275,13 @@ export default function SalesDashboard() {
                           border: '1px solid hsl(var(--border))',
                           borderRadius: 'var(--radius)',
                         }}
-                        formatter={(value) => [formatCurrency(Number(value)), "Receita"]}
+                        formatter={(value, name) => [value, "Quantidade Vendida"]}
                       />
                       <Bar
                           dataKey="total"
                           fill="hsl(var(--primary))"
-                          radius={[4, 4, 0, 0]}
+                          radius={[0, 4, 4, 0]}
+                          barSize={30}
                       />
                     </BarChart>
                 </ResponsiveContainer>
