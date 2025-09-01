@@ -57,6 +57,11 @@ export default function ApiPage() {
   // New state for products testing
   const [isFetchingProducts, setIsFetchingProducts] = React.useState(false);
 
+  // New state for order details testing
+  const [isFetchingOrderDetails, setIsFetchingOrderDetails] = React.useState(false);
+  const [orderIdToTest, setOrderIdToTest] = React.useState('');
+
+
   const { toast } = useToast();
   
   // Combina o carregamento inicial de credenciais e a contagem de pedidos
@@ -271,6 +276,29 @@ export default function ApiPage() {
       }
   }
 
+  const handleFetchOrderDetails = async () => {
+    if (!orderIdToTest) {
+        toast({ variant: "destructive", title: "ID do Pedido Faltando", description: "Por favor, insira um ID de pedido para testar."});
+        return;
+    }
+    setIsFetchingOrderDetails(true);
+    setApiResponse(null);
+    try {
+        const responseData = await getBlingOrderDetails(orderIdToTest);
+        setApiResponse(responseData);
+        toast({ title: "Busca de Detalhes Concluída", description: "A resposta da API foi recebida."});
+    } catch (error: any) {
+        setApiResponse({ error: "Falha na requisição", message: error.message });
+        toast({
+            variant: "destructive",
+            title: "Erro na Busca de Detalhes",
+            description: `Não foi possível buscar os dados: ${error.message}`,
+        });
+    } finally {
+        setIsFetchingOrderDetails(false);
+    }
+  }
+
   const renderConnectionContent = () => {
     if (isLoading) {
         return (
@@ -376,27 +404,55 @@ export default function ApiPage() {
             
             <Separator />
 
-             {/* Products Test Section */}
-            <div className="space-y-4 pt-4">
-                <h3 className="font-semibold">Teste de Consulta de Produtos</h3>
-                 <p className="text-sm text-muted-foreground">
-                   Use este botão para buscar os primeiros 5 produtos cadastrados no Bling e ver a resposta da API.
+             <div className="space-y-6">
+                <h3 className="font-semibold text-lg">Testes de Endpoints</h3>
+                 <p className="text-sm text-muted-foreground -mt-4">
+                   Use as seções abaixo para fazer chamadas individuais à API do Bling e inspecionar a resposta.
                 </p>
-                <div className="flex items-end gap-2">
+                {/* Order Details Test Section */}
+                <Card className="bg-muted/40">
+                  <CardHeader>
+                    <CardTitle className="text-base">Detalhes do Pedido</CardTitle>
+                    <CardDescription>Busque os dados completos de um pedido específico pelo ID.</CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="flex items-end gap-2">
+                      <div className="flex-1 space-y-1.5">
+                        <Label htmlFor="orderIdToTest">ID do Pedido no Bling</Label>
+                        <Input 
+                            id="orderIdToTest"
+                            value={orderIdToTest}
+                            onChange={(e) => setOrderIdToTest(e.target.value)}
+                            placeholder="Ex: 123456789"
+                        />
+                      </div>
+                      <Button onClick={handleFetchOrderDetails} disabled={isFetchingOrderDetails}>
+                        {isFetchingOrderDetails ? (
+                          <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Buscando...</>
+                        ) : (
+                          <><Search className="mr-2 h-4 w-4" /> Buscar Detalhes</>
+                        )}
+                      </Button>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                {/* Products Test Section */}
+                <Card className="bg-muted/40">
+                  <CardHeader>
+                    <CardTitle className="text-base">Lista de Produtos</CardTitle>
+                     <CardDescription>Busque os produtos cadastrados no Bling.</CardDescription>
+                  </CardHeader>
+                  <CardContent>
                     <Button onClick={handleFetchProducts} disabled={isFetchingProducts}>
                         {isFetchingProducts ? (
-                          <>
-                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                            Buscando...
-                          </>
+                          <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Buscando...</>
                         ) : (
-                          <>
-                           <Package className="mr-2 h-4 w-4" />
-                            Buscar Produtos
-                          </>
+                          <><Package className="mr-2 h-4 w-4" /> Buscar Produtos</>
                         )}
                     </Button>
-                </div>
+                  </CardContent>
+                </Card>
             </div>
 
          </div>
@@ -559,4 +615,3 @@ export default function ApiPage() {
     </DashboardLayout>
   );
 }
-
