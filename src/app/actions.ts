@@ -392,18 +392,29 @@ export type ProductionDemand = {
   quantity: number;
 };
 
-export async function getProductionDemand(): Promise<ProductionDemand[]> {
+export async function getProductionDemand(
+    { from, to }: { from?: Date, to?: Date }
+): Promise<ProductionDemand[]> {
     const salesCollection = collection(db, 'salesOrders');
+    
+    // Base query: filter for orders that have an issued invoice
     const q = query(salesCollection, where('notaFiscal.id', '!=', null));
     const snapshot = await getDocs(q);
+
+    const fromDateStr = from ? format(from, 'yyyy-MM-dd') : null;
+    const toDateStr = to ? format(to, 'yyyy-MM-dd') : null;
 
     const productDemand = new Map<string, { description: string, quantity: number }>();
 
     snapshot.forEach(doc => {
         const order = doc.data() as SaleOrder;
         
-        // Double-checking if the invoice really exists
-        if (order.notaFiscal && order.notaFiscal.id) {
+        // Manual date filtering, as we can't combine `!=` with range filters in Firestore.
+        const isDateInRange = 
+            (!fromDateStr || order.data >= fromDateStr) && 
+            (!toDateStr || order.data <= toDateStr);
+
+        if (isDateInRange && order.notaFiscal && order.notaFiscal.id) {
             order.itens?.forEach(item => {
                 const sku = item.codigo || 'SKU_INDEFINIDO';
                 const currentData = productDemand.get(sku) || { description: item.descricao, quantity: 0 };
