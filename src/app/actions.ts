@@ -387,7 +387,7 @@ export async function getProductsStockWithFallback(): Promise<{ data: ProductSto
 }
 
 // Atualizar a função principal para usar o fallback
-export async function getProductsStock(): Promise<{ data: ProductStock[] }> {
+export async function getProductsStock(): Promise<{ data: ProductStock[], isSimulated?: boolean }> {
     try {
         const result = await getProductsStockWithFallback();
         
@@ -395,7 +395,7 @@ export async function getProductsStock(): Promise<{ data: ProductStock[] }> {
             console.warn('⚠️ Usando dados simulados - A API de estoque do Bling pode não estar disponível para sua conta');
         }
         
-        return { data: result.data };
+        return { data: result.data, isSimulated: result.isSimulated };
     } catch (error: any) {
         console.error('Erro ao buscar dados de estoque:', error);
         throw new Error(`Erro ao buscar estoque: ${error.message}`);

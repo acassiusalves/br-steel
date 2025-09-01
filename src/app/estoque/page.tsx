@@ -34,7 +34,7 @@ import {
 } from "@/components/ui/dialog";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Skeleton } from '@/components/ui/skeleton';
-import { getProductsStockWithFallback, getBlingCredentials } from '@/app/actions';
+import { getProductsStock, getBlingCredentials } from '@/app/actions';
 import type { ProductStock } from '@/app/actions';
 import { useToast } from '@/hooks/use-toast';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -65,7 +65,11 @@ export default function EstoquePage() {
             return;
         }
 
-      const { data, isSimulated } = await getProductsStockWithFallback();
+      const result = await getProductsStock();
+      const data = result.data;
+      const isSimulated = result.isSimulated || false;
+      
+      setIsSimulatedData(isSimulated);
       
       if (data.length === 0) {
           setError('Nenhum produto com estoque foi encontrado. Verifique se há produtos cadastrados com estoque no Bling.');
@@ -73,8 +77,6 @@ export default function EstoquePage() {
           setIsLoading(false);
           return;
       }
-      
-      setIsSimulatedData(isSimulated);
 
       const aggregatedStock = new Map<string, { 
           productId: number;
@@ -420,3 +422,5 @@ export default function EstoquePage() {
     </DashboardLayout>
   );
 }
+
+    
