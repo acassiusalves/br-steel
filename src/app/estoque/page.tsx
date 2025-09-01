@@ -2,7 +2,7 @@
 'use client';
 
 import * as React from 'react';
-import { Search, Download, RefreshCw, Package, AlertTriangle, CheckCircle, AlertCircle, Info } from 'lucide-react';
+import { Search, Download, RefreshCw, Package, AlertTriangle, CheckCircle, AlertCircle, Info, BellRing } from 'lucide-react';
 import DashboardLayout from '@/components/dashboard-layout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -23,9 +23,18 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+  DialogTrigger,
+} from "@/components/ui/dialog";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Skeleton } from '@/components/ui/skeleton';
-import { getProductsStock, getBlingCredentials } from '@/app/actions';
+import { getProductsStockWithFallback, getBlingCredentials } from '@/app/actions';
 import type { ProductStock } from '@/app/actions';
 import { useToast } from '@/hooks/use-toast';
 
@@ -38,6 +47,7 @@ export default function EstoquePage() {
   const [error, setError] = React.useState<string | null>(null);
   const [isConnected, setIsConnected] = React.useState(false);
   const [isSimulatedData, setIsSimulatedData] = React.useState(false);
+  const [isAlertsModalOpen, setIsAlertsModalOpen] = React.useState(false);
   const { toast } = useToast();
 
   const fetchStockData = React.useCallback(async () => {
@@ -50,24 +60,20 @@ export default function EstoquePage() {
 
         if (!hasToken) {
             setError('Não conectado ao Bling. Por favor, configure a conexão na página de API para visualizar o estoque.');
+            setIsLoading(false);
             return;
         }
 
-      const { data } = await getProductsStock();
+      const { data, isSimulated } = await getProductsStockWithFallback();
       
       if (data.length === 0) {
           setError('Nenhum produto com estoque foi encontrado. Verifique se há produtos cadastrados com estoque no Bling.');
           setStockData([]);
+          setIsLoading(false);
           return;
       }
-
-      // Detectar se são dados simulados (baseado em padrões dos dados de exemplo)
-      const hasExampleData = data.some(item => item.produto.codigo.includes('EXEMPLO'));
-      const hasConsecutiveIds = data.length > 1 && data.every((item, index) => 
-        index === 0 || item.produto.id === data[index - 1].produto.id + 1
-      );
       
-      setIsSimulatedData(hasExampleData || hasConsecutiveIds);
+      setIsSimulatedData(isSimulated);
 
       const aggregatedStock = new Map<string, { 
           productId: number;
@@ -86,10 +92,9 @@ export default function EstoquePage() {
                   saldoVirtualTotal: item.saldoVirtualTotal,
               });
           } else {
-              // Se já existe, somar os valores (para múltiplos depósitos)
               const existing = aggregatedStock.get(sku)!;
-              existing.saldoFisicoTotal += item.saldoFisicoTotal;
-              existing.saldoVirtualTotal += item.saldoVirtualTotal;
+              existing.saldoFisicoTotal += item.saldoFisico;
+              existing.saldoVirtualTotal += item.saldoVirtual;
           }
       });
       
@@ -98,8 +103,8 @@ export default function EstoquePage() {
           saldoFisicoTotal: value.saldoFisicoTotal,
           saldoVirtualTotal: value.saldoVirtualTotal,
           deposito: { id: 0, nome: ''},
-          saldoFisico: 0,
-          saldoVirtual: 0,
+          saldoFisico: value.saldoFisicoTotal,
+          saldoVirtual: value.saldoVirtualTotal,
       }));
       
       setStockData(processedData);
@@ -112,16 +117,13 @@ export default function EstoquePage() {
     }
   }, []);
 
-  // Carregamento inicial dos dados
   React.useEffect(() => {
     fetchStockData();
   }, [fetchStockData]);
 
-  // Filtros
   React.useEffect(() => {
     let filtered = stockData;
 
-    // Filtro por texto de busca
     if (searchTerm) {
       filtered = filtered.filter(item => 
         item.produto.nome.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -129,7 +131,6 @@ export default function EstoquePage() {
       );
     }
 
-    // Filtro por status
     if (statusFilter !== 'all') {
       filtered = filtered.filter(item => {
         switch (statusFilter) {
@@ -194,50 +195,9 @@ export default function EstoquePage() {
     }
   };
 
-  const handleExport = () => {
-    if (filteredData.length === 0) {
-      toast({
-        variant: "destructive",
-        title: "Nenhum Dado",
-        description: "Não há dados para exportar.",
-      });
-      return;
-    }
-
-    const headers = ['SKU', 'Produto', 'Estoque Físico', 'Estoque Virtual', 'Status'];
-    const csvContent = [
-      headers.join(','),
-      ...filteredData.map(item => [
-        item.produto.codigo,
-        `"${item.produto.nome.replace(/"/g, '""')}"`,
-        item.saldoFisicoTotal,
-        item.saldoVirtualTotal,
-        item.saldoVirtualTotal <= 0 ? 'Esgotado' : item.saldoVirtualTotal < 10 ? 'Estoque Baixo' : 'Em Estoque'
-      ].join(','))
-    ].join('\n');
-
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement('a');
-    if (link.download !== undefined) {
-      const url = URL.createObjectURL(blob);
-      link.setAttribute('href', url);
-      link.setAttribute('download', `estoque_${isSimulatedData ? 'simulado_' : ''}${new Date().toISOString().split('T')[0]}.csv`);
-      link.style.visibility = 'hidden';
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-    }
-    
-    toast({
-      title: "Arquivo Exportado",
-      description: `Os dados de estoque ${isSimulatedData ? '(simulados) ' : ''}foram exportados para CSV.`,
-    });
-  };
-
   return (
     <DashboardLayout>
       <div className="flex-1 space-y-6 p-4 pt-6 md:p-8">
-        {/* Header */}
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
           <div>
             <h2 className="text-3xl font-bold tracking-tight">Gestão de Estoque</h2>
@@ -250,14 +210,31 @@ export default function EstoquePage() {
               <RefreshCw className={`w-4 h-4 mr-2 ${isLoading ? 'animate-spin' : ''}`} />
               Atualizar
             </Button>
-            <Button onClick={handleExport} variant="outline" disabled={filteredData.length === 0}>
-              <Download className="w-4 h-4 mr-2" />
-              Exportar
-            </Button>
+            <Dialog open={isAlertsModalOpen} onOpenChange={setIsAlertsModalOpen}>
+              <DialogTrigger asChild>
+                <Button variant="outline">
+                  <BellRing className="w-4 h-4 mr-2" />
+                  Alertas
+                </Button>
+              </DialogTrigger>
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>Configurar Alertas de Estoque Mínimo</DialogTitle>
+                  <DialogDescription>
+                    Defina a quantidade mínima para cada produto para ser notificado quando o estoque estiver baixo.
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="py-4">
+                  <p className="text-sm text-center text-muted-foreground">(A funcionalidade de configuração de alertas será implementada aqui)</p>
+                </div>
+                <DialogFooter>
+                  <Button onClick={() => setIsAlertsModalOpen(false)} type="submit">Salvar Configurações</Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
           </div>
         </div>
 
-        {/* Alerta de erro ou desconexão */}
         {error && (
           <Alert variant="destructive">
             <AlertCircle className="h-4 w-4" />
@@ -274,19 +251,15 @@ export default function EstoquePage() {
           </Alert>
         )}
 
-        {/* Alerta de dados simulados */}
         {isSimulatedData && !error && (
           <Alert>
             <Info className="h-4 w-4" />
             <AlertDescription>
-              <strong>Dados Simulados:</strong> Os dados de estoque mostrados são simulados porque a API de estoque do Bling 
-              pode não estar disponível para sua conta. Entre em contato com o suporte do Bling para verificar 
-              se você tem acesso ao módulo de estoque.
+              <strong>Dados Simulados:</strong> A API de estoque do Bling pode não estar disponível para sua conta. Usando dados simulados com base na sua lista de produtos.
             </AlertDescription>
           </Alert>
         )}
 
-        {/* Cards de Estatísticas */}
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
@@ -426,4 +399,3 @@ export default function EstoquePage() {
   );
 }
 
-    
