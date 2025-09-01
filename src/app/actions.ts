@@ -220,8 +220,8 @@ export async function getBlingChannelByOrderId(orderId: string): Promise<any> {
             throw new Error('O pedido não contém um ID de loja (canal de venda).');
         }
 
-        // Passo 2: Buscar os detalhes do canal de venda
-        const channelDetails = await blingGet(`https://api.bling.com.br/Api/v3/canais-de-venda/${lojaId}`, accessToken);
+        // Passo 2: Buscar os detalhes da loja (marketplace)
+        const channelDetails = await blingGet(`https://api.bling.com.br/Api/v3/lojas/${lojaId}`, accessToken);
         
         return channelDetails;
 
