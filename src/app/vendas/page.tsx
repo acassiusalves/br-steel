@@ -152,10 +152,11 @@ export default function VendasPage() {
                               <TableCell>{sale.loja?.nome || 'N/A'}</TableCell>
                               <TableCell>
                                 {sale.itens && sale.itens.length > 0 ? (
-                                  <ul className="list-disc list-inside text-xs">
+                                  <ul className="text-xs space-y-1">
                                     {sale.itens.map((item, index) => (
-                                      <li key={item.produto?.id || index} title={item.descricao}>
-                                        {item.quantidade}x {item.descricao.substring(0, 25)}{item.descricao.length > 25 ? '...' : ''}
+                                      <li key={item.produto?.id || index} title={item.descricao} className="flex items-start gap-2">
+                                        <span className="font-bold">{item.quantidade}x</span>
+                                        <span>{item.descricao}</span>
                                       </li>
                                     ))}
                                   </ul>
