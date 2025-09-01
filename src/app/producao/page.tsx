@@ -7,7 +7,7 @@ import {
   Filter,
   Loader2,
 } from "lucide-react";
-import { format } from "date-fns";
+import { format, subDays, startOfMonth, endOfMonth, startOfYesterday, endOfYesterday, startOfWeek, endOfWeek, startOfYear, endOfYear, subMonths } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import type { DateRange } from "react-day-picker";
 
@@ -28,6 +28,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Calendar } from '@/components/ui/calendar';
 import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
+import { Separator } from '@/components/ui/separator';
 
 
 export default function ProducaoPage() {
@@ -83,6 +84,34 @@ export default function ProducaoPage() {
     }
     fetchData(date);
   };
+  
+  const setDatePreset = (preset: 'today' | 'yesterday' | 'last7' | 'last30' | 'thisMonth' | 'lastMonth') => {
+      const today = new Date();
+      switch (preset) {
+          case 'today':
+              setDate({ from: today, to: today });
+              break;
+          case 'yesterday':
+              const yesterday = subDays(today, 1);
+              setDate({ from: yesterday, to: yesterday });
+              break;
+          case 'last7':
+              setDate({ from: subDays(today, 6), to: today });
+              break;
+          case 'last30':
+              setDate({ from: subDays(today, 29), to: today });
+              break;
+          case 'thisMonth':
+              setDate({ from: startOfMonth(today), to: endOfMonth(today) });
+              break;
+          case 'lastMonth':
+              const lastMonthStart = startOfMonth(subMonths(today, 1));
+              const lastMonthEnd = endOfMonth(subMonths(today, 1));
+              setDate({ from: lastMonthStart, to: lastMonthEnd });
+              break;
+      }
+  }
+
 
   return (
     <DashboardLayout>
@@ -101,7 +130,7 @@ export default function ProducaoPage() {
                       id="date"
                       variant={"outline"}
                       className={cn(
-                        "w-full sm:w-[260px] justify-start text-left font-normal",
+                        "w-full sm:w-[280px] justify-start text-left font-normal",
                         !date && "text-muted-foreground"
                       )}
                     >
@@ -120,7 +149,16 @@ export default function ProducaoPage() {
                       )}
                     </Button>
                   </PopoverTrigger>
-                  <PopoverContent className="w-auto p-0" align="end">
+                  <PopoverContent className="w-auto p-0 flex" align="end">
+                    <div className="flex flex-col space-y-2 p-2 border-r">
+                        <Button variant="ghost" className="justify-start" onClick={() => setDatePreset('today')}>Hoje</Button>
+                        <Button variant="ghost" className="justify-start" onClick={() => setDatePreset('yesterday')}>Ontem</Button>
+                        <Button variant="ghost" className="justify-start" onClick={() => setDatePreset('last7')}>Últimos 7 dias</Button>
+                        <Button variant="ghost" className="justify-start" onClick={() => setDatePreset('last30')}>Últimos 30 dias</Button>
+                        <Separator />
+                        <Button variant="ghost" className="justify-start" onClick={() => setDatePreset('thisMonth')}>Este mês</Button>
+                        <Button variant="ghost" className="justify-start" onClick={() => setDatePreset('lastMonth')}>Mês passado</Button>
+                    </div>
                     <Calendar
                       initialFocus
                       mode="range"
