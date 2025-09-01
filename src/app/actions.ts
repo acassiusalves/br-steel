@@ -109,48 +109,63 @@ export async function getBlingSalesOrders({ from, to }: { from?: Date, to?: Date
         throw new Error('Access Token do Bling não encontrado. Por favor, conecte sua conta primeiro.');
     }
 
-    const url = new URL('https://api.bling.com.br/Api/v3/pedidos/vendas');
-    url.searchParams.set('pagina', '1');
-    url.searchParams.set('limite', '100'); // Bling's max limit
+    const allOrders: any[] = [];
+    let page = 1;
+    const limit = 100; // Bling's max limit
 
-    if (from) {
-        url.searchParams.set('dataInicial', format(from, 'yyyy-MM-dd'));
-    }
-    if (to) {
-        url.searchParams.set('dataFinal', format(to, 'yyyy-MM-dd'));
-    }
+    while (true) {
+        const url = new URL('https://api.bling.com.br/Api/v3/pedidos/vendas');
+        url.searchParams.set('pagina', String(page));
+        url.searchParams.set('limite', String(limit));
 
-    try {
-        const response = await fetch(url.toString(), {
-            method: 'GET',
-            headers: {
-                'Authorization': `Bearer ${accessToken}`,
-                'Accept': 'application/json',
-            },
-        });
-
-        const data = await response.json();
-
-        if (!response.ok) {
-           throw new Error(`Erro do Bling: ${data.error.description || response.statusText}`);
+        if (from) {
+            url.searchParams.set('dataInicial', format(from, 'yyyy-MM-dd'));
         }
-        
-        // If the fetch was successful, save the orders to Firestore
-        if (data && data.data) {
-           const { count } = await saveSalesOrders(data.data);
-           console.log(`${count} orders processed.`);
-           // We can add the save count to the response if needed
-           return { ...data, firestore: { savedCount: count } };
+        if (to) {
+            url.searchParams.set('dataFinal', format(to, 'yyyy-MM-dd'));
         }
 
-        return data;
+        try {
+            const response = await fetch(url.toString(), {
+                method: 'GET',
+                headers: {
+                    'Authorization': `Bearer ${accessToken}`,
+                    'Accept': 'application/json',
+                },
+            });
 
-    } catch (error: any) {
-        // Here, we could also implement the refresh token logic if the token is expired
-        console.error('Falha ao buscar pedidos no Bling:', error);
-        throw new Error(`Falha na comunicação com a API do Bling: ${error.message}`);
+            const data = await response.json();
+
+            if (!response.ok) {
+                throw new Error(`Erro do Bling: ${data.error.description || response.statusText}`);
+            }
+
+            const ordersOnPage = data.data || [];
+            allOrders.push(...ordersOnPage);
+
+            // If we received less than the limit, it's the last page.
+            if (ordersOnPage.length < limit) {
+                break;
+            }
+
+            page++;
+        } catch (error: any) {
+            // Here, we could also implement the refresh token logic if the token is expired
+            console.error('Falha ao buscar pedidos no Bling:', error);
+            throw new Error(`Falha na comunicação com a API do Bling: ${error.message}`);
+        }
     }
+
+    // After fetching all pages, save the orders to Firestore
+    if (allOrders.length > 0) {
+        const { count } = await saveSalesOrders(allOrders);
+        console.log(`${count} orders processed and saved.`);
+    }
+
+    // Return the combined data
+    return { data: allOrders, firestore: { savedCount: allOrders.length } };
 }
+
 
 export async function getBlingOrderDetails(orderId: string): Promise<any> {
     if (!orderId) {
