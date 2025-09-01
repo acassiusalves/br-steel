@@ -88,6 +88,57 @@ export async function getBlingCredentials(): Promise<Partial<BlingCredentials>> 
     };
 }
 
+// Função auxiliar para chamadas GET genéricas ao Bling
+async function blingGet(url: string, token: string) {
+  const response = await fetch(url, {
+    method: 'GET',
+    headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
+    cache: 'no-store', // Evita cache para dados que podem mudar
+  });
+
+  const data = await response.json();
+
+  if (!response.ok) {
+    const errorMessage = data?.error?.description || response.statusText;
+    throw new Error(`Erro do Bling (${response.status}): ${errorMessage}`);
+  }
+  return data;
+}
+
+// Função auxiliar para chamadas GET paginadas ao Bling
+async function blingGetPaged(baseUrl: string, token: string) {
+    const allData: any[] = [];
+    let page = 1;
+    const limit = 100; // Bling's max limit
+
+    while (true) {
+        const url = new URL(baseUrl);
+        url.searchParams.set('pagina', String(page));
+        url.searchParams.set('limite', String(limit));
+
+        const response = await fetch(url.toString(), {
+            method: 'GET',
+            headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/json' },
+        });
+
+        const responseData = await response.json();
+
+        if (!response.ok) {
+            throw new Error(`Erro do Bling: ${responseData.error.description || response.statusText}`);
+        }
+
+        const dataOnPage = responseData.data || [];
+        allData.push(...dataOnPage);
+
+        if (dataOnPage.length < limit) {
+            break;
+        }
+        page++;
+    }
+    return allData;
+}
+
+
 export async function getBlingSalesOrders({ from, to }: { from?: Date, to?: Date } = {}): Promise<any> {
     const envMap = await readEnvFile();
     const accessToken = envMap.get('BLING_ACCESS_TOKEN');
@@ -95,62 +146,25 @@ export async function getBlingSalesOrders({ from, to }: { from?: Date, to?: Date
     if (!accessToken) {
         throw new Error('Access Token do Bling não encontrado. Por favor, conecte sua conta primeiro.');
     }
+    
+    const baseUrl = new URL('https://api.bling.com.br/Api/v3/pedidos/vendas');
+    if (from) baseUrl.searchParams.set('dataInicial', format(from, 'yyyy-MM-dd'));
+    if (to) baseUrl.searchParams.set('dataFinal', format(to, 'yyyy-MM-dd'));
+    
+    try {
+        const allOrders = await blingGetPaged(baseUrl.toString(), accessToken);
 
-    const allOrders: any[] = [];
-    let page = 1;
-    const limit = 100; // Bling's max limit
-
-    while (true) {
-        const url = new URL('https://api.bling.com.br/Api/v3/pedidos/vendas');
-        url.searchParams.set('pagina', String(page));
-        url.searchParams.set('limite', String(limit));
-
-        if (from) {
-            url.searchParams.set('dataInicial', format(from, 'yyyy-MM-dd'));
+        if (allOrders.length > 0) {
+            const { count } = await saveSalesOrders(allOrders);
+            console.log(`${count} orders processed and saved.`);
         }
-        if (to) {
-            url.searchParams.set('dataFinal', format(to, 'yyyy-MM-dd'));
-        }
+        
+        return { data: allOrders, firestore: { savedCount: allOrders.length } };
 
-        try {
-            const response = await fetch(url.toString(), {
-                method: 'GET',
-                headers: {
-                    'Authorization': `Bearer ${accessToken}`,
-                    'Accept': 'application/json',
-                },
-            });
-
-            const data = await response.json();
-
-            if (!response.ok) {
-                throw new Error(`Erro do Bling: ${data.error.description || response.statusText}`);
-            }
-
-            const ordersOnPage = data.data || [];
-            allOrders.push(...ordersOnPage);
-
-            // If we received less than the limit, it's the last page.
-            if (ordersOnPage.length < limit) {
-                break;
-            }
-
-            page++;
-        } catch (error: any) {
-            // Here, we could also implement the refresh token logic if the token is expired
-            console.error('Falha ao buscar pedidos no Bling:', error);
-            throw new Error(`Falha na comunicação com a API do Bling: ${error.message}`);
-        }
+    } catch (error: any) {
+        console.error('Falha ao buscar pedidos no Bling:', error);
+        throw new Error(`Falha na comunicação com a API do Bling: ${error.message}`);
     }
-
-    // After fetching all pages, save the orders to Firestore
-    if (allOrders.length > 0) {
-        const { count } = await saveSalesOrders(allOrders);
-        console.log(`${count} orders processed and saved.`);
-    }
-
-    // Return the combined data
-    return { data: allOrders, firestore: { savedCount: allOrders.length } };
 }
 
 
@@ -169,26 +183,12 @@ export async function getBlingOrderDetails(orderId: string): Promise<any> {
     const url = `https://api.bling.com.br/Api/v3/pedidos/vendas/${orderId}`;
 
     try {
-        const response = await fetch(url, {
-            method: 'GET',
-            headers: {
-                'Authorization': `Bearer ${accessToken}`,
-                'Accept': 'application/json',
-            },
-        });
-        
-        const data = await response.json();
-
-        if (!response.ok) {
-            const errorMessage = data?.error?.description || response.statusText;
-            throw new Error(`Erro do Bling (${response.status}): ${errorMessage}`);
-        }
+        const data = await blingGet(url, accessToken);
         
         // Se a busca for bem-sucedida, salva os detalhes no Firestore
         if (data && data.data) {
            await saveSalesOrders([data.data]); // Reutiliza a função para salvar com merge
         }
-
 
         return data;
 
@@ -198,23 +198,6 @@ export async function getBlingOrderDetails(orderId: string): Promise<any> {
     }
 }
 
-
-// Função auxiliar para chamadas GET genéricas ao Bling
-async function blingGet(url: string, token: string) {
-  const response = await fetch(url, {
-    method: 'GET',
-    headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
-    cache: 'no-store', // Evita cache para dados que podem mudar
-  });
-
-  const data = await response.json();
-
-  if (!response.ok) {
-    const errorMessage = data?.error?.description || response.statusText;
-    throw new Error(`Erro do Bling (${response.status}): ${errorMessage}`);
-  }
-  return data;
-}
 
 export async function getLogisticsBySalesOrder(orderId: string): Promise<any> {
     if (!orderId) {
@@ -265,6 +248,40 @@ export async function getLogisticsBySalesOrder(orderId: string): Promise<any> {
     }
 }
 
+export type ProductStock = {
+    produto: {
+        id: number;
+        codigo: string;
+        nome: string;
+    };
+    deposito: {
+        id: number;
+        nome: string;
+    };
+    saldoFisico: number;
+    saldoVirtual: number;
+    saldoFisicoTotal: number;
+    saldoVirtualTotal: number;
+}
+
+export async function getProductsStock(): Promise<{ data: ProductStock[] }> {
+    const envMap = await readEnvFile();
+    const accessToken = envMap.get('BLING_ACCESS_TOKEN');
+
+    if (!accessToken) {
+        throw new Error('Access Token do Bling não encontrado. Por favor, conecte sua conta primeiro.');
+    }
+
+    const baseUrl = 'https://api.bling.com.br/Api/v3/produtos/saldos/estoques';
+
+    try {
+        const allStockData = await blingGetPaged(baseUrl, accessToken);
+        return { data: allStockData };
+    } catch (error: any) {
+        console.error('Falha ao buscar estoques no Bling:', error);
+        throw new Error(`Falha na comunicação com a API do Bling: ${error.message}`);
+    }
+}
 
 
 export async function countImportedOrders(): Promise<number> {
