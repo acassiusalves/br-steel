@@ -198,37 +198,44 @@ export async function getBlingOrderDetails(orderId: string): Promise<any> {
     }
 }
 
+export async function getBlingChannelByOrderId(orderId: string) {
+  if (!orderId) {
+    throw new Error('O ID do pedido é obrigatório.');
+  }
 
-export async function getBlingChannelByOrderId(orderId: string): Promise<any> {
-    if (!orderId) {
-        throw new Error('O ID do pedido é obrigatório.');
-    }
+  const env = await readEnvFile();
+  const accessToken = env.get('BLING_ACCESS_TOKEN');
+  if (!accessToken) {
+    throw new Error('Access Token do Bling não encontrado.');
+  }
 
-    const envMap = await readEnvFile();
-    const accessToken = envMap.get('BLING_ACCESS_TOKEN');
+  // 1) busca o pedido pelo *id interno* do Bling
+  const orderResp = await blingGet(
+    `https://api.bling.com.br/Api/v3/pedidos/vendas/${orderId}`,
+    accessToken
+  );
 
-    if (!accessToken) {
-        throw new Error('Access Token do Bling não encontrado. Por favor, conecte sua conta primeiro.');
-    }
+  const order = orderResp?.data ?? {};
+  const lojaId = order?.loja?.id ?? null;
+  const intermediador = order?.intermediador ?? null;
 
-    try {
-        // Passo 1: Buscar o pedido para obter o loja.id
-        const orderDetails = await blingGet(`https://api.bling.com.br/Api/v3/pedidos/vendas/${orderId}`, accessToken);
-        const lojaId = orderDetails?.data?.loja?.id;
+  // 2) tentativa de inferência simples do marketplace
+  const rastreio = String(order?.transporte?.volumes?.[0]?.codigoRastreamento || '');
+  let marketplaceName: string | null = null;
+  if (rastreio.startsWith('MEL')) {
+    marketplaceName = 'Mercado Livre';
+  } else if (intermediador?.nomeUsuario) {
+    marketplaceName = `Marketplace (usuário ${intermediador.nomeUsuario})`;
+  } else if (order.loja?.nome) {
+    marketplaceName = order.loja.nome;
+  }
 
-        if (!lojaId) {
-            throw new Error('O pedido não contém um ID de loja (canal de venda).');
-        }
-
-        // Passo 2: Buscar os detalhes da loja (marketplace)
-        const channelDetails = await blingGet(`https://api.bling.com.br/Api/v3/lojas/${lojaId}`, accessToken);
-        
-        return channelDetails;
-
-    } catch (error: any) {
-        console.error(`Falha ao buscar canal de venda para o pedido ${orderId}:`, error);
-        throw new Error(`Falha na comunicação com a API do Bling: ${error.message}`);
-    }
+  return {
+    lojaId,
+    intermediador,
+    marketplaceName,
+    rawOrderData: order, // Retorna o pedido completo para depuração
+  };
 }
 
 
