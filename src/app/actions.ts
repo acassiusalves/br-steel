@@ -199,9 +199,26 @@ export async function getBlingOrderDetails(orderId: string): Promise<any> {
 }
 
 
-export async function getBlingLogisticsDetails(objectId: string): Promise<any> {
-    if (!objectId) {
-        throw new Error('O ID do objeto de logística é obrigatório.');
+// Função auxiliar para chamadas GET genéricas ao Bling
+async function blingGet(url: string, token: string) {
+  const response = await fetch(url, {
+    method: 'GET',
+    headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
+    cache: 'no-store', // Evita cache para dados que podem mudar
+  });
+
+  const data = await response.json();
+
+  if (!response.ok) {
+    const errorMessage = data?.error?.description || response.statusText;
+    throw new Error(`Erro do Bling (${response.status}): ${errorMessage}`);
+  }
+  return data;
+}
+
+export async function getLogisticsBySalesOrder(orderId: string): Promise<any> {
+    if (!orderId) {
+        throw new Error('O ID do pedido de venda é obrigatório.');
     }
 
     const envMap = await readEnvFile();
@@ -211,31 +228,43 @@ export async function getBlingLogisticsDetails(objectId: string): Promise<any> {
         throw new Error('Access Token do Bling não encontrado. Por favor, conecte sua conta primeiro.');
     }
 
-    const url = `https://api.bling.com.br/Api/v3/logisticas/objetos/${objectId}`;
-
     try {
-        const response = await fetch(url, {
-            method: 'GET',
-            headers: {
-                'Authorization': `Bearer ${accessToken}`,
-                'Accept': 'application/json',
-            },
-        });
-        
-        const data = await response.json();
+        // Passo 1: Buscar o pedido de venda para obter o ID da nota fiscal.
+        const orderDetails = await blingGet(`https://api.bling.com.br/Api/v3/pedidos/vendas/${orderId}`, accessToken);
+        const invoiceId = orderDetails?.data?.notaFiscal?.id;
 
-        if (!response.ok) {
-            const errorMessage = data?.error?.description || response.statusText;
-            throw new Error(`Erro do Bling (${response.status}): ${errorMessage}`);
+        if (!invoiceId) {
+            throw new Error('Nota Fiscal não encontrada para este pedido. Não é possível rastrear.');
         }
 
-        return data;
+        // Passo 2: Buscar a remessa de logística usando o ID da nota fiscal.
+        // A API de remessas permite filtrar pelo ID do documento (que é a nota fiscal).
+        const shippingManifests = await blingGet(`https://api.bling.com.br/Api/v3/logisticas/remessas?idsDocumentos[]=${invoiceId}`, accessToken);
+        const shippingObjects = shippingManifests?.data?.[0]?.objetos;
+
+        if (!shippingObjects || shippingObjects.length === 0) {
+            throw new Error('Nenhum objeto de logística encontrado para a nota fiscal deste pedido.');
+        }
+        
+        // Assumimos que queremos o primeiro objeto de logística da remessa
+        const logisticsObjectId = shippingObjects[0]?.id;
+
+        if (!logisticsObjectId) {
+            throw new Error('ID do objeto de logística não encontrado na remessa.');
+        }
+
+        // Passo 3: Com o ID do objeto de logística, buscar os detalhes do rastreio.
+        const logisticsDetails = await blingGet(`https://api.bling.com.br/Api/v3/logisticas/objetos/${logisticsObjectId}`, accessToken);
+        
+        return logisticsDetails;
 
     } catch (error: any) {
-        console.error(`Falha ao buscar detalhes de logística do objeto ${objectId}:`, error);
-        throw new Error(`Falha na comunicação com a API do Bling: ${error.message}`);
+        console.error(`Falha na cadeia de busca de logística para o pedido ${orderId}:`, error);
+        // Retorna a mensagem de erro original para o cliente
+        throw new Error(error.message);
     }
 }
+
 
 
 export async function countImportedOrders(): Promise<number> {
@@ -356,5 +385,3 @@ export async function getSalesDashboardData(
     }
   };
 }
-
-    

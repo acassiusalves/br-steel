@@ -15,7 +15,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
-import { getBlingCredentials, saveBlingCredentials, getBlingSalesOrders, countImportedOrders, getBlingOrderDetails, getImportedOrderIds, getBlingLogisticsDetails } from '@/app/actions';
+import { getBlingCredentials, saveBlingCredentials, getBlingSalesOrders, countImportedOrders, getBlingOrderDetails, getImportedOrderIds, getLogisticsBySalesOrder } from '@/app/actions';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Calendar } from '@/components/ui/calendar';
 import { cn } from '@/lib/utils';
@@ -55,7 +55,7 @@ export default function ApiPage() {
   const [importProgress, setImportProgress] = React.useState(0);
   
   // New state for logistics testing
-  const [logisticsObjectId, setLogisticsObjectId] = React.useState('');
+  const [logisticsOrderId, setLogisticsOrderId] = React.useState('');
   const [isFetchingLogistics, setIsFetchingLogistics] = React.useState(false);
   const [logisticsResponse, setLogisticsResponse] = React.useState<any>(null);
 
@@ -256,15 +256,15 @@ export default function ApiPage() {
   }
 
   const handleFetchLogistics = async () => {
-      if (!logisticsObjectId) {
-          toast({ variant: "destructive", title: "ID do Objeto Faltando", description: "Por favor, insira um ID de objeto de logística."});
+      if (!logisticsOrderId) {
+          toast({ variant: "destructive", title: "ID do Pedido Faltando", description: "Por favor, insira um ID de pedido de venda."});
           return;
       }
       setIsFetchingLogistics(true);
       setLogisticsResponse(null);
       setApiResponse(null);
       try {
-          const responseData = await getBlingLogisticsDetails(logisticsObjectId);
+          const responseData = await getLogisticsBySalesOrder(logisticsOrderId);
           setLogisticsResponse(responseData);
           toast({ title: "Busca de Logística Concluída", description: "A resposta da API foi recebida."});
       } catch (error: any) {
@@ -388,21 +388,21 @@ export default function ApiPage() {
             <div className="space-y-4 pt-4">
                 <h3 className="font-semibold">Teste de Endpoint de Logística</h3>
                  <p className="text-sm text-muted-foreground">
-                   Use este campo para buscar os detalhes de um objeto de logística específico pelo ID.
+                   Use este campo para buscar os detalhes de rastreio de um pedido de venda a partir do seu ID.
                 </p>
                 <div className="flex items-end gap-2">
                     <div className="flex-1 space-y-2">
-                        <Label htmlFor="logistics-object-id">ID do Objeto de Logística</Label>
+                        <Label htmlFor="logistics-order-id">ID do Pedido de Venda</Label>
                         <Input
-                            id="logistics-object-id"
+                            id="logistics-order-id"
                             type="text"
-                            placeholder="Insira o ID do objeto"
-                            value={logisticsObjectId}
-                            onChange={(e) => setLogisticsObjectId(e.target.value)}
+                            placeholder="Insira o ID do pedido de venda"
+                            value={logisticsOrderId}
+                            onChange={(e) => setLogisticsOrderId(e.target.value)}
                             disabled={isFetchingLogistics}
                         />
                     </div>
-                    <Button onClick={handleFetchLogistics} disabled={isFetchingLogistics || !logisticsObjectId}>
+                    <Button onClick={handleFetchLogistics} disabled={isFetchingLogistics || !logisticsOrderId}>
                         {isFetchingLogistics ? (
                           <>
                             <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -411,7 +411,7 @@ export default function ApiPage() {
                         ) : (
                           <>
                            <Truck className="mr-2 h-4 w-4" />
-                            Buscar Logística
+                            Buscar Rastreio
                           </>
                         )}
                     </Button>
@@ -578,5 +578,3 @@ export default function ApiPage() {
     </DashboardLayout>
   );
 }
-
-    
