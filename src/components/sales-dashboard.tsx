@@ -256,8 +256,8 @@ export default function SalesDashboard() {
         />
       </div>
       
-      <div className="grid grid-cols-1 lg:grid-cols-7 gap-4">
-        <Card className="lg:col-span-5">
+      <div className="grid grid-cols-1 gap-4">
+        <Card>
             <CardHeader>
               <CardTitle>Ranking de Produtos</CardTitle>
               <CardDescription>Os 10 produtos que mais geraram receita no período.</CardDescription>
@@ -304,18 +304,6 @@ export default function SalesDashboard() {
                     <p className="text-muted-foreground text-sm">Tente selecionar outro período ou <a href="/api" className="text-primary underline">importe seus pedidos</a>.</p>
                 </div>
             )}
-            </CardContent>
-        </Card>
-        <Card className="lg:col-span-2">
-            <CardHeader>
-                <CardTitle>Importar e Exportar</CardTitle>
-                <CardDescription>
-                Gerencie seus dados de vendas.
-                </CardDescription>
-            </CardHeader>
-            <CardContent className="flex flex-col gap-4">
-                <Button disabled className="w-full"><ArrowUpFromLine className="mr-2 h-4 w-4" />Importar CSV</Button>
-                <Button disabled variant="secondary" className="w-full"><ArrowDownToLine className="mr-2 h-4 w-4" />Exportar Excel</Button>
             </CardContent>
         </Card>
       </div>
