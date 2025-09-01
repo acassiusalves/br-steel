@@ -8,17 +8,89 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-
-const mockSales = [
-  { id: 'PED-001', date: '25/07/2024', customer: 'João da Silva', marketplace: 'Mercado Livre', total: 'R$ 150,00', status: 'Enviado' },
-  { id: 'PED-002', date: '25/07/2024', customer: 'Maria Oliveira', marketplace: 'Amazon', total: 'R$ 89,90', status: 'Processando' },
-  { id: 'PED-003', date: '24/07/2024', customer: 'Carlos Pereira', marketplace: 'Magazine Luiza', total: 'R$ 299,99', status: 'Entregue' },
-  { id: 'PED-004', date: '24/07/2024', customer: 'Ana Costa', marketplace: 'Mercado Livre', total: 'R$ 45,50', status: 'Cancelado' },
-  { id: 'PED-005', date: '23/07/2024', customer: 'Pedro Martins', marketplace: 'Amazon', total: 'R$ 1.200,00', status: 'Entregue' },
-];
+import { collection, getDocs, query, orderBy } from 'firebase/firestore';
+import { db } from '@/lib/firebase';
+import { Badge } from '@/components/ui/badge';
 
 
-export default function VendasPage() {
+// Tipagem para os dados do pedido que vêm do Firestore
+interface SaleOrder {
+  id: string;
+  data: string; // ex: "2024-07-26"
+  cliente: {
+    nome: string;
+  };
+  loja?: {
+      nome: string;
+  };
+  situacao: {
+    id: number;
+    valor: number;
+    nome: string;
+  };
+  total: number;
+}
+
+
+// Função para buscar os pedidos do Firestore
+async function getSalesFromFirestore(): Promise<SaleOrder[]> {
+  try {
+    const ordersCollection = collection(db, 'salesOrders');
+    // Ordena os pedidos pela data, dos mais recentes para os mais antigos
+    const q = query(ordersCollection, orderBy('data', 'desc'));
+    const snapshot = await getDocs(q);
+
+    if (snapshot.empty) {
+      console.log("Nenhum pedido encontrado no Firestore.");
+      return [];
+    }
+
+    const sales: SaleOrder[] = [];
+    snapshot.forEach(doc => {
+      // Adiciona o ID do documento ao objeto do pedido
+      sales.push({ id: doc.id, ...doc.data() } as SaleOrder);
+    });
+    
+    return sales;
+  } catch (error) {
+    console.error("Erro ao buscar pedidos do Firestore:", error);
+    return []; // Retorna um array vazio em caso de erro
+  }
+}
+
+// Função para formatar a data
+const formatDate = (dateString: string) => {
+    try {
+        const [year, month, day] = dateString.split('-');
+        return `${day}/${month}/${year}`;
+    } catch {
+        return dateString; // Retorna a data original se o formato for inesperado
+    }
+}
+
+// Função para formatar a moeda
+const formatCurrency = (value: number) => {
+    return new Intl.NumberFormat('pt-BR', {
+        style: 'currency',
+        currency: 'BRL',
+    }).format(value);
+}
+
+// Badge de status
+const StatusBadge = ({ statusName }: { statusName: string }) => {
+    let variant: "default" | "secondary" | "destructive" | "outline" = "secondary";
+    if (statusName.toLowerCase().includes('entregue')) variant = "default";
+    if (statusName.toLowerCase().includes('cancelado')) variant = "destructive";
+    if (statusName.toLowerCase().includes('enviado')) variant = "outline";
+
+
+    return <Badge variant={variant}>{statusName}</Badge>
+}
+
+
+export default async function VendasPage() {
+  const sales = await getSalesFromFirestore();
+
   return (
     <DashboardLayout>
       <div className="flex-1 space-y-8 p-4 pt-6 md:p-8">
@@ -32,9 +104,9 @@ export default function VendasPage() {
         </div>
         <Card>
           <CardHeader>
-            <CardTitle>Últimos Pedidos</CardTitle>
+            <CardTitle>Últimos Pedidos Importados</CardTitle>
             <CardDescription>
-              Uma lista dos seus pedidos de venda mais recentes.
+              Uma lista dos seus pedidos de venda mais recentes sincronizados do Bling.
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -50,16 +122,26 @@ export default function VendasPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {mockSales.map((sale) => (
-                    <TableRow key={sale.id}>
-                        <TableCell className="font-medium">{sale.id}</TableCell>
-                        <TableCell>{sale.date}</TableCell>
-                        <TableCell>{sale.customer}</TableCell>
-                        <TableCell>{sale.marketplace}</TableCell>
-                        <TableCell>{sale.status}</TableCell>
-                        <TableCell className="text-right">{sale.total}</TableCell>
+                {sales.length > 0 ? (
+                    sales.map((sale) => (
+                        <TableRow key={sale.id}>
+                            <TableCell className="font-medium">{sale.id}</TableCell>
+                            <TableCell>{formatDate(sale.data)}</TableCell>
+                            <TableCell>{sale.cliente?.nome || 'N/A'}</TableCell>
+                            <TableCell>{sale.loja?.nome || 'N/A'}</TableCell>
+                            <TableCell>
+                                <StatusBadge statusName={sale.situacao?.nome || 'Desconhecido'} />
+                            </TableCell>
+                            <TableCell className="text-right">{formatCurrency(sale.total || 0)}</TableCell>
+                        </TableRow>
+                    ))
+                ) : (
+                    <TableRow>
+                        <TableCell colSpan={6} className="text-center h-24">
+                           Nenhum pedido encontrado. <a href="/api" className="text-primary underline">Importe seus pedidos aqui.</a>
+                        </TableCell>
                     </TableRow>
-                ))}
+                )}
               </TableBody>
             </Table>
           </CardContent>
