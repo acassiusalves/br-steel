@@ -1,4 +1,7 @@
 
+'use client';
+
+import * as React from 'react';
 import DashboardLayout from '@/components/dashboard-layout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import {
@@ -12,45 +15,14 @@ import {
 import { collection, getDocs, query, orderBy } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { Badge } from '@/components/ui/badge';
-
-
-// Tipagem expandida para incluir os detalhes do pedido
-interface SaleOrder {
-  id: number;
-  numero: number;
-  numeroLoja: string;
-  data: string;
-  dataSaida: string;
-  contato: {
-    nome: string;
-    numeroDocumento?: string;
-  };
-  vendedor?: {
-    nome: string;
-  };
-  loja?: {
-      nome: string;
-  };
-  situacao: {
-    id: number;
-    valor: number;
-    nome: string;
-  };
-  itens: {
-    descricao: string;
-    quantidade: number;
-    valor: number;
-  }[];
-  totalProdutos: number;
-  total: number;
-}
+import SaleOrderDetailModal from '@/components/sale-order-detail-modal';
+import type { SaleOrder } from '@/types/sale-order';
 
 
 // Função para buscar os pedidos do Firestore
 async function getSalesFromFirestore(): Promise<SaleOrder[]> {
   try {
     const ordersCollection = collection(db, 'salesOrders');
-    // Ordena os pedidos pela data, dos mais recentes para os mais antigos
     const q = query(ordersCollection, orderBy('data', 'desc'));
     const snapshot = await getDocs(q);
 
@@ -61,14 +33,13 @@ async function getSalesFromFirestore(): Promise<SaleOrder[]> {
 
     const sales: SaleOrder[] = [];
     snapshot.forEach(doc => {
-      // O doc.data() contém o objeto completo do pedido do Bling
       sales.push(doc.data() as SaleOrder);
     });
     
     return sales;
   } catch (error) {
     console.error("Erro ao buscar pedidos do Firestore:", error);
-    return []; // Retorna um array vazio em caso de erro
+    return [];
   }
 }
 
@@ -76,11 +47,10 @@ async function getSalesFromFirestore(): Promise<SaleOrder[]> {
 const formatDate = (dateString: string) => {
     if (!dateString || dateString.startsWith('0000')) return 'N/A';
     try {
-        // A data vem como 'YYYY-MM-DD'
-        const date = new Date(dateString + 'T00:00:00'); // Adiciona T00:00:00 para evitar problemas de fuso
+        const date = new Date(dateString + 'T00:00:00');
         return new Intl.DateTimeFormat('pt-BR').format(date);
     } catch {
-        return dateString; // Retorna a data original se o formato for inesperado
+        return dateString;
     }
 }
 
@@ -103,13 +73,31 @@ const StatusBadge = ({ statusName }: { statusName: string }) => {
     if (lowerStatus.includes('enviado') || lowerStatus.includes('em trânsito')) variant = "outline";
     if (lowerStatus.includes('em aberto') || lowerStatus.includes('em andamento')) variant = "secondary";
 
-
     return <Badge variant={variant} className="whitespace-nowrap">{statusName}</Badge>
 }
 
+export default function VendasPage() {
+  const [sales, setSales] = React.useState<SaleOrder[]>([]);
+  const [isLoading, setIsLoading] = React.useState(true);
+  const [selectedOrder, setSelectedOrder] = React.useState<SaleOrder | null>(null);
 
-export default async function VendasPage() {
-  const sales = await getSalesFromFirestore();
+  React.useEffect(() => {
+    async function fetchData() {
+      setIsLoading(true);
+      const data = await getSalesFromFirestore();
+      setSales(data);
+      setIsLoading(false);
+    }
+    fetchData();
+  }, []);
+
+  const handleRowClick = (sale: SaleOrder) => {
+    setSelectedOrder(sale);
+  };
+
+  const handleModalClose = () => {
+    setSelectedOrder(null);
+  };
 
   return (
     <DashboardLayout>
@@ -126,7 +114,7 @@ export default async function VendasPage() {
           <CardHeader>
             <CardTitle>Últimos Pedidos Importados</CardTitle>
             <CardDescription>
-              Uma lista detalhada dos seus pedidos de venda sincronizados do Bling.
+              Uma lista detalhada dos seus pedidos de venda. Clique em um pedido para ver todos os detalhes.
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -147,9 +135,15 @@ export default async function VendasPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {sales.length > 0 ? (
+                  {isLoading ? (
+                     <TableRow>
+                        <TableCell colSpan={10} className="text-center h-24">
+                           Carregando pedidos...
+                        </TableCell>
+                    </TableRow>
+                  ) : sales.length > 0 ? (
                       sales.map((sale) => (
-                          <TableRow key={sale.id}>
+                          <TableRow key={sale.id} onClick={() => handleRowClick(sale)} className="cursor-pointer">
                               <TableCell className="font-medium">{sale.id}</TableCell>
                               <TableCell>{sale.numero || 'N/A'}</TableCell>
                               <TableCell>{sale.numeroLoja || 'N/A'}</TableCell>
@@ -158,9 +152,9 @@ export default async function VendasPage() {
                               <TableCell>{sale.loja?.nome || 'N/A'}</TableCell>
                               <TableCell>
                                 {sale.itens && sale.itens.length > 0 ? (
-                                  <ul className="list-disc list-inside">
-                                    {sale.itens.map(item => (
-                                      <li key={item.produto.id} title={item.descricao}>
+                                  <ul className="list-disc list-inside text-xs">
+                                    {sale.itens.map((item, index) => (
+                                      <li key={item.produto?.id || index} title={item.descricao}>
                                         {item.quantidade}x {item.descricao.substring(0, 25)}{item.descricao.length > 25 ? '...' : ''}
                                       </li>
                                     ))}
@@ -187,6 +181,13 @@ export default async function VendasPage() {
           </CardContent>
         </Card>
       </div>
+      {selectedOrder && (
+        <SaleOrderDetailModal 
+          order={selectedOrder} 
+          isOpen={!!selectedOrder}
+          onClose={handleModalClose}
+        />
+      )}
     </DashboardLayout>
   );
 }
