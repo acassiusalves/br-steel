@@ -3,7 +3,7 @@
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import { format } from 'date-fns';
-import { collection, getDocs } from 'firebase/firestore';
+import { collection, getDocs, doc, writeBatch, query, getDocsFromCache } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 
 import {
@@ -221,4 +221,24 @@ export async function countImportedOrders(): Promise<number> {
         console.error("Failed to count imported orders:", error);
         return 0; // Return 0 if there's an error
     }
+}
+
+export async function getImportedOrderIds(): Promise<Set<string>> {
+  try {
+    const ordersCollection = collection(db, 'salesOrders');
+    // For performance, we only need the document IDs, not the full data.
+    const q = query(ordersCollection);
+    const snapshot = await getDocs(q);
+    const ids = new Set<string>();
+    snapshot.forEach(doc => {
+      // We only add IDs of orders that have been enriched (have 'itens').
+      if (doc.data().itens) {
+        ids.add(doc.id);
+      }
+    });
+    return ids;
+  } catch (error) {
+    console.error("Failed to get imported order IDs:", error);
+    return new Set();
+  }
 }

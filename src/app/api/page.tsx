@@ -14,7 +14,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
-import { getBlingCredentials, saveBlingCredentials, getBlingSalesOrders, countImportedOrders, getBlingOrderDetails } from '@/app/actions';
+import { getBlingCredentials, saveBlingCredentials, getBlingSalesOrders, countImportedOrders, getBlingOrderDetails, getImportedOrderIds } from '@/app/actions';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Calendar } from '@/components/ui/calendar';
 import { cn } from '@/lib/utils';
@@ -185,8 +185,12 @@ export default function ApiPage() {
       const responseData = await getBlingSalesOrders({ from: date?.from, to: date?.to });
       setApiResponse(responseData);
 
-      // Filtra pedidos que ainda não têm detalhes (verificando a ausência do campo 'itens')
-      const ordersToEnrich = (responseData?.data || []).filter((order: any) => !order.itens);
+      // Busca os IDs dos pedidos já enriquecidos do Firestore
+      const enrichedOrderIds = await getImportedOrderIds();
+
+      // Filtra pedidos que ainda não foram enriquecidos
+      const ordersToEnrich = (responseData?.data || []).filter((order: any) => !enrichedOrderIds.has(String(order.id)));
+      
       const totalOrdersToEnrich = ordersToEnrich.length;
       setImportStatus({ current: 0, total: totalOrdersToEnrich });
 
