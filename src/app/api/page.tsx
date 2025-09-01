@@ -196,46 +196,42 @@ export default function ApiPage() {
     setImportStatus({ current: 0, total: 0 });
 
     try {
+      // 1. Busca a lista de pedidos (sem detalhes)
       const responseData = await getBlingSalesOrders({ from: date?.from, to: date?.to });
       setApiResponse(responseData);
 
-      // Busca os IDs dos pedidos já enriquecidos do Firestore
-      const enrichedOrderIds = await getImportedOrderIds();
-
-      // Filtra pedidos que ainda não foram enriquecidos
-      const ordersToEnrich = (responseData?.data || []).filter((order: any) => !enrichedOrderIds.has(String(order.id)));
-      
+      const ordersToEnrich = responseData?.data || [];
       const totalOrdersToEnrich = ordersToEnrich.length;
       setImportStatus({ current: 0, total: totalOrdersToEnrich });
 
-      if (totalOrdersToEnrich > 0) {
-          toast({
-              title: "Enriquecendo Pedidos...",
-              description: `Buscando detalhes para ${totalOrdersToEnrich} novo(s) pedido(s). Isso pode levar um momento.`,
-          });
+      if (totalOrdersToEnrich === 0) {
+        toast({
+          title: "Nenhum Pedido Encontrado",
+          description: "Não há novos pedidos no período selecionado para importar.",
+        });
+        setIsImporting(false);
+        return;
+      }
+      
+      // 2. Itera sobre cada pedido para buscar os detalhes completos e salvar
+      toast({
+          title: "Importando Pedidos...",
+          description: `Buscando detalhes completos para ${totalOrdersToEnrich} pedido(s). Isso pode levar um momento.`,
+      });
 
-          for (let i = 0; i < totalOrdersToEnrich; i++) {
-              const order = ordersToEnrich[i];
-              try {
-                  await getBlingOrderDetails(String(order.id));
-                  console.log(`Detalhes do pedido ${order.id} salvos com sucesso.`);
-              } catch (detailError: any) {
-                  console.error(`Falha ao buscar detalhes para o pedido ${order.id}:`, detailError.message);
-                  // Opcional: notificar sobre falha em pedido específico
-              }
-              const progress = ((i + 1) / totalOrdersToEnrich) * 100;
-              setImportProgress(progress);
-              setImportStatus(prev => ({ ...prev, current: i + 1 }));
+      for (let i = 0; i < totalOrdersToEnrich; i++) {
+          const order = ordersToEnrich[i];
+          try {
+              // getBlingOrderDetails já busca e salva o pedido completo
+              await getBlingOrderDetails(String(order.id));
+              console.log(`Detalhes do pedido ${order.id} importados e salvos com sucesso.`);
+          } catch (detailError: any) {
+              console.error(`Falha ao buscar/salvar detalhes para o pedido ${order.id}:`, detailError.message);
+              // Opcional: notificar sobre falha em pedido específico
           }
-           toast({
-              title: "Enriquecimento Concluído!",
-              description: `Os detalhes de ${totalOrdersToEnrich} pedido(s) foram salvos.`,
-          });
-      } else {
-           toast({
-              title: "Nenhuma Atualização Necessária",
-              description: "Todos os pedidos importados já possuem detalhes.",
-          });
+          const progress = ((i + 1) / totalOrdersToEnrich) * 100;
+          setImportProgress(progress);
+          setImportStatus(prev => ({ ...prev, current: i + 1 }));
       }
      
       const totalCount = await countImportedOrders();
@@ -243,9 +239,8 @@ export default function ApiPage() {
       
       toast({
         title: "Sincronização Concluída!",
-        description: `Seus pedidos foram importados/atualizados. Total no banco de dados: ${totalCount}`,
+        description: `${totalOrdersToEnrich} pedido(s) foram processados. Total no banco de dados: ${totalCount}`,
       });
-
 
     } catch (error: any) {
       setApiResponse({ error: "Falha na requisição", message: error.message });
@@ -420,7 +415,7 @@ export default function ApiPage() {
                             <Progress value={importProgress} />
                             <p className="text-sm text-muted-foreground text-center">
                               {importStatus.total > 0
-                                ? `Enriquecendo ${importStatus.current} de ${importStatus.total} pedidos...`
+                                ? `Importando ${importStatus.current} de ${importStatus.total} pedidos...`
                                 : 'Buscando lista de pedidos...'}
                             </p>
                           </div>

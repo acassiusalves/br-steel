@@ -201,6 +201,17 @@ export default function VendasPage() {
     if (!items || items.length === 0) return 0;
     return items.reduce((total, item) => total + item.quantidade, 0);
   }
+  
+  const getMarketplaceName = (sale: SaleOrder): string => {
+    const rastreio = String(sale.transporte?.volumes?.[0]?.codigoRastreamento || '');
+    if (rastreio.startsWith('MEL')) {
+        return 'Mercado Livre';
+    }
+    if (sale.intermediador?.nomeUsuario) {
+        return `Marketplace (${sale.intermediador.nomeUsuario})`;
+    }
+    return sale.loja?.nome || 'N/A';
+  }
 
   return (
     <DashboardLayout>
@@ -324,7 +335,7 @@ export default function VendasPage() {
                               <TableCell>{sale.numeroLoja || 'N/A'}</TableCell>
                               <TableCell className="whitespace-nowrap">{formatDate(sale.data)}</TableCell>
                               <TableCell>{sale.contato?.nome || 'N/A'}</TableCell>
-                              <TableCell>{sale.loja?.nome || 'N/A'}</TableCell>
+                              <TableCell>{getMarketplaceName(sale)}</TableCell>
                                <TableCell className="text-center">{getTotalQuantity(sale.itens)}</TableCell>
                               <TableCell>
                                 {sale.itens && sale.itens.length > 0 ? (
