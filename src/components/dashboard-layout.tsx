@@ -4,8 +4,6 @@ import type { ReactNode } from "react";
 import Link from "next/link";
 import { usePathname } from 'next/navigation';
 import {
-  BrainCircuit,
-  FileText,
   LayoutDashboard,
   Settings,
   Code,
@@ -32,12 +30,12 @@ import {
   Sidebar,
   SidebarHeader,
   SidebarMenu,
-  SidebarMenuButton,
   SidebarMenuItem,
   SidebarInset,
   SidebarProvider,
   SidebarFooter,
   SidebarTrigger,
+  SidebarMenuButton,
 } from "@/components/ui/sidebar";
 
 const Logo = () => (
@@ -90,22 +88,6 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
               <Link href="/vendas">
                   <ShoppingCart />
                   <span>Vendas</span>
-              </Link>
-            </Button>
-          </SidebarMenuItem>
-          <SidebarMenuItem>
-            <Button asChild variant="ghost" className="w-full justify-start">
-              <Link href="/#analise">
-                <BrainCircuit />
-                <span>Análise Preditiva</span>
-              </Link>
-            </Button>
-          </SidebarMenuItem>
-          <SidebarMenuItem>
-            <Button asChild variant="ghost" className="w-full justify-start">
-              <Link href="/#relatorios">
-                <FileText />
-                <span>Relatórios</span>
               </Link>
             </Button>
           </SidebarMenuItem>
