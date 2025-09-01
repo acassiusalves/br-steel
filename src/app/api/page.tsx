@@ -1,3 +1,4 @@
+
 "use client";
 
 import * as React from 'react';
@@ -174,7 +175,9 @@ export default function ApiPage() {
     setIsImporting(true);
     setApiResponse(null);
     try {
-      await getBlingSalesOrders({ from: date?.from, to: date?.to });
+      const responseData = await getBlingSalesOrders({ from: date?.from, to: date?.to });
+      setApiResponse(responseData);
+
       const totalCount = await countImportedOrders();
       setImportedCount(totalCount);
       
@@ -422,6 +425,22 @@ export default function ApiPage() {
                 {renderConnectionContent()}
               </CardContent>
             </Card>
+
+            {apiResponse && (
+              <Card>
+                  <CardHeader>
+                      <CardTitle>Resposta da API do Bling</CardTitle>
+                      <CardDescription>
+                          Estes são os dados brutos retornados pela última requisição à API do Bling.
+                      </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                      <pre className="p-4 bg-muted rounded-md text-sm overflow-auto max-h-[500px]">
+                          <code>{JSON.stringify(apiResponse, null, 2)}</code>
+                      </pre>
+                  </CardContent>
+              </Card>
+            )}
           </TabsContent>
         </Tabs>
       </div>
