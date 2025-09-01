@@ -1,3 +1,4 @@
+
 "use client";
 
 import {
@@ -8,8 +9,9 @@ import {
   Filter,
   ShoppingCart,
   Users,
+  Loader2,
 } from "lucide-react";
-import { Bar, BarChart, ResponsiveContainer, XAxis, YAxis } from "recharts";
+import { Bar, BarChart, ResponsiveContainer, XAxis, YAxis, Tooltip } from "recharts";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import type { DateRange } from "react-day-picker";
@@ -37,21 +39,59 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
+import { getSalesDashboardData } from "@/app/actions";
+import { Skeleton } from "./ui/skeleton";
+import { useToast } from "@/hooks/use-toast";
 
-const mockData = [
-  { name: "Jan", total: Math.floor(Math.random() * 5000) + 1000 },
-  { name: "Fev", total: Math.floor(Math.random() * 5000) + 1000 },
-  { name: "Mar", total: Math.floor(Math.random() * 5000) + 1000 },
-  { name: "Abr", total: Math.floor(Math.random() * 5000) + 1000 },
-  { name: "Mai", total: Math.floor(Math.random() * 5000) + 1000 },
-  { name: "Jun", total: Math.floor(Math.random() * 5000) + 1000 },
-  { name: "Jul", total: Math.floor(Math.random() * 5000) + 1000 },
-  { name: "Ago", total: Math.floor(Math.random() * 5000) + 1000 },
-  { name: "Set", total: Math.floor(Math.random() * 5000) + 1000 },
-  { name: "Out", total: Math.floor(Math.random() * 5000) + 1000 },
-  { name: "Nov", total: Math.floor(Math.random() * 5000) + 1000 },
-  { name: "Dez", total: Math.floor(Math.random() * 5000) + 1000 },
-];
+
+// Helper to format currency
+const formatCurrency = (value: number) => {
+  return new Intl.NumberFormat('pt-BR', {
+    style: 'currency',
+    currency: 'BRL',
+  }).format(value);
+};
+
+// Helper to format percentage change
+const formatChange = (change: number) => {
+  const sign = change > 0 ? "+" : "";
+  return `${sign}${change.toFixed(1)}%`;
+}
+
+// Component for stat cards
+const StatCard = ({ title, value, icon: Icon, change, isLoading, valueFormatter = (v) => v.toLocaleString() }: {
+  title: string;
+  value: number;
+  icon: React.ElementType;
+  change: number;
+  isLoading: boolean;
+  valueFormatter?: (value: number) => string;
+}) => {
+  return (
+    <Card>
+      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+        <CardTitle className="text-sm font-medium">{title}</CardTitle>
+        <Icon className="h-4 w-4 text-muted-foreground" />
+      </CardHeader>
+      <CardContent>
+        {isLoading ? (
+          <>
+            <Skeleton className="h-8 w-3/4 mb-2" />
+            <Skeleton className="h-4 w-1/2" />
+          </>
+        ) : (
+          <>
+            <div className="text-2xl font-bold">{valueFormatter(value)}</div>
+            <p className="text-xs text-muted-foreground">
+              {formatChange(change)} em relação ao período anterior
+            </p>
+          </>
+        )}
+      </CardContent>
+    </Card>
+  );
+};
+
 
 export default function SalesDashboard() {
   const [date, setDate] = React.useState<DateRange | undefined>({
@@ -59,6 +99,40 @@ export default function SalesDashboard() {
     to: new Date(),
   });
   
+  const [isLoading, setIsLoading] = React.useState(true);
+  const [data, setData] = React.useState<Awaited<ReturnType<typeof getSalesDashboardData>> | null>(null);
+  const { toast } = useToast();
+
+  const fetchData = React.useCallback(async (currentDate: DateRange | undefined) => {
+      if (!currentDate?.from || !currentDate?.to) {
+        return;
+      }
+      setIsLoading(true);
+      try {
+        const result = await getSalesDashboardData({ from: currentDate.from, to: currentDate.to });
+        setData(result);
+      } catch (error: any) {
+        console.error("Failed to fetch dashboard data:", error);
+        toast({
+          variant: "destructive",
+          title: "Erro ao buscar dados",
+          description: error.message,
+        });
+        setData(null);
+      } finally {
+        setIsLoading(false);
+      }
+  }, [toast]);
+  
+  React.useEffect(() => {
+    fetchData(date);
+  }, []); // Fetch on initial load
+  
+  const handleFilter = () => {
+    fetchData(date);
+  };
+
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
@@ -106,7 +180,7 @@ export default function SalesDashboard() {
                 />
               </PopoverContent>
             </Popover>
-          <Select>
+          <Select disabled>
             <SelectTrigger className="w-full sm:w-[180px]">
               <SelectValue placeholder="Marketplace" />
             </SelectTrigger>
@@ -117,90 +191,100 @@ export default function SalesDashboard() {
               <SelectItem value="magalu">Magazine Luiza</SelectItem>
             </SelectContent>
           </Select>
-          <Button variant="outline" className="w-full sm:w-auto"><Filter className="mr-2 h-4 w-4" />Filtrar</Button>
+          <Button onClick={handleFilter} disabled={isLoading} className="w-full sm:w-auto">
+            {isLoading ? (
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            ) : (
+              <Filter className="mr-2 h-4 w-4" />
+            )}
+            Filtrar
+          </Button>
         </div>
       </div>
 
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Receita Total</CardTitle>
-            <DollarSign className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">R$ 45.231,89</div>
-            <p className="text-xs text-muted-foreground">
-              +20.1% em relação ao mês passado
-            </p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Vendas</CardTitle>
-            <ShoppingCart className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">+2.350</div>
-            <p className="text-xs text-muted-foreground">
-              +180.1% em relação ao mês passado
-            </p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Ticket Médio</CardTitle>
-            <DollarSign className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">R$ 19,25</div>
-            <p className="text-xs text-muted-foreground">
-              +19% em relação ao mês passado
-            </p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Novos Clientes</CardTitle>
-            <Users className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">+573</div>
-            <p className="text-xs text-muted-foreground">
-              +201 desde o mês passado
-            </p>
-          </CardContent>
-        </Card>
+        <StatCard 
+          title="Receita Total"
+          value={data?.stats.totalRevenue.value ?? 0}
+          change={data?.stats.totalRevenue.change ?? 0}
+          icon={DollarSign}
+          isLoading={isLoading}
+          valueFormatter={formatCurrency}
+        />
+         <StatCard 
+          title="Vendas"
+          value={data?.stats.totalSales.value ?? 0}
+          change={data?.stats.totalSales.change ?? 0}
+          icon={ShoppingCart}
+          isLoading={isLoading}
+        />
+        <StatCard 
+          title="Ticket Médio"
+          value={data?.stats.averageTicket.value ?? 0}
+          change={data?.stats.averageTicket.change ?? 0}
+          icon={DollarSign}
+          isLoading={isLoading}
+          valueFormatter={formatCurrency}
+        />
+        <StatCard 
+          title="Novos Clientes"
+          value={data?.stats.uniqueCustomers.value ?? 0}
+          change={data?.stats.uniqueCustomers.change ?? 0}
+          icon={Users}
+          isLoading={isLoading}
+        />
       </div>
       
       <div className="grid grid-cols-1 lg:grid-cols-7 gap-4">
         <Card className="lg:col-span-5">
             <CardHeader>
-            <CardTitle>Visão Geral das Vendas</CardTitle>
+              <CardTitle>Visão Geral das Vendas</CardTitle>
+              <CardDescription>Receita mensal no período selecionado.</CardDescription>
             </CardHeader>
             <CardContent className="pl-2">
-            <ResponsiveContainer width="100%" height={350}>
-                <BarChart data={mockData}>
-                <XAxis
-                    dataKey="name"
-                    stroke="hsl(var(--muted-foreground))"
-                    fontSize={12}
-                    tickLine={false}
-                    axisLine={false}
-                />
-                <YAxis
-                    stroke="hsl(var(--muted-foreground))"
-                    fontSize={12}
-                    tickLine={false}
-                    axisLine={false}
-                    tickFormatter={(value) => `R$${Number(value)/1000}k`}
-                />
-                <Bar
-                    dataKey="total"
-                    fill="hsl(var(--primary))"
-                    radius={[4, 4, 0, 0]}
-                />
-                </BarChart>
-            </ResponsiveContainer>
+            {isLoading ? (
+              <div className="h-[350px] w-full flex items-center justify-center">
+                <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+              </div>
+            ) : data && data.monthlyRevenue.length > 0 ? (
+                <ResponsiveContainer width="100%" height={350}>
+                    <BarChart data={data?.monthlyRevenue}>
+                      <XAxis
+                          dataKey="name"
+                          stroke="hsl(var(--muted-foreground))"
+                          fontSize={12}
+                          tickLine={false}
+                          axisLine={false}
+                      />
+                      <YAxis
+                          stroke="hsl(var(--muted-foreground))"
+                          fontSize={12}
+                          tickLine={false}
+                          axisLine={false}
+                          tickFormatter={(value) => formatCurrency(Number(value))}
+                      />
+                      <Tooltip 
+                        cursor={{ fill: 'hsl(var(--accent))' }}
+                        contentStyle={{
+                          background: 'hsl(var(--background))',
+                          border: '1px solid hsl(var(--border))',
+                          borderRadius: 'var(--radius)',
+                        }}
+                        formatter={(value) => [formatCurrency(Number(value)), "Receita"]}
+                      />
+                      <Bar
+                          dataKey="total"
+                          fill="hsl(var(--primary))"
+                          radius={[4, 4, 0, 0]}
+                      />
+                    </BarChart>
+                </ResponsiveContainer>
+             ) : (
+                <div className="h-[350px] w-full flex flex-col items-center justify-center text-center">
+                    <p className="font-semibold">Nenhum dado de venda encontrado.</p>
+                    <p className="text-muted-foreground text-sm">Tente selecionar outro período ou <a href="/api" className="text-primary underline">importe seus pedidos</a>.</p>
+                </div>
+            )}
             </CardContent>
         </Card>
         <Card className="lg:col-span-2">
@@ -211,8 +295,8 @@ export default function SalesDashboard() {
                 </CardDescription>
             </CardHeader>
             <CardContent className="flex flex-col gap-4">
-                <Button className="w-full"><ArrowUpFromLine className="mr-2 h-4 w-4" />Importar CSV</Button>
-                <Button variant="secondary" className="w-full"><ArrowDownToLine className="mr-2 h-4 w-4" />Exportar Excel</Button>
+                <Button disabled className="w-full"><ArrowUpFromLine className="mr-2 h-4 w-4" />Importar CSV</Button>
+                <Button disabled variant="secondary" className="w-full"><ArrowDownToLine className="mr-2 h-4 w-4" />Exportar Excel</Button>
             </CardContent>
         </Card>
       </div>

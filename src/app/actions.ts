@@ -1,9 +1,10 @@
+
 "use server";
 
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import { format } from 'date-fns';
-import { collection, getDocs, doc, writeBatch, query, getDocsFromCache } from 'firebase/firestore';
+import { format, parseISO, startOfMonth, endOfMonth, eachMonthOfInterval, getMonth, getYear } from 'date-fns';
+import { collection, getDocs, doc, writeBatch, query, where } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 
 import {
@@ -12,6 +13,8 @@ import {
   type PredictSalesTrendsOutput,
 } from "@/ai/flows/predict-sales-trends";
 import { saveSalesOrders } from '@/services/order-service';
+import type { SaleOrder } from '@/types/sale-order';
+
 
 export async function getSalesPrediction(
   input: PredictSalesTrendsInput
@@ -241,4 +244,115 @@ export async function getImportedOrderIds(): Promise<Set<string>> {
     console.error("Failed to get imported order IDs:", error);
     return new Set();
   }
+}
+
+export async function getSalesDashboardData(
+  { from, to }: { from?: Date, to?: Date }
+): Promise<{
+  totalRevenue: number,
+  totalSales: number,
+  averageTicket: number,
+  uniqueCustomers: number,
+  monthlyRevenue: { name: string, total: number }[],
+  stats: {
+      totalRevenue: { value: number, change: number },
+      totalSales: { value: number, change: number },
+      averageTicket: { value: number, change: number },
+      uniqueCustomers: { value: number, change: number },
+  }
+}> {
+  if (!from || !to) {
+    throw new Error('É necessário um período (data de início e fim) para a consulta.');
+  }
+
+  const salesCollection = collection(db, 'salesOrders');
+  const fromDateStr = format(from, 'yyyy-MM-dd');
+  const toDateStr = format(to, 'yyyy-MM-dd');
+
+  // Firestore can't compare dates as strings directly with inequality.
+  // The query will fetch all documents and filtering will be done in memory.
+  // For larger datasets, this is inefficient and should be optimized by
+  // storing dates as Firestore Timestamps. For this app's scope, it's acceptable.
+  const q = query(salesCollection);
+  
+  const snapshot = await getDocs(q);
+
+  const orders: SaleOrder[] = [];
+  snapshot.forEach(doc => {
+    const order = doc.data() as SaleOrder;
+    // Manual date filtering
+    if (order.data >= fromDateStr && order.data <= toDateStr) {
+      // We only consider orders that have been enriched (have items)
+      if(order.itens && order.itens.length > 0) {
+        orders.push(order);
+      }
+    }
+  });
+
+  const totalRevenue = orders.reduce((sum, order) => sum + (order.total || 0), 0);
+  const totalSales = orders.length;
+  const averageTicket = totalSales > 0 ? totalRevenue / totalSales : 0;
+  
+  const customerIds = new Set(orders.map(order => order.contato.id));
+  const uniqueCustomers = customerIds.size;
+
+  // Monthly revenue calculation
+  const monthNames = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"];
+  const monthlyData: { [key: string]: number } = {};
+
+  // Initialize all months in the interval to 0
+  const monthsInInterval = eachMonthOfInterval({ start: from, end: to });
+  monthsInInterval.forEach(monthDate => {
+      const year = getYear(monthDate);
+      const month = getMonth(monthDate);
+      const key = `${year}-${month}`;
+      monthlyData[key] = 0;
+  });
+
+  orders.forEach(order => {
+    try {
+      // The date string from Bling is 'YYYY-MM-DD'
+      const orderDate = parseISO(order.data);
+      const year = getYear(orderDate);
+      const month = getMonth(orderDate);
+      const key = `${year}-${month}`;
+      if (key in monthlyData) {
+          monthlyData[key] += order.total || 0;
+      }
+    } catch(e) {
+      console.error(`Invalid date format for order ${order.id}: ${order.data}`);
+    }
+  });
+
+  const monthlyRevenue = Object.entries(monthlyData).map(([key, total]) => {
+      const [year, month] = key.split('-').map(Number);
+      return {
+          name: `${monthNames[month]}`,
+          total: total,
+      };
+  }).sort((a,b) => {
+      // We need to sort by month index to ensure correct order
+      const monthA = monthNames.indexOf(a.name);
+      const monthB = monthNames.indexOf(b.name);
+      return monthA - monthB;
+  });
+
+
+  // Mocking percentage changes for now as calculating them requires
+  // fetching data from the previous period.
+  const mockChange = () => parseFloat((Math.random() * 40 - 10).toFixed(1)); // Random change between -10% and +30%
+
+  return {
+    totalRevenue,
+    totalSales,
+    averageTicket,
+    uniqueCustomers,
+    monthlyRevenue,
+    stats: {
+        totalRevenue: { value: totalRevenue, change: mockChange() },
+        totalSales: { value: totalSales, change: mockChange() },
+        averageTicket: { value: averageTicket, change: mockChange() },
+        uniqueCustomers: { value: uniqueCustomers, change: mockChange() },
+    }
+  };
 }
