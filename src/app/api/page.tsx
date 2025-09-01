@@ -47,10 +47,7 @@ export default function ApiPage() {
   const [authUrl, setAuthUrl] = React.useState('');
   const [isImporting, setIsImporting] = React.useState(false);
   const [apiResponse, setApiResponse] = React.useState<any>(null);
-  const [date, setDate] = React.useState<DateRange | undefined>({
-    from: startOfMonth(new Date()),
-    to: endOfMonth(new Date()),
-  });
+  const [date, setDate] = React.useState<DateRange | undefined>(undefined);
   const [apiStatus, setApiStatus] = React.useState<ApiStatus>('unchecked');
   const [importedCount, setImportedCount] = React.useState(0);
   const [importStatus, setImportStatus] = React.useState({ current: 0, total: 0 });
@@ -90,6 +87,10 @@ export default function ApiPage() {
   React.useEffect(() => {
     if (typeof window !== 'undefined') {
         setCallbackUrl(`${window.location.origin}/api/callback/bling`);
+        setDate({
+            from: startOfMonth(new Date()),
+            to: endOfMonth(new Date()),
+        });
     }
     loadInitialData();
   }, [loadInitialData]);

@@ -94,10 +94,7 @@ const StatCard = ({ title, value, icon: Icon, change, isLoading, valueFormatter 
 
 
 export default function SalesDashboard() {
-  const [date, setDate] = React.useState<DateRange | undefined>({
-    from: new Date(new Date().getFullYear(), 0, 1),
-    to: new Date(),
-  });
+  const [date, setDate] = React.useState<DateRange | undefined>(undefined);
   
   const [isLoading, setIsLoading] = React.useState(true);
   const [data, setData] = React.useState<Awaited<ReturnType<typeof getSalesDashboardData>> | null>(null);
@@ -125,8 +122,13 @@ export default function SalesDashboard() {
   }, [toast]);
   
   React.useEffect(() => {
-    fetchData(date);
-  }, []); // Fetch on initial load
+    const initialDate = {
+        from: new Date(new Date().getFullYear(), 0, 1),
+        to: new Date(),
+    };
+    setDate(initialDate);
+    fetchData(initialDate);
+  }, [fetchData]); 
   
   const handleFilter = () => {
     fetchData(date);
