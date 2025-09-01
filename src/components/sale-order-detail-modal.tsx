@@ -40,7 +40,7 @@ const formatDate = (dateString: string | undefined) => {
 const DetailItem = ({ label, value }: { label: string, value: React.ReactNode }) => (
     <div className="flex flex-col">
         <p className="text-sm font-medium text-gray-500">{label}</p>
-        <p className="text-sm text-gray-900">{value || 'N/A'}</p>
+        <div className="text-sm text-gray-900">{value || 'N/A'}</div>
     </div>
 );
 
