@@ -198,7 +198,7 @@ export async function getBlingOrderDetails(orderId: string): Promise<any> {
     }
 }
 
-export async function getBlingProducts(limit: number = 5): Promise<any> {
+export async function getBlingProducts(limit: number = 100): Promise<any> {
     const envMap = await readEnvFile();
     const accessToken = envMap.get('BLING_ACCESS_TOKEN');
 
