@@ -42,6 +42,7 @@ import { cn } from "@/lib/utils";
 import { getSalesDashboardData } from "@/app/actions";
 import { Skeleton } from "./ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
+import { ScrollArea } from "./ui/scroll-area";
 
 
 // Helper to format currency
@@ -125,23 +126,38 @@ const PieChartTooltip = ({ active, payload }: TooltipProps<number, string>) => {
     return null;
 };
 
-const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#AF19FF', '#FF1919', '#19B2FF'];
+const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#AF19FF', '#FF1919', '#19B2FF', '#FF6666', '#66FF66', '#6666FF'];
 
-const CustomLegend = (props: LegendProps) => {
-    const { payload } = props;
-    if (!payload) return null;
+const stateMap: { [key: string]: string } = {
+  'AC': 'Acre', 'AL': 'Alagoas', 'AP': 'Amapá', 'AM': 'Amazonas',
+  'BA': 'Bahia', 'CE': 'Ceará', 'DF': 'Distrito Federal', 'ES': 'Espírito Santo',
+  'GO': 'Goiás', 'MA': 'Maranhão', 'MT': 'Mato Grosso', 'MS': 'Mato Grosso do Sul',
+  'MG': 'Minas Gerais', 'PA': 'Pará', 'PB': 'Paraíba', 'PR': 'Paraná',
+  'PE': 'Pernambuco', 'PI': 'Piauí', 'RJ': 'Rio de Janeiro', 'RN': 'Rio Grande do Norte',
+  'RS': 'Rio Grande do Sul', 'RO': 'Rondônia', 'RR': 'Roraima', 'SC': 'Santa Catarina',
+  'SP': 'São Paulo', 'SE': 'Sergipe', 'TO': 'Tocantins', 'N/A': 'Não Aplicável'
+};
 
+const CustomLegend = ({ payload, totalRevenue }: { payload: any[], totalRevenue: number }) => {
     return (
-        <ul className="flex flex-wrap justify-center gap-x-4 gap-y-1 text-xs text-muted-foreground mt-4">
-            {
-                payload.map((entry, index) => (
-                    <li key={`item-${index}`} className="flex items-center gap-2">
-                        <span className="w-2 h-2 rounded-full" style={{ backgroundColor: entry.color }} />
-                        <span>{entry.value}</span>
-                    </li>
-                ))
-            }
-        </ul>
+        <ScrollArea className="h-[350px] w-full lg:w-56">
+            <div className="space-y-3 pr-4">
+                {payload.map((entry, index) => {
+                    const percentage = totalRevenue > 0 ? (entry.revenue / totalRevenue) * 100 : 0;
+                    return (
+                        <div key={`item-${index}`} className="flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                                <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: COLORS[index % COLORS.length] }} />
+                                <span className="text-sm text-muted-foreground truncate" title={stateMap[entry.state] || entry.state}>
+                                    {stateMap[entry.state] || entry.state}
+                                </span>
+                            </div>
+                            <span className="font-medium text-sm">{percentage.toFixed(1)}%</span>
+                        </div>
+                    );
+                })}
+            </div>
+        </ScrollArea>
     )
 }
 
@@ -352,37 +368,39 @@ export default function SalesDashboard() {
                         <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
                     </div>
                 ) : data && data.salesByState.length > 0 ? (
-                    <ResponsiveContainer width="100%" height={350}>
-                        <PieChart>
-                            <Pie
-                                data={data.salesByState}
-                                cx="50%"
-                                cy="50%"
-                                labelLine={false}
-                                outerRadius={120}
-                                fill="#8884d8"
-                                dataKey="revenue"
-                                nameKey="state"
-                                label={({ cx, cy, midAngle, innerRadius, outerRadius, percent, index }) => {
-                                    const RADIAN = Math.PI / 180;
-                                    const radius = innerRadius + (outerRadius - innerRadius) * 0.5;
-                                    const x = cx + radius * Math.cos(-midAngle * RADIAN);
-                                    const y = cy + radius * Math.sin(-midAngle * RADIAN);
-                                    return (percent > 0.05) ? (
-                                        <text x={x} y={y} fill="white" textAnchor="middle" dominantBaseline="central">
-                                            {`${(percent * 100).toFixed(0)}%`}
-                                        </text>
-                                    ) : null;
-                                }}
-                            >
-                                {data.salesByState.map((entry, index) => (
-                                    <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                                ))}
-                            </Pie>
-                            <Tooltip content={<PieChartTooltip />} />
-                            <Legend content={<CustomLegend />} />
-                        </PieChart>
-                    </ResponsiveContainer>
+                    <div className="w-full h-[350px] flex items-center justify-between">
+                        <ResponsiveContainer width="50%" height="100%">
+                            <PieChart>
+                                <Pie
+                                    data={data.salesByState}
+                                    cx="50%"
+                                    cy="50%"
+                                    labelLine={false}
+                                    outerRadius={120}
+                                    fill="#8884d8"
+                                    dataKey="revenue"
+                                    nameKey="state"
+                                    label={({ cx, cy, midAngle, innerRadius, outerRadius, percent }) => {
+                                        const RADIAN = Math.PI / 180;
+                                        const radius = innerRadius + (outerRadius - innerRadius) * 0.5;
+                                        const x = cx + radius * Math.cos(-midAngle * RADIAN);
+                                        const y = cy + radius * Math.sin(-midAngle * RADIAN);
+                                        return (percent > 0.05) ? (
+                                            <text x={x} y={y} fill="white" textAnchor="middle" dominantBaseline="central" fontSize={12}>
+                                                {`${(percent * 100).toFixed(0)}%`}
+                                            </text>
+                                        ) : null;
+                                    }}
+                                >
+                                    {data.salesByState.map((entry, index) => (
+                                        <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                                    ))}
+                                </Pie>
+                                <Tooltip content={<PieChartTooltip />} />
+                            </PieChart>
+                        </ResponsiveContainer>
+                        <CustomLegend payload={data.salesByState} totalRevenue={data.totalRevenue} />
+                    </div>
                 ) : (
                     <div className="h-[350px] w-full flex flex-col items-center justify-center text-center">
                         <p className="font-semibold">Nenhum dado de venda encontrado.</p>
