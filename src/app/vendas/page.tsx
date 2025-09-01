@@ -13,9 +13,9 @@ import { db } from '@/lib/firebase';
 import { Badge } from '@/components/ui/badge';
 
 
-// Tipagem para os dados do pedido que vêm do Firestore
+// Tipagem para os dados do pedido que vêm do Bling (e salvos no Firestore)
 interface SaleOrder {
-  id: string;
+  id: number; // ID numérico do Bling
   data: string; // ex: "2024-07-26"
   cliente: {
     nome: string;
@@ -25,7 +25,7 @@ interface SaleOrder {
   };
   situacao: {
     id: number;
-    valor: number;
+    valor: number; // O campo valor existe no objeto situacao, mantendo-o
     nome: string;
   };
   total: number;
@@ -47,8 +47,8 @@ async function getSalesFromFirestore(): Promise<SaleOrder[]> {
 
     const sales: SaleOrder[] = [];
     snapshot.forEach(doc => {
-      // Adiciona o ID do documento ao objeto do pedido
-      sales.push({ id: doc.id, ...doc.data() } as SaleOrder);
+      // O doc.data() contém o objeto completo do pedido do Bling
+      sales.push(doc.data() as SaleOrder);
     });
     
     return sales;
