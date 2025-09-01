@@ -85,7 +85,7 @@ export default function ProducaoPage() {
     fetchData(date);
   };
   
-  const setDatePreset = (preset: 'today' | 'yesterday' | 'last7' | 'last30' | 'thisMonth' | 'lastMonth') => {
+  const setDatePreset = (preset: 'today' | 'yesterday' | 'last7' | 'last30' | 'thisMonth' | 'lastMonth' | 'last3Months') => {
       const today = new Date();
       switch (preset) {
           case 'today':
@@ -100,6 +100,9 @@ export default function ProducaoPage() {
               break;
           case 'last30':
               setDate({ from: subDays(today, 29), to: today });
+              break;
+          case 'last3Months':
+              setDate({ from: subDays(today, 89), to: today });
               break;
           case 'thisMonth':
               setDate({ from: startOfMonth(today), to: endOfMonth(today) });
@@ -155,6 +158,7 @@ export default function ProducaoPage() {
                         <Button variant="ghost" className="justify-start" onClick={() => setDatePreset('yesterday')}>Ontem</Button>
                         <Button variant="ghost" className="justify-start" onClick={() => setDatePreset('last7')}>Últimos 7 dias</Button>
                         <Button variant="ghost" className="justify-start" onClick={() => setDatePreset('last30')}>Últimos 30 dias</Button>
+                        <Button variant="ghost" className="justify-start" onClick={() => setDatePreset('last3Months')}>Últimos 3 meses</Button>
                         <Separator />
                         <Button variant="ghost" className="justify-start" onClick={() => setDatePreset('thisMonth')}>Este mês</Button>
                         <Button variant="ghost" className="justify-start" onClick={() => setDatePreset('lastMonth')}>Mês passado</Button>
