@@ -21,7 +21,7 @@ type BlingCredentials = {
 
 const envPath = path.resolve(process.cwd(), '.env');
 
-async function readEnvFile(): Promise<Map<string, string>> {
+export async function readEnvFile(): Promise<Map<string, string>> {
     try {
         const content = await fs.readFile(envPath, 'utf-8');
         const map = new Map<string, string>();
@@ -399,6 +399,7 @@ export async function getSalesDashboardData(
   averageTicket: number;
   uniqueCustomers: number;
   topProducts: { name: string, total: number, revenue: number }[];
+  salesByState: { state: string, revenue: number }[];
   stats: {
       totalRevenue: { value: number, change: number };
       totalSales: { value: number, change: number };
@@ -443,8 +444,10 @@ export async function getSalesDashboardData(
 
   // Product sales ranking calculation
   const productSales = new Map<string, { total: number, revenue: number }>();
+  const stateSales = new Map<string, number>();
 
   orders.forEach(order => {
+      // Aggregate product sales
       order.itens?.forEach(item => {
           const productName = item.descricao || 'Produto sem nome';
           const currentData = productSales.get(productName) || { total: 0, revenue: 0 };
@@ -452,12 +455,21 @@ export async function getSalesDashboardData(
           currentData.revenue += item.quantidade * item.valor;
           productSales.set(productName, currentData);
       });
+
+      // Aggregate sales by state (UF)
+      const state = order.transporte?.etiqueta?.uf || 'N/A';
+      const currentRevenue = stateSales.get(state) || 0;
+      stateSales.set(state, currentRevenue + (order.total || 0));
   });
 
   const topProducts = Array.from(productSales.entries())
       .map(([name, data]) => ({ name, total: data.total, revenue: data.revenue }))
       .sort((a, b) => b.revenue - a.revenue)
       .slice(0, 10);
+      
+  const salesByState = Array.from(stateSales.entries())
+      .map(([state, revenue]) => ({ state, revenue }))
+      .sort((a, b) => b.revenue - a.revenue);
   
 
   // Mocking percentage changes for now as calculating them requires
@@ -470,6 +482,7 @@ export async function getSalesDashboardData(
     averageTicket,
     uniqueCustomers,
     topProducts,
+    salesByState,
     stats: {
         totalRevenue: { value: totalRevenue, change: mockChange() },
         totalSales: { value: totalSales, change: mockChange() },

@@ -11,7 +11,7 @@ import {
   Users,
   Loader2,
 } from "lucide-react";
-import { Bar, BarChart, ResponsiveContainer, XAxis, YAxis, Tooltip, CartesianGrid, TooltipProps } from "recharts";
+import { Bar, BarChart, ResponsiveContainer, XAxis, YAxis, Tooltip, CartesianGrid, TooltipProps, PieChart, Pie, Cell, Legend, LegendProps } from "recharts";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import type { DateRange } from "react-day-picker";
@@ -109,6 +109,41 @@ const CustomTooltip = ({ active, payload, label }: TooltipProps<number, string>)
   }
   return null;
 };
+
+const PieChartTooltip = ({ active, payload }: TooltipProps<number, string>) => {
+    if (active && payload && payload.length) {
+        const data = payload[0];
+        return (
+            <div className="p-2 bg-background border rounded-md shadow-lg text-sm">
+                <p className="font-bold mb-1">{data.name}</p>
+                <p>
+                    <span className="font-medium">Faturamento:</span> {formatCurrency(data.value!)}
+                </p>
+            </div>
+        );
+    }
+    return null;
+};
+
+const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#AF19FF', '#FF1919', '#19B2FF'];
+
+const CustomLegend = (props: LegendProps) => {
+    const { payload } = props;
+    if (!payload) return null;
+
+    return (
+        <ul className="flex flex-wrap justify-center gap-x-4 gap-y-1 text-xs text-muted-foreground mt-4">
+            {
+                payload.map((entry, index) => (
+                    <li key={`item-${index}`} className="flex items-center gap-2">
+                        <span className="w-2 h-2 rounded-full" style={{ backgroundColor: entry.color }} />
+                        <span>{entry.value}</span>
+                    </li>
+                ))
+            }
+        </ul>
+    )
+}
 
 
 export default function SalesDashboard() {
@@ -256,8 +291,8 @@ export default function SalesDashboard() {
         />
       </div>
       
-      <div className="grid grid-cols-1 gap-4">
-        <Card>
+      <div className="grid grid-cols-1 lg:grid-cols-7 gap-4">
+        <Card className="lg:col-span-4">
             <CardHeader>
               <CardTitle>Ranking de Produtos</CardTitle>
               <CardDescription>Os 10 produtos que mais geraram receita no período.</CardDescription>
@@ -304,6 +339,56 @@ export default function SalesDashboard() {
                     <p className="text-muted-foreground text-sm">Tente selecionar outro período ou <a href="/api" className="text-primary underline">importe seus pedidos</a>.</p>
                 </div>
             )}
+            </CardContent>
+        </Card>
+        <Card className="lg:col-span-3">
+            <CardHeader>
+                <CardTitle>Vendas por Estado</CardTitle>
+                <CardDescription>Faturamento total por estado (UF) no período.</CardDescription>
+            </CardHeader>
+            <CardContent>
+                {isLoading ? (
+                    <div className="h-[350px] w-full flex items-center justify-center">
+                        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+                    </div>
+                ) : data && data.salesByState.length > 0 ? (
+                    <ResponsiveContainer width="100%" height={350}>
+                        <PieChart>
+                            <Pie
+                                data={data.salesByState}
+                                cx="50%"
+                                cy="50%"
+                                labelLine={false}
+                                outerRadius={120}
+                                fill="#8884d8"
+                                dataKey="revenue"
+                                nameKey="state"
+                                label={({ cx, cy, midAngle, innerRadius, outerRadius, percent, index }) => {
+                                    const RADIAN = Math.PI / 180;
+                                    const radius = innerRadius + (outerRadius - innerRadius) * 0.5;
+                                    const x = cx + radius * Math.cos(-midAngle * RADIAN);
+                                    const y = cy + radius * Math.sin(-midAngle * RADIAN);
+                                    return (percent > 0.05) ? (
+                                        <text x={x} y={y} fill="white" textAnchor="middle" dominantBaseline="central">
+                                            {`${(percent * 100).toFixed(0)}%`}
+                                        </text>
+                                    ) : null;
+                                }}
+                            >
+                                {data.salesByState.map((entry, index) => (
+                                    <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                                ))}
+                            </Pie>
+                            <Tooltip content={<PieChartTooltip />} />
+                            <Legend content={<CustomLegend />} />
+                        </PieChart>
+                    </ResponsiveContainer>
+                ) : (
+                    <div className="h-[350px] w-full flex flex-col items-center justify-center text-center">
+                        <p className="font-semibold">Nenhum dado de venda encontrado.</p>
+                         <p className="text-muted-foreground text-sm">Não há informações de estado para exibir.</p>
+                    </div>
+                )}
             </CardContent>
         </Card>
       </div>
