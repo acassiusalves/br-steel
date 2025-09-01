@@ -21,6 +21,7 @@ import { cn } from '@/lib/utils';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
+import { Progress } from '@/components/ui/progress';
 
 
 type ApiStatus = 'valid' | 'invalid' | 'unchecked';
@@ -52,6 +53,8 @@ export default function ApiPage() {
   });
   const [apiStatus, setApiStatus] = React.useState<ApiStatus>('unchecked');
   const [importedCount, setImportedCount] = React.useState(0);
+  const [importStatus, setImportStatus] = React.useState({ current: 0, total: 0 });
+  const [importProgress, setImportProgress] = React.useState(0);
   
   const { toast } = useToast();
   
@@ -175,37 +178,50 @@ export default function ApiPage() {
   const handleImportSales = async () => {
     setIsImporting(true);
     setApiResponse(null);
+    setImportProgress(0);
+    setImportStatus({ current: 0, total: 0 });
+
     try {
       const responseData = await getBlingSalesOrders({ from: date?.from, to: date?.to });
       setApiResponse(responseData);
 
+      const ordersToEnrich = responseData?.data || [];
+      const totalOrders = ordersToEnrich.length;
+      setImportStatus({ current: 0, total: totalOrders });
+
+      if (totalOrders > 0) {
+          toast({
+              title: "Enriquecendo Pedidos...",
+              description: `Buscando detalhes para ${totalOrders} pedido(s). Isso pode levar um momento.`,
+          });
+
+          for (let i = 0; i < totalOrders; i++) {
+              const order = ordersToEnrich[i];
+              try {
+                  await getBlingOrderDetails(String(order.id));
+                  console.log(`Detalhes do pedido ${order.id} salvos com sucesso.`);
+              } catch (detailError: any) {
+                  console.error(`Falha ao buscar detalhes para o pedido ${order.id}:`, detailError.message);
+                  // Opcional: notificar sobre falha em pedido específico
+              }
+              const progress = ((i + 1) / totalOrders) * 100;
+              setImportProgress(progress);
+              setImportStatus(prev => ({ ...prev, current: i + 1 }));
+          }
+           toast({
+              title: "Enriquecimento Concluído!",
+              description: "Os detalhes de todos os novos pedidos foram salvos.",
+          });
+      }
+     
       const totalCount = await countImportedOrders();
       setImportedCount(totalCount);
       
       toast({
-        title: "Importação Concluída!",
+        title: "Sincronização Concluída!",
         description: `Seus pedidos foram importados/atualizados. Total no banco de dados: ${totalCount}`,
       });
 
-      // Enrich orders with details
-      if (responseData && responseData.data) {
-        toast({
-            title: "Enriquecendo Pedidos...",
-            description: "Buscando detalhes para os pedidos importados. Isso pode levar um momento.",
-        });
-        for (const order of responseData.data) {
-            try {
-                await getBlingOrderDetails(String(order.id));
-                console.log(`Detalhes do pedido ${order.id} salvos com sucesso.`);
-            } catch (detailError: any) {
-                console.error(`Falha ao buscar detalhes para o pedido ${order.id}:`, detailError.message);
-            }
-        }
-        toast({
-            title: "Enriquecimento Concluído!",
-            description: "Os detalhes de todos os novos pedidos foram salvos.",
-        });
-      }
 
     } catch (error: any) {
       setApiResponse({ error: "Falha na requisição", message: error.message });
@@ -216,6 +232,8 @@ export default function ApiPage() {
       });
     } finally {
       setIsImporting(false);
+      setImportProgress(0);
+      setImportStatus({ current: 0, total: 0 });
     }
   }
 
@@ -301,13 +319,23 @@ export default function ApiPage() {
                         <div className="flex gap-2">
                             <Button onClick={handleImportSales} disabled={isImporting} className="flex-1">
                                 {isImporting ? <Loader2 className="animate-spin" /> : <Sheet />}
-                                {isImporting ? "Importando..." : "Importar/Atualizar Vendas"}
+                                {isImporting ? "Sincronizando..." : "Importar/Atualizar Vendas"}
                             </Button>
                              <Button variant="outline" disabled className="flex-1">
                                 <FileDown />
                                 Exportar Dados
                             </Button>
                         </div>
+                         {isImporting && (
+                          <div className="space-y-2">
+                            <Progress value={importProgress} />
+                            <p className="text-sm text-muted-foreground text-center">
+                              {importStatus.total > 0
+                                ? `Enriquecendo ${importStatus.current} de ${importStatus.total} pedidos...`
+                                : 'Buscando lista de pedidos...'}
+                            </p>
+                          </div>
+                        )}
                     </div>
                 </div>
             </div>
