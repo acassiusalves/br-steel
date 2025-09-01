@@ -3,7 +3,7 @@
 "use client";
 
 import * as React from 'react';
-import { KeyRound, Loader2, Copy, Save, CheckCircle, XCircle, FileJson, Send, Calendar as CalendarIcon, Plug, Sheet, Database, FileDown, Search, Truck } from 'lucide-react';
+import { KeyRound, Loader2, Copy, Save, CheckCircle, XCircle, FileJson, Send, Calendar as CalendarIcon, Plug, Sheet, Database, FileDown, Search, Truck, Package } from 'lucide-react';
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import type { DateRange } from "react-day-picker";
@@ -15,7 +15,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
-import { getBlingCredentials, saveBlingCredentials, getBlingSalesOrders, countImportedOrders, getBlingOrderDetails, getImportedOrderIds, getLogisticsBySalesOrder } from '@/app/actions';
+import { getBlingCredentials, saveBlingCredentials, getBlingSalesOrders, countImportedOrders, getBlingOrderDetails, getImportedOrderIds, getBlingProducts } from '@/app/actions';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Calendar } from '@/components/ui/calendar';
 import { cn } from '@/lib/utils';
@@ -54,10 +54,8 @@ export default function ApiPage() {
   const [importStatus, setImportStatus] = React.useState({ current: 0, total: 0 });
   const [importProgress, setImportProgress] = React.useState(0);
   
-  // New state for logistics testing
-  const [logisticsOrderId, setLogisticsOrderId] = React.useState('');
-  const [isFetchingLogistics, setIsFetchingLogistics] = React.useState(false);
-  const [logisticsResponse, setLogisticsResponse] = React.useState<any>(null);
+  // New state for products testing
+  const [isFetchingProducts, setIsFetchingProducts] = React.useState(false);
 
   const { toast } = useToast();
   
@@ -185,7 +183,6 @@ export default function ApiPage() {
   const handleImportSales = async () => {
     setIsImporting(true);
     setApiResponse(null);
-    setLogisticsResponse(null);
     setImportProgress(0);
     setImportStatus({ current: 0, total: 0 });
 
@@ -255,27 +252,22 @@ export default function ApiPage() {
     }
   }
 
-  const handleFetchLogistics = async () => {
-      if (!logisticsOrderId) {
-          toast({ variant: "destructive", title: "ID do Pedido Faltando", description: "Por favor, insira um ID de pedido de venda."});
-          return;
-      }
-      setIsFetchingLogistics(true);
-      setLogisticsResponse(null);
+  const handleFetchProducts = async () => {
+      setIsFetchingProducts(true);
       setApiResponse(null);
       try {
-          const responseData = await getLogisticsBySalesOrder(logisticsOrderId);
-          setLogisticsResponse(responseData);
-          toast({ title: "Busca de Logística Concluída", description: "A resposta da API foi recebida."});
+          const responseData = await getBlingProducts();
+          setApiResponse(responseData);
+          toast({ title: "Busca de Produtos Concluída", description: "A resposta da API foi recebida."});
       } catch (error: any) {
-          setLogisticsResponse({ error: "Falha na requisição", message: error.message });
+          setApiResponse({ error: "Falha na requisição", message: error.message });
           toast({
               variant: "destructive",
-              title: "Erro na Busca de Logística",
+              title: "Erro na Busca de Produtos",
               description: `Não foi possível buscar os dados: ${error.message}`,
           });
       } finally {
-          setIsFetchingLogistics(false);
+          setIsFetchingProducts(false);
       }
   }
 
@@ -384,34 +376,23 @@ export default function ApiPage() {
             
             <Separator />
 
-             {/* Logistics Test Section */}
+             {/* Products Test Section */}
             <div className="space-y-4 pt-4">
-                <h3 className="font-semibold">Teste de Endpoint de Logística</h3>
+                <h3 className="font-semibold">Teste de Consulta de Produtos</h3>
                  <p className="text-sm text-muted-foreground">
-                   Use este campo para buscar os detalhes de rastreio de um pedido de venda a partir do seu ID.
+                   Use este botão para buscar os primeiros 5 produtos cadastrados no Bling e ver a resposta da API.
                 </p>
                 <div className="flex items-end gap-2">
-                    <div className="flex-1 space-y-2">
-                        <Label htmlFor="logistics-order-id">ID do Pedido de Venda</Label>
-                        <Input
-                            id="logistics-order-id"
-                            type="text"
-                            placeholder="Insira o ID do pedido de venda"
-                            value={logisticsOrderId}
-                            onChange={(e) => setLogisticsOrderId(e.target.value)}
-                            disabled={isFetchingLogistics}
-                        />
-                    </div>
-                    <Button onClick={handleFetchLogistics} disabled={isFetchingLogistics || !logisticsOrderId}>
-                        {isFetchingLogistics ? (
+                    <Button onClick={handleFetchProducts} disabled={isFetchingProducts}>
+                        {isFetchingProducts ? (
                           <>
                             <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                             Buscando...
                           </>
                         ) : (
                           <>
-                           <Truck className="mr-2 h-4 w-4" />
-                            Buscar Rastreio
+                           <Package className="mr-2 h-4 w-4" />
+                            Buscar Produtos
                           </>
                         )}
                     </Button>
@@ -557,7 +538,7 @@ export default function ApiPage() {
               </CardContent>
             </Card>
 
-            {(apiResponse || logisticsResponse) && (
+            {apiResponse && (
               <Card>
                   <CardHeader>
                       <CardTitle>Resposta da API</CardTitle>
@@ -567,7 +548,7 @@ export default function ApiPage() {
                   </CardHeader>
                   <CardContent>
                       <pre className="p-4 bg-muted rounded-md text-sm overflow-auto max-h-[500px]">
-                          <code>{JSON.stringify(apiResponse || logisticsResponse, null, 2)}</code>
+                          <code>{JSON.stringify(apiResponse, null, 2)}</code>
                       </pre>
                   </CardContent>
               </Card>
@@ -578,3 +559,4 @@ export default function ApiPage() {
     </DashboardLayout>
   );
 }
+

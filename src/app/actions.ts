@@ -198,6 +198,27 @@ export async function getBlingOrderDetails(orderId: string): Promise<any> {
     }
 }
 
+export async function getBlingProducts(limit: number = 5): Promise<any> {
+    const envMap = await readEnvFile();
+    const accessToken = envMap.get('BLING_ACCESS_TOKEN');
+
+    if (!accessToken) {
+        throw new Error('Access Token do Bling não encontrado. Por favor, conecte sua conta primeiro.');
+    }
+    
+    const baseUrl = new URL('https://api.bling.com.br/Api/v3/produtos');
+    baseUrl.searchParams.set('limite', String(limit));
+    
+    try {
+        const products = await blingGet(baseUrl.toString(), accessToken);
+        return products;
+
+    } catch (error: any) {
+        console.error('Falha ao buscar produtos no Bling:', error);
+        throw new Error(`Falha na comunicação com a API do Bling: ${error.message}`);
+    }
+}
+
 
 export async function getLogisticsBySalesOrder(orderId: string): Promise<any> {
     if (!orderId) {
