@@ -1,8 +1,9 @@
 
+
 "use client";
 
 import * as React from 'react';
-import { KeyRound, Loader2, Copy, Save, CheckCircle, XCircle, FileJson, Send, Calendar as CalendarIcon, Plug, Sheet, Database, FileDown, Search } from 'lucide-react';
+import { KeyRound, Loader2, Copy, Save, CheckCircle, XCircle, FileJson, Send, Calendar as CalendarIcon, Plug, Sheet, Database, FileDown, Search, Truck } from 'lucide-react';
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import type { DateRange } from "react-day-picker";
@@ -14,7 +15,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
-import { getBlingCredentials, saveBlingCredentials, getBlingSalesOrders, countImportedOrders, getBlingOrderDetails, getImportedOrderIds } from '@/app/actions';
+import { getBlingCredentials, saveBlingCredentials, getBlingSalesOrders, countImportedOrders, getBlingOrderDetails, getImportedOrderIds, getBlingLogisticsDetails } from '@/app/actions';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Calendar } from '@/components/ui/calendar';
 import { cn } from '@/lib/utils';
@@ -53,6 +54,11 @@ export default function ApiPage() {
   const [importStatus, setImportStatus] = React.useState({ current: 0, total: 0 });
   const [importProgress, setImportProgress] = React.useState(0);
   
+  // New state for logistics testing
+  const [logisticsObjectId, setLogisticsObjectId] = React.useState('');
+  const [isFetchingLogistics, setIsFetchingLogistics] = React.useState(false);
+  const [logisticsResponse, setLogisticsResponse] = React.useState<any>(null);
+
   const { toast } = useToast();
   
   // Combina o carregamento inicial de credenciais e a contagem de pedidos
@@ -179,6 +185,7 @@ export default function ApiPage() {
   const handleImportSales = async () => {
     setIsImporting(true);
     setApiResponse(null);
+    setLogisticsResponse(null);
     setImportProgress(0);
     setImportStatus({ current: 0, total: 0 });
 
@@ -246,6 +253,30 @@ export default function ApiPage() {
       setImportProgress(0);
       setImportStatus({ current: 0, total: 0 });
     }
+  }
+
+  const handleFetchLogistics = async () => {
+      if (!logisticsObjectId) {
+          toast({ variant: "destructive", title: "ID do Objeto Faltando", description: "Por favor, insira um ID de objeto de logística."});
+          return;
+      }
+      setIsFetchingLogistics(true);
+      setLogisticsResponse(null);
+      setApiResponse(null);
+      try {
+          const responseData = await getBlingLogisticsDetails(logisticsObjectId);
+          setLogisticsResponse(responseData);
+          toast({ title: "Busca de Logística Concluída", description: "A resposta da API foi recebida."});
+      } catch (error: any) {
+          setLogisticsResponse({ error: "Falha na requisição", message: error.message });
+          toast({
+              variant: "destructive",
+              title: "Erro na Busca de Logística",
+              description: `Não foi possível buscar os dados: ${error.message}`,
+          });
+      } finally {
+          setIsFetchingLogistics(false);
+      }
   }
 
   const renderConnectionContent = () => {
@@ -352,6 +383,40 @@ export default function ApiPage() {
             </div>
             
             <Separator />
+
+             {/* Logistics Test Section */}
+            <div className="space-y-4 pt-4">
+                <h3 className="font-semibold">Teste de Endpoint de Logística</h3>
+                 <p className="text-sm text-muted-foreground">
+                   Use este campo para buscar os detalhes de um objeto de logística específico pelo ID.
+                </p>
+                <div className="flex items-end gap-2">
+                    <div className="flex-1 space-y-2">
+                        <Label htmlFor="logistics-object-id">ID do Objeto de Logística</Label>
+                        <Input
+                            id="logistics-object-id"
+                            type="text"
+                            placeholder="Insira o ID do objeto"
+                            value={logisticsObjectId}
+                            onChange={(e) => setLogisticsObjectId(e.target.value)}
+                            disabled={isFetchingLogistics}
+                        />
+                    </div>
+                    <Button onClick={handleFetchLogistics} disabled={isFetchingLogistics || !logisticsObjectId}>
+                        {isFetchingLogistics ? (
+                          <>
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            Buscando...
+                          </>
+                        ) : (
+                          <>
+                           <Truck className="mr-2 h-4 w-4" />
+                            Buscar Logística
+                          </>
+                        )}
+                    </Button>
+                </div>
+            </div>
 
          </div>
         );
@@ -492,17 +557,17 @@ export default function ApiPage() {
               </CardContent>
             </Card>
 
-            {apiResponse && (
+            {(apiResponse || logisticsResponse) && (
               <Card>
                   <CardHeader>
-                      <CardTitle>Resposta da API de Lista de Pedidos</CardTitle>
+                      <CardTitle>Resposta da API</CardTitle>
                       <CardDescription>
                           Estes são os dados brutos retornados pela última requisição à API do Bling.
                       </CardDescription>
                   </CardHeader>
                   <CardContent>
                       <pre className="p-4 bg-muted rounded-md text-sm overflow-auto max-h-[500px]">
-                          <code>{JSON.stringify(apiResponse, null, 2)}</code>
+                          <code>{JSON.stringify(apiResponse || logisticsResponse, null, 2)}</code>
                       </pre>
                   </CardContent>
               </Card>

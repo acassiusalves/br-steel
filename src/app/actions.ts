@@ -199,6 +199,45 @@ export async function getBlingOrderDetails(orderId: string): Promise<any> {
 }
 
 
+export async function getBlingLogisticsDetails(objectId: string): Promise<any> {
+    if (!objectId) {
+        throw new Error('O ID do objeto de logística é obrigatório.');
+    }
+
+    const envMap = await readEnvFile();
+    const accessToken = envMap.get('BLING_ACCESS_TOKEN');
+
+    if (!accessToken) {
+        throw new Error('Access Token do Bling não encontrado. Por favor, conecte sua conta primeiro.');
+    }
+
+    const url = `https://api.bling.com.br/Api/v3/logisticas/objetos/${objectId}`;
+
+    try {
+        const response = await fetch(url, {
+            method: 'GET',
+            headers: {
+                'Authorization': `Bearer ${accessToken}`,
+                'Accept': 'application/json',
+            },
+        });
+        
+        const data = await response.json();
+
+        if (!response.ok) {
+            const errorMessage = data?.error?.description || response.statusText;
+            throw new Error(`Erro do Bling (${response.status}): ${errorMessage}`);
+        }
+
+        return data;
+
+    } catch (error: any) {
+        console.error(`Falha ao buscar detalhes de logística do objeto ${objectId}:`, error);
+        throw new Error(`Falha na comunicação com a API do Bling: ${error.message}`);
+    }
+}
+
+
 export async function countImportedOrders(): Promise<number> {
     try {
         const ordersCollection = collection(db, 'salesOrders');
