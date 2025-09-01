@@ -1,5 +1,4 @@
 
-
 'use client';
 
 import * as React from 'react';
@@ -20,8 +19,14 @@ import SaleOrderDetailModal from '@/components/sale-order-detail-modal';
 import type { SaleOrder } from '@/types/sale-order';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { ChevronsLeft, ChevronLeft, ChevronRight, ChevronsRight } from 'lucide-react';
-
+import { ChevronsLeft, ChevronLeft, ChevronRight, ChevronsRight, Loader2, Calendar as CalendarIcon, Filter, DollarSign, ShoppingCart, Users } from 'lucide-react';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Calendar } from '@/components/ui/calendar';
+import { cn } from '@/lib/utils';
+import { format, parseISO } from "date-fns";
+import { ptBR } from "date-fns/locale";
+import type { DateRange } from "react-day-picker";
+import { Skeleton } from '@/components/ui/skeleton';
 
 // Função para buscar os pedidos do Firestore
 async function getSalesFromFirestore(): Promise<SaleOrder[]> {
@@ -59,7 +64,7 @@ const formatDate = (dateString: string) => {
 }
 
 // Função para formatar a moeda
-const formatCurrency = (value: number) => {
+const formatCurrency = (value: number | undefined) => {
     return new Intl.NumberFormat('pt-BR', {
         style: 'currency',
         currency: 'BRL',
@@ -80,28 +85,106 @@ const StatusBadge = ({ statusName }: { statusName: string }) => {
     return <Badge variant={variant} className="whitespace-nowrap">{statusName}</Badge>
 }
 
+// Componente para os cards de estatísticas
+const StatCard = ({ title, value, icon: Icon, isLoading, valueFormatter = (v) => v.toLocaleString() }: {
+  title: string;
+  value: number;
+  icon: React.ElementType;
+  isLoading: boolean;
+  valueFormatter?: (value: number) => string;
+}) => {
+  return (
+    <Card>
+      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+        <CardTitle className="text-sm font-medium">{title}</CardTitle>
+        <Icon className="h-4 w-4 text-muted-foreground" />
+      </CardHeader>
+      <CardContent>
+        {isLoading ? (
+          <>
+            <Skeleton className="h-8 w-3/4 mb-2" />
+          </>
+        ) : (
+          <div className="text-2xl font-bold">{valueFormatter(value)}</div>
+        )}
+      </CardContent>
+    </Card>
+  );
+};
+
+
 export default function VendasPage() {
-  const [sales, setSales] = React.useState<SaleOrder[]>([]);
+  const [allSales, setAllSales] = React.useState<SaleOrder[]>([]);
+  const [filteredSales, setFilteredSales] = React.useState<SaleOrder[]>([]);
   const [isLoading, setIsLoading] = React.useState(true);
+  const [isFiltering, setIsFiltering] = React.useState(false);
   const [selectedOrder, setSelectedOrder] = React.useState<SaleOrder | null>(null);
 
   // Pagination State
   const [currentPage, setCurrentPage] = React.useState(1);
   const [rowsPerPage, setRowsPerPage] = React.useState(10);
+  
+  // Date filter state
+  const [date, setDate] = React.useState<DateRange | undefined>(undefined);
+
+  // Stats state
+  const [stats, setStats] = React.useState({
+    totalRevenue: 0,
+    totalSales: 0,
+    averageTicket: 0,
+  });
 
   React.useEffect(() => {
     async function fetchData() {
       setIsLoading(true);
       const data = await getSalesFromFirestore();
-      setSales(data);
+      setAllSales(data);
+      setFilteredSales(data); // Initially, show all sales
+      
+      const today = new Date();
+      const initialDate = { from: new Date(today.getFullYear(), 0, 1), to: today };
+      setDate(initialDate);
+      
       setIsLoading(false);
     }
     fetchData();
   }, []);
   
+  // Recalculate stats whenever filteredSales changes
+  React.useEffect(() => {
+    const totalRevenue = filteredSales.reduce((sum, order) => sum + (order.total || 0), 0);
+    const totalSales = filteredSales.length;
+    const averageTicket = totalSales > 0 ? totalRevenue / totalSales : 0;
+    
+    setStats({ totalRevenue, totalSales, averageTicket });
+    setCurrentPage(1); // Reset to first page on filter change
+  }, [filteredSales]);
+
+
+  const handleFilter = React.useCallback(() => {
+    setIsFiltering(true);
+    let newFilteredSales = allSales;
+
+    if (date?.from && date?.to) {
+        newFilteredSales = allSales.filter(sale => {
+            try {
+                const saleDate = parseISO(sale.data);
+                return saleDate >= date.from! && saleDate <= date.to!;
+            } catch (e) {
+                return false;
+            }
+        });
+    }
+
+    setFilteredSales(newFilteredSales);
+    // Give a small delay to show the loader, improving UX
+    setTimeout(() => setIsFiltering(false), 300);
+  }, [allSales, date]);
+
+
   // Pagination Logic
-  const totalPages = Math.ceil(sales.length / rowsPerPage);
-  const paginatedSales = sales.slice(
+  const totalPages = Math.ceil(filteredSales.length / rowsPerPage);
+  const paginatedSales = filteredSales.slice(
     (currentPage - 1) * rowsPerPage,
     currentPage * rowsPerPage
   );
@@ -122,17 +205,88 @@ export default function VendasPage() {
   return (
     <DashboardLayout>
       <div className="flex-1 space-y-8 p-4 pt-6 md:p-8">
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
             <div>
                 <h2 className="text-3xl font-bold tracking-tight">Vendas</h2>
                 <p className="text-muted-foreground">
                     Liste e gerencie todos os pedidos de venda dos seus marketplaces.
                 </p>
             </div>
+            <div className="flex flex-wrap items-center gap-2">
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button
+                      id="date"
+                      variant={"outline"}
+                      className={cn(
+                        "w-full sm:w-[260px] justify-start text-left font-normal",
+                        !date && "text-muted-foreground"
+                      )}
+                    >
+                      <CalendarIcon className="mr-2 h-4 w-4" />
+                      {date?.from ? (
+                        date.to ? (
+                          <>
+                            {format(date.from, "dd/MM/yy")} -{" "}
+                            {format(date.to, "dd/MM/yy")}
+                          </>
+                        ) : (
+                          format(date.from, "dd/MM/yy")
+                        )
+                      ) : (
+                        <span>Escolha um período</span>
+                      )}
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-auto p-0" align="end">
+                    <Calendar
+                      initialFocus
+                      mode="range"
+                      defaultMonth={date?.from}
+                      selected={date}
+                      onSelect={setDate}
+                      numberOfMonths={2}
+                      locale={ptBR}
+                    />
+                  </PopoverContent>
+                </Popover>
+              <Button onClick={handleFilter} disabled={isFiltering} className="w-full sm:w-auto">
+                {isFiltering ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <Filter className="mr-2 h-4 w-4" />
+                )}
+                Filtrar
+              </Button>
+            </div>
         </div>
+
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+            <StatCard 
+              title="Receita Total"
+              value={stats.totalRevenue}
+              icon={DollarSign}
+              isLoading={isFiltering}
+              valueFormatter={formatCurrency}
+            />
+             <StatCard 
+              title="Vendas"
+              value={stats.totalSales}
+              icon={ShoppingCart}
+              isLoading={isFiltering}
+            />
+            <StatCard 
+              title="Ticket Médio"
+              value={stats.averageTicket}
+              icon={DollarSign}
+              isLoading={isFiltering}
+              valueFormatter={formatCurrency}
+            />
+        </div>
+
         <Card>
           <CardHeader>
-            <CardTitle>Últimos Pedidos Importados</CardTitle>
+            <CardTitle>Pedidos Importados</CardTitle>
             <CardDescription>
               Uma lista detalhada dos seus pedidos de venda. Clique em um pedido para ver todos os detalhes.
             </CardDescription>
@@ -156,10 +310,10 @@ export default function VendasPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {isLoading ? (
+                  {isLoading || isFiltering ? (
                      <TableRow>
                         <TableCell colSpan={11} className="text-center h-24">
-                           Carregando pedidos...
+                           <Loader2 className="mx-auto h-6 w-6 animate-spin" />
                         </TableCell>
                     </TableRow>
                   ) : paginatedSales.length > 0 ? (
@@ -203,7 +357,7 @@ export default function VendasPage() {
           </CardContent>
            <CardFooter className="flex items-center justify-between">
             <div className="text-sm text-muted-foreground">
-              Total de {sales.length} pedidos.
+              Total de {filteredSales.length} pedidos.
             </div>
             <div className="flex items-center space-x-6 lg:space-x-8">
               <div className="flex items-center space-x-2">
