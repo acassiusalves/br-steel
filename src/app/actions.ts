@@ -253,7 +253,7 @@ export async function getSalesDashboardData(
   totalSales: number;
   averageTicket: number;
   uniqueCustomers: number;
-  topProducts: { name: string, total: number }[];
+  topProducts: { name: string, total: number, revenue: number }[];
   stats: {
       totalRevenue: { value: number, change: number };
       totalSales: { value: number, change: number };
@@ -297,19 +297,21 @@ export async function getSalesDashboardData(
   const uniqueCustomers = customerIds.size;
 
   // Product sales ranking calculation
-  const productSales = new Map<string, number>();
+  const productSales = new Map<string, { total: number, revenue: number }>();
 
   orders.forEach(order => {
       order.itens?.forEach(item => {
           const productName = item.descricao || 'Produto sem nome';
-          const currentQty = productSales.get(productName) || 0;
-          productSales.set(productName, currentQty + item.quantidade);
+          const currentData = productSales.get(productName) || { total: 0, revenue: 0 };
+          currentData.total += item.quantidade;
+          currentData.revenue += item.quantidade * item.valor;
+          productSales.set(productName, currentData);
       });
   });
 
   const topProducts = Array.from(productSales.entries())
-      .map(([name, total]) => ({ name, total }))
-      .sort((a, b) => b.total - a.total)
+      .map(([name, data]) => ({ name, total: data.total, revenue: data.revenue }))
+      .sort((a, b) => b.revenue - a.revenue)
       .slice(0, 10);
   
 
@@ -331,3 +333,5 @@ export async function getSalesDashboardData(
     }
   };
 }
+
+    

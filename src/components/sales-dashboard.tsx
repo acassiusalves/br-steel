@@ -11,7 +11,7 @@ import {
   Users,
   Loader2,
 } from "lucide-react";
-import { Bar, BarChart, ResponsiveContainer, XAxis, YAxis, Tooltip, CartesianGrid } from "recharts";
+import { Bar, BarChart, ResponsiveContainer, XAxis, YAxis, Tooltip, CartesianGrid, TooltipProps } from "recharts";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import type { DateRange } from "react-day-picker";
@@ -90,6 +90,24 @@ const StatCard = ({ title, value, icon: Icon, change, isLoading, valueFormatter 
       </CardContent>
     </Card>
   );
+};
+
+const CustomTooltip = ({ active, payload, label }: TooltipProps<number, string>) => {
+  if (active && payload && payload.length) {
+    const data = payload[0].payload;
+    return (
+      <div className="p-2 bg-background border rounded-md shadow-lg text-sm">
+        <p className="font-bold mb-1">{label}</p>
+        <p>
+          <span className="font-medium">Faturamento:</span> {formatCurrency(payload[0].value!)}
+        </p>
+        <p>
+          <span className="font-medium">Quantidade Vendida:</span> {data.total}
+        </p>
+      </div>
+    );
+  }
+  return null;
 };
 
 
@@ -242,7 +260,7 @@ export default function SalesDashboard() {
         <Card className="lg:col-span-5">
             <CardHeader>
               <CardTitle>Ranking de Produtos</CardTitle>
-              <CardDescription>Os 10 produtos mais vendidos no período.</CardDescription>
+              <CardDescription>Os 10 produtos que mais geraram receita no período.</CardDescription>
             </CardHeader>
             <CardContent className="pl-2">
             {isLoading ? (
@@ -257,7 +275,7 @@ export default function SalesDashboard() {
                       margin={{ top: 5, right: 30, left: 20, bottom: 5 }}
                     >
                       <CartesianGrid strokeDasharray="3 3" horizontal={false} />
-                      <XAxis type="number" stroke="hsl(var(--muted-foreground))" fontSize={12} tickLine={false} axisLine={false} />
+                      <XAxis type="number" stroke="hsl(var(--muted-foreground))" fontSize={12} tickLine={false} axisLine={false} tickFormatter={(value) => formatCurrency(value as number)}/>
                       <YAxis
                           type="category"
                           dataKey="name"
@@ -270,15 +288,10 @@ export default function SalesDashboard() {
                       />
                       <Tooltip 
                         cursor={{ fill: 'hsl(var(--accent))' }}
-                        contentStyle={{
-                          background: 'hsl(var(--background))',
-                          border: '1px solid hsl(var(--border))',
-                          borderRadius: 'var(--radius)',
-                        }}
-                        formatter={(value, name) => [value, "Quantidade Vendida"]}
+                        content={<CustomTooltip />}
                       />
                       <Bar
-                          dataKey="total"
+                          dataKey="revenue"
                           fill="hsl(var(--primary))"
                           radius={[0, 4, 4, 0]}
                           barSize={30}
@@ -309,3 +322,5 @@ export default function SalesDashboard() {
     </div>
   );
 }
+
+    
