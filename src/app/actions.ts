@@ -385,3 +385,41 @@ export async function getSalesDashboardData(
     }
   };
 }
+
+export type ProductionDemand = {
+  sku: string;
+  description: string;
+  quantity: number;
+};
+
+export async function getProductionDemand(): Promise<ProductionDemand[]> {
+    const salesCollection = collection(db, 'salesOrders');
+    const q = query(salesCollection, where('notaFiscal.id', '!=', null));
+    const snapshot = await getDocs(q);
+
+    const productDemand = new Map<string, { description: string, quantity: number }>();
+
+    snapshot.forEach(doc => {
+        const order = doc.data() as SaleOrder;
+        
+        // Double-checking if the invoice really exists
+        if (order.notaFiscal && order.notaFiscal.id) {
+            order.itens?.forEach(item => {
+                const sku = item.codigo || 'SKU_INDEFINIDO';
+                const currentData = productDemand.get(sku) || { description: item.descricao, quantity: 0 };
+                currentData.quantity += item.quantidade;
+                productDemand.set(sku, currentData);
+            });
+        }
+    });
+
+    const result = Array.from(productDemand.entries())
+        .map(([sku, data]) => ({
+            sku,
+            description: data.description,
+            quantity: data.quantity,
+        }))
+        .sort((a, b) => b.quantity - a.quantity);
+
+    return result;
+}
