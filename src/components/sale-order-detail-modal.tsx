@@ -135,13 +135,24 @@ export default function SaleOrderDetailModal({ order, isOpen, onClose }: SaleOrd
                             <CardContent className="space-y-6">
                                 <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                                     <DetailItem label="Total Produtos" value={formatCurrency(order.totalProdutos)} />
-                                    <DetailItem label="Outras Despesas" value={formatCurrency(order.outrasDespesas)} />
+                                    <DetailItem label="Frete Pago pelo Cliente" value={formatCurrency(order.transporte?.frete)} />
                                     <DetailItem label="Desconto" value={`${formatCurrency(order.desconto?.valor)} (${order.desconto?.unidade})`} />
-                                    <DetailItem label="Frete" value={formatCurrency(order.transporte?.frete)} />
+                                    <DetailItem label="Outras Despesas" value={formatCurrency(order.outrasDespesas)} />
                                     <DetailItem label="Total do Pedido" value={<span className="font-bold">{formatCurrency(order.total)}</span>} />
+                                </div>
+                                <Separator />
+                                <div>
+                                     <h4 className="font-semibold mb-2 text-base">Custos da Venda</h4>
+                                     <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                                        <DetailItem label="Custo do Frete" value={formatCurrency(order.taxas?.custoFrete)} />
+                                        <DetailItem label="Taxa de Comissão" value={formatCurrency(order.taxas?.taxaComissao)} />
+                                        <DetailItem label="Total IPI" value={formatCurrency(order.tributacao?.totalIPI)} />
+                                        <DetailItem label="Total ICMS" value={formatCurrency(order.tributacao?.totalICMS)} />
+                                     </div>
                                 </div>
                                 {order.parcelas && order.parcelas.length > 0 && (
                                     <div>
+                                        <Separator className="my-4" />
                                         <h4 className="font-semibold mb-2">Parcelas</h4>
                                         <div className="space-y-2">
                                             {order.parcelas.map(p => (
