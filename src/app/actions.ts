@@ -297,7 +297,7 @@ export async function getProductsStock(): Promise<{ data: ProductStock[], isSimu
 
     try {
         // Tentar endpoint principal de estoques
-        const stockUrl = 'https://api.bling.com.br/Api/v3/estoques/saldos/produtos';
+        const stockUrl = 'https://api.bling.com.br/Api/v3/produtos';
         console.log('🔍 Tentando endpoint:', stockUrl);
         
         const stockData = await blingGetPaged(stockUrl, accessToken);
@@ -309,18 +309,18 @@ export async function getProductsStock(): Promise<{ data: ProductStock[], isSimu
             
             const formattedData: ProductStock[] = stockData.map((item: any) => ({
                 produto: {
-                    id: item.produto?.id || 0,
-                    codigo: item.produto?.codigo || `PROD-${item.produto?.id}`,
-                    nome: item.produto?.nome || 'Produto sem nome',
+                    id: item.id || 0,
+                    codigo: item.codigo || `PROD-${item.id}`,
+                    nome: item.nome || 'Produto sem nome',
                 },
                 deposito: {
                     id: item.deposito?.id || 0,
                     nome: item.deposito?.nome || 'Depósito padrão',
                 },
-                saldoFisico: item.saldoFisico || 0,
-                saldoVirtual: item.saldoVirtual || 0,
-                saldoFisicoTotal: item.saldoFisicoTotal || item.saldoFisico || 0,
-                saldoVirtualTotal: item.saldoVirtualTotal || item.saldoVirtual || 0,
+                saldoFisico: item.estoque?.saldoFisico || 0,
+                saldoVirtual: item.estoque?.saldoVirtualTotal || 0,
+                saldoFisicoTotal: item.estoque?.saldoFisicoTotal || item.estoque?.saldoFisico || 0,
+                saldoVirtualTotal: item.estoque?.saldoVirtualTotal || item.estoque?.saldoVirtual || 0,
             }));
             
             console.log('🎯 RETORNANDO DADOS REAIS, isSimulated = false');
@@ -330,7 +330,7 @@ export async function getProductsStock(): Promise<{ data: ProductStock[], isSimu
         console.log('❌ Erro no endpoint de estoque:', error.message);
     }
 
-    // Fallback para produtos
+    // Fallback para produtos (neste caso, a tentativa principal já é produtos, então isso é redundante, mas mantido por segurança)
     console.log('🔄 Usando fallback - buscando produtos...');
     const productsData = await blingGetPaged('https://api.bling.com.br/Api/v3/produtos', accessToken);
     
