@@ -181,6 +181,12 @@ export async function getBlingOrderDetails(orderId: string): Promise<any> {
             const errorMessage = data?.error?.description || response.statusText;
             throw new Error(`Erro do Bling (${response.status}): ${errorMessage}`);
         }
+        
+        // Se a busca for bem-sucedida, salva os detalhes no Firestore
+        if (data && data.data) {
+           await saveSalesOrders([data.data]); // Reutiliza a função para salvar com merge
+        }
+
 
         return data;
 

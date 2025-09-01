@@ -21,10 +21,11 @@ export async function saveSalesOrders(orders: any[]): Promise<{ count: number }>
     orders.forEach(order => {
         // Use the Bling order ID as the Firestore document ID
         const docRef = doc(ordersCollection, String(order.id)); 
-        batch.set(docRef, order);
+        // Use { merge: true } to update existing documents or create new ones
+        batch.set(docRef, order, { merge: true });
     });
 
     await batch.commit();
-    console.log(`${orders.length} orders saved to Firestore.`);
+    console.log(`${orders.length} orders saved/updated in Firestore.`);
     return { count: orders.length };
 }

@@ -20,7 +20,7 @@ interface SaleOrder {
   numeroLoja: string;
   data: string;
   dataSaida: string;
-  cliente: {
+  contato: {
     nome: string;
     numeroDocumento?: string;
   };
@@ -140,8 +140,8 @@ export default async function VendasPage() {
                             <TableCell>{sale.numeroLoja || 'N/A'}</TableCell>
                             <TableCell>{formatDate(sale.data)}</TableCell>
                             <TableCell>{formatDate(sale.dataSaida)}</TableCell>
-                            <TableCell>{sale.cliente?.nome || 'N/A'}</TableCell>
-                            <TableCell>{sale.cliente?.numeroDocumento || 'N/A'}</TableCell>
+                            <TableCell>{sale.contato?.nome || 'N/A'}</TableCell>
+                            <TableCell>{sale.contato?.numeroDocumento || 'N/A'}</TableCell>
                             <TableCell>{sale.loja?.nome || 'N/A'}</TableCell>
                             <TableCell>
                                 <StatusBadge statusName={sale.situacao?.nome || 'Desconhecido'} />
