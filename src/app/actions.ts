@@ -84,7 +84,7 @@ export async function getBlingCredentials(): Promise<Partial<BlingCredentials>> 
     return {
         clientId: envMap.get('BLING_CLIENT_ID') || '',
         clientSecret: envMap.get('BLING_CLIENT_SECRET') ? '********' : '', // Don't expose secret to client
-        accessToken: envMap.get('BLING_ACCESS_TOKEN') ? '********' : '', // Only indicate presence
+        accessToken: envMap.get('BLING_ACCESS_TOKEN') || '', // Return the actual token for server actions
     };
 }
 
@@ -249,20 +249,20 @@ export async function getLogisticsBySalesOrder(orderId: string): Promise<any> {
 }
 
 export type ProductStock = {
-    produto: {
-        id: number;
-        codigo: string;
-        nome: string;
-    };
-    deposito: {
-        id: number;
-        nome: string;
-    };
-    saldoFisico: number;
-    saldoVirtual: number;
-    saldoFisicoTotal: number;
-    saldoVirtualTotal: number;
-}
+  produto: {
+    id: number;
+    codigo: string;
+    nome: string;
+  };
+  deposito: {
+    id: number;
+    nome: string;
+  };
+  saldoFisico: number;
+  saldoVirtual: number;
+  saldoFisicoTotal: number;
+  saldoVirtualTotal: number;
+};
 
 export async function getProductsStock(): Promise<{ data: ProductStock[] }> {
     const envMap = await readEnvFile();
@@ -272,14 +272,28 @@ export async function getProductsStock(): Promise<{ data: ProductStock[] }> {
         throw new Error('Access Token do Bling não encontrado. Por favor, conecte sua conta primeiro.');
     }
 
+    // Endpoint principal recomendado pela documentação é `/produtos/saldos/estoques`
     const baseUrl = 'https://api.bling.com.br/Api/v3/produtos/saldos/estoques';
 
     try {
-        const allStockData = await blingGetPaged(baseUrl, accessToken);
+        const allStockData = await blingGetPaged(baseUrl.toString(), accessToken);
         return { data: allStockData };
     } catch (error: any) {
         console.error('Falha ao buscar estoques no Bling:', error);
-        throw new Error(`Falha na comunicação com a API do Bling: ${error.message}`);
+        
+        // Tenta decodificar a mensagem de erro da API do Bling
+        let errorMessage = `Falha na comunicação com a API do Bling: ${error.message}`;
+        if (error.cause) {
+            try {
+                const causeError = JSON.parse(error.cause);
+                if(causeError.error?.description){
+                    errorMessage = causeError.error.description;
+                }
+            } catch (e) {
+                // Mantém a mensagem original se não conseguir parsear
+            }
+        }
+        throw new Error(errorMessage);
     }
 }
 
@@ -459,3 +473,5 @@ export async function getProductionDemand(
 
     return result;
 }
+
+    

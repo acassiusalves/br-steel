@@ -2,9 +2,9 @@
 'use client';
 
 import * as React from 'react';
-import { Search, Download, RefreshCw, Package, AlertTriangle, CheckCircle } from 'lucide-react';
+import { Search, Download, RefreshCw, Package, AlertTriangle, CheckCircle, AlertCircle } from 'lucide-react';
 import DashboardLayout from '@/components/dashboard-layout';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -23,8 +23,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Skeleton } from '@/components/ui/skeleton';
-import { getProductsStock } from '@/app/actions';
+import { getProductsStock, getBlingCredentials } from '@/app/actions';
 import type { ProductStock } from '@/app/actions';
 import { useToast } from '@/hooks/use-toast';
 
@@ -34,13 +35,31 @@ export default function EstoquePage() {
   const [isLoading, setIsLoading] = React.useState(true);
   const [searchTerm, setSearchTerm] = React.useState('');
   const [statusFilter, setStatusFilter] = React.useState('all');
+  const [error, setError] = React.useState<string | null>(null);
+  const [isConnected, setIsConnected] = React.useState(false);
   const { toast } = useToast();
 
   const fetchStockData = React.useCallback(async () => {
     setIsLoading(true);
+    setError(null);
     try {
+        const credentials = await getBlingCredentials();
+        const hasToken = !!credentials.accessToken;
+        setIsConnected(hasToken);
+
+        if (!hasToken) {
+            setError('Não conectado ao Bling. Por favor, configure a conexão na página de API para visualizar o estoque.');
+            return;
+        }
+
       const { data } = await getProductsStock();
       
+       if (data.length === 0) {
+          setError('Nenhum produto com estoque foi encontrado. Verifique se há produtos cadastrados com estoque no Bling.');
+          setStockData([]);
+          return;
+        }
+
       const aggregatedStock = new Map<string, { 
           productId: number;
           productName: string;
@@ -73,11 +92,7 @@ export default function EstoquePage() {
 
     } catch (error: any) {
       console.error("Failed to fetch stock data:", error);
-      toast({
-          variant: "destructive",
-          title: "Erro ao Buscar Estoque",
-          description: `Não foi possível carregar os dados de estoque do Bling: ${error.message}`,
-      });
+      setError(error.message);
     } finally {
       setIsLoading(false);
     }
@@ -157,10 +172,12 @@ export default function EstoquePage() {
 
   const handleRefresh = async () => {
     await fetchStockData();
-    toast({
-      title: "Dados Atualizados",
-      description: "Os níveis de estoque foram sincronizados com o Bling.",
-    });
+    if(!error) {
+        toast({
+            title: "Dados Atualizados",
+            description: "Os níveis de estoque foram sincronizados com o Bling.",
+        });
+    }
   };
 
   const handleExport = () => {
@@ -218,6 +235,23 @@ export default function EstoquePage() {
             </Button>
           </div>
         </div>
+
+        {/* Alerta de erro ou desconexão */}
+        {error && (
+          <Alert variant="destructive">
+            <AlertCircle className="h-4 w-4" />
+            <AlertDescription>
+              {error}
+              {!isConnected && (
+                <div className="mt-2">
+                  <Button asChild variant="outline" size="sm">
+                    <a href="/api">Configurar Conexão</a>
+                  </Button>
+                </div>
+              )}
+            </AlertDescription>
+          </Alert>
+        )}
 
         {/* Cards de Estatísticas */}
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
@@ -346,7 +380,7 @@ export default function EstoquePage() {
                 ) : (
                   <TableRow>
                     <TableCell colSpan={5} className="h-24 text-center">
-                      Nenhum produto encontrado com os filtros atuais.
+                      Nenhum produto encontrado.
                     </TableCell>
                   </TableRow>
                 )}
@@ -358,3 +392,5 @@ export default function EstoquePage() {
     </DashboardLayout>
   );
 }
+
+    
