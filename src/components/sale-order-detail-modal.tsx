@@ -69,6 +69,7 @@ export default function SaleOrderDetailModal({ order, isOpen, onClose }: SaleOrd
                     <DetailItem label="Data Prevista" value={formatDate(order.dataPrevista)} />
                     <DetailItem label="Status" value={<Badge>{order.situacao?.nome || 'N/A'}</Badge>} />
                     <DetailItem label="Vendedor" value={order.vendedor?.nome} />
+                    <DetailItem label="ID Nota Fiscal" value={order.notaFiscal?.id} />
                 </div>
             </section>
 
