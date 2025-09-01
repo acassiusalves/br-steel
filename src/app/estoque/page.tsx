@@ -1,10 +1,9 @@
-
 'use client';
 
 import * as React from 'react';
-import { Search, Download, RefreshCw, Package, AlertTriangle, CheckCircle, AlertCircle, Info, BellRing } from 'lucide-react';
+import { Search, Download, RefreshCw, Package, AlertTriangle, CheckCircle, AlertCircle, Info, BellRing, ChevronsLeft, ChevronLeft, ChevronRight, ChevronsRight } from 'lucide-react';
 import DashboardLayout from '@/components/dashboard-layout';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
@@ -50,6 +49,11 @@ export default function EstoquePage() {
   const [isConnected, setIsConnected] = React.useState(false);
   const [isSimulatedData, setIsSimulatedData] = React.useState(false);
   const [isAlertsModalOpen, setIsAlertsModalOpen] = React.useState(false);
+  
+  // Pagination State
+  const [currentPage, setCurrentPage] = React.useState(1);
+  const [rowsPerPage, setRowsPerPage] = React.useState(10);
+  
   const { toast } = useToast();
 
   const fetchStockData = React.useCallback(async () => {
@@ -151,7 +155,16 @@ export default function EstoquePage() {
     }
 
     setFilteredData(filtered);
+    setCurrentPage(1); // Reset page on filter change
   }, [stockData, searchTerm, statusFilter]);
+  
+  // Pagination Logic
+  const totalPages = Math.ceil(filteredData.length / rowsPerPage);
+  const paginatedData = filteredData.slice(
+    (currentPage - 1) * rowsPerPage,
+    currentPage * rowsPerPage
+  );
+
 
   const StockStatusBadge = ({ virtual }: { virtual: number }) => {
     if (virtual <= 0) {
@@ -394,8 +407,8 @@ export default function EstoquePage() {
                       <TableCell><Skeleton className="h-6 w-24" /></TableCell>
                     </TableRow>
                   ))
-                ) : filteredData.length > 0 ? (
-                    filteredData.map((item) => (
+                ) : paginatedData.length > 0 ? (
+                    paginatedData.map((item) => (
                         <TableRow key={item.produto.id}>
                             <TableCell className="font-medium">{item.produto.codigo}</TableCell>
                             <TableCell>{item.produto.nome}</TableCell>
@@ -418,10 +431,77 @@ export default function EstoquePage() {
               </TableBody>
             </Table>
           </CardContent>
+          <CardFooter className="flex items-center justify-between">
+            <div className="text-sm text-muted-foreground">
+              Total de {filteredData.length} produtos.
+            </div>
+            <div className="flex items-center space-x-6 lg:space-x-8">
+              <div className="flex items-center space-x-2">
+                <p className="text-sm font-medium">Itens por página</p>
+                <Select
+                  value={`${rowsPerPage}`}
+                  onValueChange={(value) => {
+                    setRowsPerPage(Number(value))
+                    setCurrentPage(1)
+                  }}
+                >
+                  <SelectTrigger className="h-8 w-[70px]">
+                    <SelectValue placeholder={rowsPerPage} />
+                  </SelectTrigger>
+                  <SelectContent side="top">
+                    {[10, 20, 30, 40, 50].map((pageSize) => (
+                      <SelectItem key={pageSize} value={`${pageSize}`}>
+                        {pageSize}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="flex w-[100px] items-center justify-center text-sm font-medium">
+                Página {currentPage} de {totalPages}
+              </div>
+              <div className="flex items-center space-x-2">
+                <Button
+                  variant="outline"
+                  className="hidden h-8 w-8 p-0 lg:flex"
+                  onClick={() => setCurrentPage(1)}
+                  disabled={currentPage === 1}
+                >
+                  <span className="sr-only">Go to first page</span>
+                  <ChevronsLeft className="h-4 w-4" />
+                </Button>
+                <Button
+                  variant="outline"
+                  className="h-8 w-8 p-0"
+                  onClick={() => setCurrentPage(currentPage - 1)}
+                  disabled={currentPage === 1}
+                >
+                  <span className="sr-only">Go to previous page</span>
+                  <ChevronLeft className="h-4 w-4" />
+                </Button>
+                <Button
+                  variant="outline"
+                  className="h-8 w-8 p-0"
+                  onClick={() => setCurrentPage(currentPage + 1)}
+                  disabled={currentPage === totalPages}
+                >
+                  <span className="sr-only">Go to next page</span>
+                  <ChevronRight className="h-4 w-4" />
+                </Button>
+                <Button
+                  variant="outline"
+                  className="hidden h-8 w-8 p-0 lg:flex"
+                  onClick={() => setCurrentPage(totalPages)}
+                  disabled={currentPage === totalPages}
+                >
+                  <span className="sr-only">Go to last page</span>
+                  <ChevronsRight className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+          </CardFooter>
         </Card>
       </div>
     </DashboardLayout>
   );
 }
-
-    
