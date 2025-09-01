@@ -99,6 +99,11 @@ export default function VendasPage() {
     setSelectedOrder(null);
   };
 
+  const getTotalQuantity = (items: SaleOrder['itens']) => {
+    if (!items || items.length === 0) return 0;
+    return items.reduce((total, item) => total + item.quantidade, 0);
+  }
+
   return (
     <DashboardLayout>
       <div className="flex-1 space-y-8 p-4 pt-6 md:p-8">
@@ -128,6 +133,7 @@ export default function VendasPage() {
                     <TableHead>Data</TableHead>
                     <TableHead>Cliente</TableHead>
                     <TableHead>Marketplace</TableHead>
+                    <TableHead>Qtd. Itens</TableHead>
                     <TableHead>Itens</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead>Vendedor</TableHead>
@@ -137,7 +143,7 @@ export default function VendasPage() {
                 <TableBody>
                   {isLoading ? (
                      <TableRow>
-                        <TableCell colSpan={10} className="text-center h-24">
+                        <TableCell colSpan={11} className="text-center h-24">
                            Carregando pedidos...
                         </TableCell>
                     </TableRow>
@@ -150,12 +156,12 @@ export default function VendasPage() {
                               <TableCell className="whitespace-nowrap">{formatDate(sale.data)}</TableCell>
                               <TableCell>{sale.contato?.nome || 'N/A'}</TableCell>
                               <TableCell>{sale.loja?.nome || 'N/A'}</TableCell>
+                               <TableCell className="text-center">{getTotalQuantity(sale.itens)}</TableCell>
                               <TableCell>
                                 {sale.itens && sale.itens.length > 0 ? (
                                   <ul className="text-xs space-y-1">
                                     {sale.itens.map((item, index) => (
                                       <li key={item.produto?.id || index} title={item.descricao} className="flex items-start gap-2">
-                                        <span className="font-bold">{item.quantidade}x</span>
                                         <span>{item.descricao}</span>
                                       </li>
                                     ))}
@@ -171,7 +177,7 @@ export default function VendasPage() {
                       ))
                   ) : (
                       <TableRow>
-                          <TableCell colSpan={10} className="text-center h-24">
+                          <TableCell colSpan={11} className="text-center h-24">
                              Nenhum pedido encontrado. <a href="/api" className="text-primary underline">Importe seus pedidos aqui.</a>
                           </TableCell>
                       </TableRow>
