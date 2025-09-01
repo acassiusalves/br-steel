@@ -188,7 +188,7 @@ export default function ProducaoPage() {
           <CardHeader>
             <CardTitle>Demanda por SKU</CardTitle>
             <CardDescription>
-              A lista abaixo mostra a quantidade total de cada produto vendido em pedidos que já tiveram a nota fiscal gerada no período selecionado.
+              A lista abaixo mostra a quantidade total e a média semanal de cada produto vendido (com nota fiscal) no período selecionado.
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -197,13 +197,14 @@ export default function ProducaoPage() {
                 <TableRow>
                   <TableHead>SKU</TableHead>
                   <TableHead>Descrição do Produto</TableHead>
-                  <TableHead className="text-right">Quantidade Vendida (com NF)</TableHead>
+                  <TableHead className="text-right">Qtd. Vendida (com NF)</TableHead>
+                   <TableHead className="text-right">Média Semanal</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {isLoading ? (
                   <TableRow>
-                    <TableCell colSpan={3} className="h-24 text-center">
+                    <TableCell colSpan={4} className="h-24 text-center">
                       <Loader2 className="mx-auto h-6 w-6 animate-spin" />
                     </TableCell>
                   </TableRow>
@@ -213,11 +214,12 @@ export default function ProducaoPage() {
                       <TableCell className="font-medium">{item.sku}</TableCell>
                       <TableCell>{item.description}</TableCell>
                       <TableCell className="text-right font-bold">{item.quantity}</TableCell>
+                      <TableCell className="text-right">{item.weeklyAverage.toFixed(1)}</TableCell>
                     </TableRow>
                   ))
                 ) : (
                   <TableRow>
-                    <TableCell colSpan={3} className="h-24 text-center">
+                    <TableCell colSpan={4} className="h-24 text-center">
                       Nenhum item vendido com nota fiscal encontrada para o período.
                     </TableCell>
                   </TableRow>

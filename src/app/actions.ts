@@ -3,7 +3,7 @@
 
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import { format, parseISO, startOfMonth, endOfMonth, eachMonthOfInterval, getMonth, getYear } from 'date-fns';
+import { format, parseISO, startOfMonth, endOfMonth, eachMonthOfInterval, getMonth, getYear, differenceInDays } from 'date-fns';
 import { collection, getDocs, doc, writeBatch, query, where } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 
@@ -390,19 +390,28 @@ export type ProductionDemand = {
   sku: string;
   description: string;
   quantity: number;
+  weeklyAverage: number;
 };
 
 export async function getProductionDemand(
     { from, to }: { from?: Date, to?: Date }
 ): Promise<ProductionDemand[]> {
+    if (!from || !to) {
+        return [];
+    }
+
     const salesCollection = collection(db, 'salesOrders');
     
     // Base query: filter for orders that have an issued invoice
     const q = query(salesCollection, where('notaFiscal.id', '!=', null));
     const snapshot = await getDocs(q);
 
-    const fromDateStr = from ? format(from, 'yyyy-MM-dd') : null;
-    const toDateStr = to ? format(to, 'yyyy-MM-dd') : null;
+    const fromDateStr = format(from, 'yyyy-MM-dd');
+    const toDateStr = format(to, 'yyyy-MM-dd');
+    
+    // Calculate the number of weeks in the period. Minimum 1 to avoid division by zero.
+    const days = differenceInDays(to, from) + 1;
+    const weeks = Math.max(1, days / 7);
 
     const productDemand = new Map<string, { description: string, quantity: number }>();
 
@@ -410,9 +419,7 @@ export async function getProductionDemand(
         const order = doc.data() as SaleOrder;
         
         // Manual date filtering, as we can't combine `!=` with range filters in Firestore.
-        const isDateInRange = 
-            (!fromDateStr || order.data >= fromDateStr) && 
-            (!toDateStr || order.data <= toDateStr);
+        const isDateInRange = order.data >= fromDateStr && order.data <= toDateStr;
 
         if (isDateInRange && order.notaFiscal && order.notaFiscal.id) {
             order.itens?.forEach(item => {
@@ -429,6 +436,7 @@ export async function getProductionDemand(
             sku,
             description: data.description,
             quantity: data.quantity,
+            weeklyAverage: data.quantity / weeks,
         }))
         .sort((a, b) => b.quantity - a.quantity);
 
