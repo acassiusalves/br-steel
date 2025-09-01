@@ -1,3 +1,4 @@
+
 "use client";
 
 import type { ReactNode } from "react";
@@ -8,6 +9,7 @@ import {
   Settings,
   Code,
   ShoppingCart,
+  Factory,
 } from "lucide-react";
 import * as React from "react";
 
@@ -88,6 +90,14 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
               <Link href="/vendas">
                   <ShoppingCart />
                   <span>Vendas</span>
+              </Link>
+            </Button>
+          </SidebarMenuItem>
+           <SidebarMenuItem>
+            <Button asChild variant="ghost" className="w-full justify-start">
+              <Link href="/producao">
+                  <Factory />
+                  <span>Produção</span>
               </Link>
             </Button>
           </SidebarMenuItem>
