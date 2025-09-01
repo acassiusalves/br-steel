@@ -1,3 +1,4 @@
+
 import DashboardLayout from '@/components/dashboard-layout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import {
@@ -13,7 +14,7 @@ import { db } from '@/lib/firebase';
 import { Badge } from '@/components/ui/badge';
 
 
-// Tipagem para os dados do pedido que vêm do Bling (e salvos no Firestore)
+// Tipagem expandida para incluir os detalhes do pedido
 interface SaleOrder {
   id: number;
   numero: number;
@@ -24,6 +25,9 @@ interface SaleOrder {
     nome: string;
     numeroDocumento?: string;
   };
+  vendedor?: {
+    nome: string;
+  };
   loja?: {
       nome: string;
   };
@@ -32,6 +36,11 @@ interface SaleOrder {
     valor: number;
     nome: string;
   };
+  itens: {
+    descricao: string;
+    quantidade: number;
+    valor: number;
+  }[];
   totalProdutos: number;
   total: number;
 }
@@ -65,10 +74,11 @@ async function getSalesFromFirestore(): Promise<SaleOrder[]> {
 
 // Função para formatar a data
 const formatDate = (dateString: string) => {
-    if (!dateString) return 'N/A';
+    if (!dateString || dateString.startsWith('0000')) return 'N/A';
     try {
-        const [year, month, day] = dateString.split('-');
-        return `${day}/${month}/${year}`;
+        // A data vem como 'YYYY-MM-DD'
+        const date = new Date(dateString + 'T00:00:00'); // Adiciona T00:00:00 para evitar problemas de fuso
+        return new Intl.DateTimeFormat('pt-BR').format(date);
     } catch {
         return dateString; // Retorna a data original se o formato for inesperado
     }
@@ -85,11 +95,16 @@ const formatCurrency = (value: number) => {
 // Badge de status
 const StatusBadge = ({ statusName }: { statusName: string }) => {
     let variant: "default" | "secondary" | "destructive" | "outline" = "secondary";
-    if (statusName.toLowerCase().includes('entregue')) variant = "default";
-    if (statusName.toLowerCase().includes('cancelado')) variant = "destructive";
-    if (statusName.toLowerCase().includes('enviado')) variant = "outline";
+    if (!statusName) return <Badge variant={variant}>Desconhecido</Badge>;
 
-    return <Badge variant={variant}>{statusName}</Badge>
+    const lowerStatus = statusName.toLowerCase();
+    if (lowerStatus.includes('entregue') || lowerStatus.includes('concluído') || lowerStatus.includes('atendido')) variant = "default";
+    if (lowerStatus.includes('cancelado')) variant = "destructive";
+    if (lowerStatus.includes('enviado') || lowerStatus.includes('em trânsito')) variant = "outline";
+    if (lowerStatus.includes('em aberto') || lowerStatus.includes('em andamento')) variant = "secondary";
+
+
+    return <Badge variant={variant} className="whitespace-nowrap">{statusName}</Badge>
 }
 
 
@@ -111,54 +126,64 @@ export default async function VendasPage() {
           <CardHeader>
             <CardTitle>Últimos Pedidos Importados</CardTitle>
             <CardDescription>
-              Uma lista dos seus pedidos de venda mais recentes sincronizados do Bling.
+              Uma lista detalhada dos seus pedidos de venda sincronizados do Bling.
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>ID Pedido</TableHead>
-                  <TableHead>Nº Pedido</TableHead>
-                  <TableHead>Nº Loja</TableHead>
-                  <TableHead>Data</TableHead>
-                  <TableHead>Data Saída</TableHead>
-                  <TableHead>Cliente</TableHead>
-                  <TableHead>Documento</TableHead>
-                  <TableHead>Marketplace</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead className="text-right">Total Produtos</TableHead>
-                  <TableHead className="text-right">Total Pedido</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {sales.length > 0 ? (
-                    sales.map((sale) => (
-                        <TableRow key={sale.id}>
-                            <TableCell className="font-medium">{sale.id}</TableCell>
-                            <TableCell>{sale.numero || 'N/A'}</TableCell>
-                            <TableCell>{sale.numeroLoja || 'N/A'}</TableCell>
-                            <TableCell>{formatDate(sale.data)}</TableCell>
-                            <TableCell>{formatDate(sale.dataSaida)}</TableCell>
-                            <TableCell>{sale.contato?.nome || 'N/A'}</TableCell>
-                            <TableCell>{sale.contato?.numeroDocumento || 'N/A'}</TableCell>
-                            <TableCell>{sale.loja?.nome || 'N/A'}</TableCell>
-                            <TableCell>
-                                <StatusBadge statusName={sale.situacao?.nome || 'Desconhecido'} />
-                            </TableCell>
-                            <TableCell className="text-right">{formatCurrency(sale.totalProdutos)}</TableCell>
-                            <TableCell className="text-right">{formatCurrency(sale.total)}</TableCell>
-                        </TableRow>
-                    ))
-                ) : (
-                    <TableRow>
-                        <TableCell colSpan={11} className="text-center h-24">
-                           Nenhum pedido encontrado. <a href="/api" className="text-primary underline">Importe seus pedidos aqui.</a>
-                        </TableCell>
-                    </TableRow>
-                )}
-              </TableBody>
-            </Table>
+            <div className="w-full overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>ID Pedido</TableHead>
+                    <TableHead>Nº Pedido</TableHead>
+                    <TableHead>Nº Loja</TableHead>
+                    <TableHead>Data</TableHead>
+                    <TableHead>Cliente</TableHead>
+                    <TableHead>Marketplace</TableHead>
+                    <TableHead>Itens</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Vendedor</TableHead>
+                    <TableHead className="text-right">Total Pedido</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {sales.length > 0 ? (
+                      sales.map((sale) => (
+                          <TableRow key={sale.id}>
+                              <TableCell className="font-medium">{sale.id}</TableCell>
+                              <TableCell>{sale.numero || 'N/A'}</TableCell>
+                              <TableCell>{sale.numeroLoja || 'N/A'}</TableCell>
+                              <TableCell className="whitespace-nowrap">{formatDate(sale.data)}</TableCell>
+                              <TableCell>{sale.contato?.nome || 'N/A'}</TableCell>
+                              <TableCell>{sale.loja?.nome || 'N/A'}</TableCell>
+                              <TableCell>
+                                {sale.itens && sale.itens.length > 0 ? (
+                                  <ul className="list-disc list-inside">
+                                    {sale.itens.map(item => (
+                                      <li key={item.produto.id} title={item.descricao}>
+                                        {item.quantidade}x {item.descricao.substring(0, 25)}{item.descricao.length > 25 ? '...' : ''}
+                                      </li>
+                                    ))}
+                                  </ul>
+                                ) : 'Sem itens'}
+                              </TableCell>
+                              <TableCell>
+                                  <StatusBadge statusName={sale.situacao?.nome || 'Desconhecido'} />
+                              </TableCell>
+                              <TableCell>{sale.vendedor?.nome || 'N/A'}</TableCell>
+                              <TableCell className="text-right whitespace-nowrap">{formatCurrency(sale.total)}</TableCell>
+                          </TableRow>
+                      ))
+                  ) : (
+                      <TableRow>
+                          <TableCell colSpan={10} className="text-center h-24">
+                             Nenhum pedido encontrado. <a href="/api" className="text-primary underline">Importe seus pedidos aqui.</a>
+                          </TableCell>
+                      </TableRow>
+                  )}
+                </TableBody>
+              </Table>
+            </div>
           </CardContent>
         </Card>
       </div>
