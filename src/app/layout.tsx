@@ -3,7 +3,7 @@ import './globals.css';
 import { Toaster } from "@/components/ui/toaster";
 
 export const metadata: Metadata = {
-  title: 'MarketFlow',
+  title: 'BR Steel - MarketFlow',
   description: 'Sistema de gerenciamento de vendas de marketplaces',
 };
 

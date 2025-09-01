@@ -3,7 +3,7 @@
 
 import type { ReactNode } from "react";
 import Link from "next/link";
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import {
   LayoutDashboard,
   Settings,
@@ -12,6 +12,7 @@ import {
   Factory,
   Warehouse,
   ClipboardList,
+  LogOut,
 } from "lucide-react";
 import * as React from "react";
 
@@ -41,6 +42,7 @@ import {
   SidebarTrigger,
   SidebarMenuButton,
 } from "@/components/ui/sidebar";
+import { useToast } from "@/hooks/use-toast";
 
 const Logo = () => (
     <svg width="120" height="30" viewBox="0 0 120 30" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -54,34 +56,37 @@ const Logo = () => (
 
 export default function DashboardLayout({ children }: { children: ReactNode }) {
   const pathname = usePathname();
+  const router = useRouter();
+  const { toast } = useToast();
 
-  const getActiveMenu = () => {
-    if (pathname === '/api') return 'api';
-    if (pathname.startsWith('/#')) {
-        return pathname.substring(2);
+  React.useEffect(() => {
+    const isAuthenticated = localStorage.getItem('isAuthenticated');
+    if (!isAuthenticated) {
+      router.push('/login');
     }
-    return 'painel';
-  }
+  }, [router]);
 
-  const handleMenuClick = (menu: string) => {
-    const element = document.getElementById(menu);
-    if (element) {
-        element.scrollIntoView({ behavior: 'smooth' });
-    }
-  }
+  const handleLogout = () => {
+    localStorage.removeItem('isAuthenticated');
+    toast({
+        title: "Logout realizado com sucesso!",
+        description: "Você será redirecionado para a tela de login.",
+    });
+    router.push('/login');
+  };
 
   return (
     <SidebarProvider>
       <Sidebar>
         <SidebarHeader>
-            <Link href="/" className="flex items-center gap-2">
+            <Link href="/dashboard" className="flex items-center gap-2">
                 <Logo />
             </Link>
         </SidebarHeader>
         <SidebarMenu>
           <SidebarMenuItem>
             <Button asChild variant="ghost" className="w-full justify-start">
-              <Link href="/">
+              <Link href="/dashboard">
                   <LayoutDashboard />
                   <span>Painel de Vendas</span>
               </Link>
@@ -166,7 +171,10 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
                   <DropdownMenuItem>Configurações</DropdownMenuItem>
                 </DropdownMenuGroup>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem>Sair</DropdownMenuItem>
+                <DropdownMenuItem onClick={handleLogout}>
+                    <LogOut className="mr-2 h-4 w-4" />
+                    Sair
+                </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
         </header>
