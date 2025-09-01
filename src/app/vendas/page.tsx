@@ -4,7 +4,7 @@
 
 import * as React from 'react';
 import DashboardLayout from '@/components/dashboard-layout';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card';
 import {
   Table,
   TableBody,
@@ -18,6 +18,9 @@ import { db } from '@/lib/firebase';
 import { Badge } from '@/components/ui/badge';
 import SaleOrderDetailModal from '@/components/sale-order-detail-modal';
 import type { SaleOrder } from '@/types/sale-order';
+import { Button } from '@/components/ui/button';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { ChevronsLeft, ChevronLeft, ChevronRight, ChevronsRight } from 'lucide-react';
 
 
 // Função para buscar os pedidos do Firestore
@@ -82,6 +85,10 @@ export default function VendasPage() {
   const [isLoading, setIsLoading] = React.useState(true);
   const [selectedOrder, setSelectedOrder] = React.useState<SaleOrder | null>(null);
 
+  // Pagination State
+  const [currentPage, setCurrentPage] = React.useState(1);
+  const [rowsPerPage, setRowsPerPage] = React.useState(10);
+
   React.useEffect(() => {
     async function fetchData() {
       setIsLoading(true);
@@ -91,6 +98,13 @@ export default function VendasPage() {
     }
     fetchData();
   }, []);
+  
+  // Pagination Logic
+  const totalPages = Math.ceil(sales.length / rowsPerPage);
+  const paginatedSales = sales.slice(
+    (currentPage - 1) * rowsPerPage,
+    currentPage * rowsPerPage
+  );
 
   const handleRowClick = (sale: SaleOrder) => {
     setSelectedOrder(sale);
@@ -148,8 +162,8 @@ export default function VendasPage() {
                            Carregando pedidos...
                         </TableCell>
                     </TableRow>
-                  ) : sales.length > 0 ? (
-                      sales.map((sale) => (
+                  ) : paginatedSales.length > 0 ? (
+                      paginatedSales.map((sale) => (
                           <TableRow key={sale.id} onClick={() => handleRowClick(sale)} className="cursor-pointer">
                               <TableCell className="font-medium">{sale.id}</TableCell>
                               <TableCell>{sale.numero || 'N/A'}</TableCell>
@@ -187,6 +201,75 @@ export default function VendasPage() {
               </Table>
             </div>
           </CardContent>
+           <CardFooter className="flex items-center justify-between">
+            <div className="text-sm text-muted-foreground">
+              Total de {sales.length} pedidos.
+            </div>
+            <div className="flex items-center space-x-6 lg:space-x-8">
+              <div className="flex items-center space-x-2">
+                <p className="text-sm font-medium">Itens por página</p>
+                <Select
+                  value={`${rowsPerPage}`}
+                  onValueChange={(value) => {
+                    setRowsPerPage(Number(value))
+                    setCurrentPage(1)
+                  }}
+                >
+                  <SelectTrigger className="h-8 w-[70px]">
+                    <SelectValue placeholder={rowsPerPage} />
+                  </SelectTrigger>
+                  <SelectContent side="top">
+                    {[10, 20, 30, 40, 50].map((pageSize) => (
+                      <SelectItem key={pageSize} value={`${pageSize}`}>
+                        {pageSize}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="flex w-[100px] items-center justify-center text-sm font-medium">
+                Página {currentPage} de {totalPages}
+              </div>
+              <div className="flex items-center space-x-2">
+                <Button
+                  variant="outline"
+                  className="hidden h-8 w-8 p-0 lg:flex"
+                  onClick={() => setCurrentPage(1)}
+                  disabled={currentPage === 1}
+                >
+                  <span className="sr-only">Go to first page</span>
+                  <ChevronsLeft className="h-4 w-4" />
+                </Button>
+                <Button
+                  variant="outline"
+                  className="h-8 w-8 p-0"
+                  onClick={() => setCurrentPage(currentPage - 1)}
+                  disabled={currentPage === 1}
+                >
+                  <span className="sr-only">Go to previous page</span>
+                  <ChevronLeft className="h-4 w-4" />
+                </Button>
+                <Button
+                  variant="outline"
+                  className="h-8 w-8 p-0"
+                  onClick={() => setCurrentPage(currentPage + 1)}
+                  disabled={currentPage === totalPages}
+                >
+                  <span className="sr-only">Go to next page</span>
+                  <ChevronRight className="h-4 w-4" />
+                </Button>
+                <Button
+                  variant="outline"
+                  className="hidden h-8 w-8 p-0 lg:flex"
+                  onClick={() => setCurrentPage(totalPages)}
+                  disabled={currentPage === totalPages}
+                >
+                  <span className="sr-only">Go to last page</span>
+                  <ChevronsRight className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+          </CardFooter>
         </Card>
       </div>
       {selectedOrder && (
