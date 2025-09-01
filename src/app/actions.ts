@@ -152,6 +152,45 @@ export async function getBlingSalesOrders({ from, to }: { from?: Date, to?: Date
     }
 }
 
+export async function getBlingOrderDetails(orderId: string): Promise<any> {
+    if (!orderId) {
+        throw new Error('O ID do pedido é obrigatório.');
+    }
+
+    const envMap = await readEnvFile();
+    const accessToken = envMap.get('BLING_ACCESS_TOKEN');
+
+    if (!accessToken) {
+        throw new Error('Access Token do Bling não encontrado. Por favor, conecte sua conta primeiro.');
+    }
+
+    const url = `https://api.bling.com.br/Api/v3/pedidos/vendas/${orderId}`;
+
+    try {
+        const response = await fetch(url, {
+            method: 'GET',
+            headers: {
+                'Authorization': `Bearer ${accessToken}`,
+                'Accept': 'application/json',
+            },
+        });
+        
+        const data = await response.json();
+
+        if (!response.ok) {
+            const errorMessage = data?.error?.description || response.statusText;
+            throw new Error(`Erro do Bling (${response.status}): ${errorMessage}`);
+        }
+
+        return data;
+
+    } catch (error: any) {
+        console.error(`Falha ao buscar detalhes do pedido ${orderId}:`, error);
+        throw new Error(`Falha na comunicação com a API do Bling: ${error.message}`);
+    }
+}
+
+
 export async function countImportedOrders(): Promise<number> {
     try {
         const ordersCollection = collection(db, 'salesOrders');

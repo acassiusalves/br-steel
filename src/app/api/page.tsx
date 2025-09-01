@@ -2,7 +2,7 @@
 "use client";
 
 import * as React from 'react';
-import { KeyRound, Loader2, Copy, Save, CheckCircle, XCircle, FileJson, Send, Calendar as CalendarIcon, Plug, Sheet, Database, FileDown } from 'lucide-react';
+import { KeyRound, Loader2, Copy, Save, CheckCircle, XCircle, FileJson, Send, Calendar as CalendarIcon, Plug, Sheet, Database, FileDown, Search } from 'lucide-react';
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import type { DateRange } from "react-day-picker";
@@ -14,12 +14,13 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
-import { getBlingCredentials, saveBlingCredentials, getBlingSalesOrders, countImportedOrders } from '@/app/actions';
+import { getBlingCredentials, saveBlingCredentials, getBlingSalesOrders, countImportedOrders, getBlingOrderDetails } from '@/app/actions';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Calendar } from '@/components/ui/calendar';
 import { cn } from '@/lib/utils';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from '@/components/ui/badge';
+import { Separator } from '@/components/ui/separator';
 
 
 type ApiStatus = 'valid' | 'invalid' | 'unchecked';
@@ -51,6 +52,10 @@ export default function ApiPage() {
   });
   const [apiStatus, setApiStatus] = React.useState<ApiStatus>('unchecked');
   const [importedCount, setImportedCount] = React.useState(0);
+
+  const [orderId, setOrderId] = React.useState('');
+  const [isSearchingDetails, setIsSearchingDetails] = React.useState(false);
+  const [detailsResponse, setDetailsResponse] = React.useState<any>(null);
 
   const { toast } = useToast();
   
@@ -197,6 +202,28 @@ export default function ApiPage() {
     }
   }
 
+  const handleSearchDetails = async () => {
+    if (!orderId) {
+        toast({ variant: 'destructive', title: "ID do Pedido Obrigatório", description: "Por favor, insira um ID de pedido para buscar." });
+        return;
+    }
+    setIsSearchingDetails(true);
+    setDetailsResponse(null);
+    try {
+        const responseData = await getBlingOrderDetails(orderId);
+        setDetailsResponse(responseData);
+    } catch (error: any) {
+        setDetailsResponse({ error: "Falha na requisição", message: error.message });
+        toast({
+            variant: "destructive",
+            title: "Erro ao Buscar Detalhes",
+            description: `Não foi possível buscar os detalhes do pedido: ${error.message}`,
+        });
+    } finally {
+        setIsSearchingDetails(false);
+    }
+  };
+
   const renderConnectionContent = () => {
     if (isLoading) {
         return (
@@ -209,6 +236,7 @@ export default function ApiPage() {
     // Se estiver conectado, mostra a área de importação e desconexão
     if (apiStatus === 'valid') {
        return (
+         <div className="space-y-8">
             <div className="grid md:grid-cols-2 gap-6 items-start">
                  <div className="space-y-4">
                     <div className="flex items-center gap-3 text-left">
@@ -288,6 +316,27 @@ export default function ApiPage() {
                     </div>
                 </div>
             </div>
+            
+            <Separator />
+
+            <div className="space-y-4">
+                 <h3 className="text-lg font-medium">Buscar Detalhes de um Pedido</h3>
+                 <div className="flex items-center gap-2 max-w-md">
+                     <Input
+                        id="orderId"
+                        type="text"
+                        placeholder="Insira o ID do pedido no Bling"
+                        value={orderId}
+                        onChange={(e) => setOrderId(e.target.value)}
+                        disabled={isSearchingDetails}
+                     />
+                     <Button onClick={handleSearchDetails} disabled={isSearchingDetails}>
+                        {isSearchingDetails ? <Loader2 className="animate-spin" /> : <Search />}
+                        {isSearchingDetails ? "Buscando..." : "Buscar"}
+                     </Button>
+                 </div>
+            </div>
+         </div>
         );
     }
     
@@ -426,10 +475,26 @@ export default function ApiPage() {
               </CardContent>
             </Card>
 
+            {detailsResponse && (
+              <Card>
+                  <CardHeader>
+                      <CardTitle>Resposta dos Detalhes do Pedido</CardTitle>
+                      <CardDescription>
+                          Estes são os dados brutos retornados pela API do Bling para o pedido ID: {detailsResponse?.data?.id || orderId}.
+                      </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                      <pre className="p-4 bg-muted rounded-md text-sm overflow-auto max-h-[500px]">
+                          <code>{JSON.stringify(detailsResponse, null, 2)}</code>
+                      </pre>
+                  </CardContent>
+              </Card>
+            )}
+
             {apiResponse && (
               <Card>
                   <CardHeader>
-                      <CardTitle>Resposta da API do Bling</CardTitle>
+                      <CardTitle>Resposta da API de Lista de Pedidos</CardTitle>
                       <CardDescription>
                           Estes são os dados brutos retornados pela última requisição à API do Bling.
                       </CardDescription>
