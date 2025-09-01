@@ -297,7 +297,7 @@ export async function getProductsStock(): Promise<{ data: ProductStock[], isSimu
 
     try {
         // Tentar endpoint principal de estoques
-        const stockUrl = 'https://api.bling.com.br/Api/v3/estoques';
+        const stockUrl = 'https://api.bling.com.br/Api/v3/estoques/saldos/produtos';
         console.log('🔍 Tentando endpoint:', stockUrl);
         
         const stockData = await blingGetPaged(stockUrl, accessToken);
@@ -536,4 +536,5 @@ export async function getProductionDemand(
     return result;
 }
 
+    
     
