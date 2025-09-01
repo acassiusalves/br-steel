@@ -15,19 +15,24 @@ import { Badge } from '@/components/ui/badge';
 
 // Tipagem para os dados do pedido que vêm do Bling (e salvos no Firestore)
 interface SaleOrder {
-  id: number; // ID numérico do Bling
-  data: string; // ex: "2024-07-26"
+  id: number;
+  numero: number;
+  numeroLoja: string;
+  data: string;
+  dataSaida: string;
   cliente: {
     nome: string;
+    numeroDocumento?: string;
   };
   loja?: {
       nome: string;
   };
   situacao: {
     id: number;
-    valor: number; // O campo valor existe no objeto situacao, mantendo-o
+    valor: number;
     nome: string;
   };
+  totalProdutos: number;
   total: number;
 }
 
@@ -60,6 +65,7 @@ async function getSalesFromFirestore(): Promise<SaleOrder[]> {
 
 // Função para formatar a data
 const formatDate = (dateString: string) => {
+    if (!dateString) return 'N/A';
     try {
         const [year, month, day] = dateString.split('-');
         return `${day}/${month}/${year}`;
@@ -73,7 +79,7 @@ const formatCurrency = (value: number) => {
     return new Intl.NumberFormat('pt-BR', {
         style: 'currency',
         currency: 'BRL',
-    }).format(value);
+    }).format(value || 0);
 }
 
 // Badge de status
@@ -82,7 +88,6 @@ const StatusBadge = ({ statusName }: { statusName: string }) => {
     if (statusName.toLowerCase().includes('entregue')) variant = "default";
     if (statusName.toLowerCase().includes('cancelado')) variant = "destructive";
     if (statusName.toLowerCase().includes('enviado')) variant = "outline";
-
 
     return <Badge variant={variant}>{statusName}</Badge>
 }
@@ -113,12 +118,17 @@ export default async function VendasPage() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Pedido</TableHead>
+                  <TableHead>ID Pedido</TableHead>
+                  <TableHead>Nº Pedido</TableHead>
+                  <TableHead>Nº Loja</TableHead>
                   <TableHead>Data</TableHead>
+                  <TableHead>Data Saída</TableHead>
                   <TableHead>Cliente</TableHead>
+                  <TableHead>Documento</TableHead>
                   <TableHead>Marketplace</TableHead>
                   <TableHead>Status</TableHead>
-                  <TableHead className="text-right">Total</TableHead>
+                  <TableHead className="text-right">Total Produtos</TableHead>
+                  <TableHead className="text-right">Total Pedido</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -126,18 +136,23 @@ export default async function VendasPage() {
                     sales.map((sale) => (
                         <TableRow key={sale.id}>
                             <TableCell className="font-medium">{sale.id}</TableCell>
+                            <TableCell>{sale.numero || 'N/A'}</TableCell>
+                            <TableCell>{sale.numeroLoja || 'N/A'}</TableCell>
                             <TableCell>{formatDate(sale.data)}</TableCell>
+                            <TableCell>{formatDate(sale.dataSaida)}</TableCell>
                             <TableCell>{sale.cliente?.nome || 'N/A'}</TableCell>
+                            <TableCell>{sale.cliente?.numeroDocumento || 'N/A'}</TableCell>
                             <TableCell>{sale.loja?.nome || 'N/A'}</TableCell>
                             <TableCell>
                                 <StatusBadge statusName={sale.situacao?.nome || 'Desconhecido'} />
                             </TableCell>
-                            <TableCell className="text-right">{formatCurrency(sale.total || 0)}</TableCell>
+                            <TableCell className="text-right">{formatCurrency(sale.totalProdutos)}</TableCell>
+                            <TableCell className="text-right">{formatCurrency(sale.total)}</TableCell>
                         </TableRow>
                     ))
                 ) : (
                     <TableRow>
-                        <TableCell colSpan={6} className="text-center h-24">
+                        <TableCell colSpan={11} className="text-center h-24">
                            Nenhum pedido encontrado. <a href="/api" className="text-primary underline">Importe seus pedidos aqui.</a>
                         </TableCell>
                     </TableRow>
