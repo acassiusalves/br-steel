@@ -164,6 +164,7 @@ const CustomLegend = ({ payload, totalRevenue }: { payload: any[], totalRevenue:
     )
 }
 
+const SYNC_INTERVAL = 15 * 60 * 1000; // 15 minutes
 
 export default function SalesDashboard() {
   const [date, setDate] = React.useState<DateRange | undefined>(() => {
@@ -256,7 +257,16 @@ export default function SalesDashboard() {
         autoSyncBling(false);
         setInitialSyncDone(true);
     }
-  }, [initialSyncDone, autoSyncBling]); 
+  }, [initialSyncDone, autoSyncBling]);
+
+  React.useEffect(() => {
+    const intervalId = setInterval(() => {
+      console.log('Iniciando rotina de sincronização automática...');
+      autoSyncBling(false);
+    }, SYNC_INTERVAL);
+
+    return () => clearInterval(intervalId);
+  }, [autoSyncBling]);
 
   const handleFilter = () => {
     fetchData(date);
