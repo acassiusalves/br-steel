@@ -7,7 +7,7 @@ import { format, parseISO, startOfMonth, endOfMonth, eachMonthOfInterval, getMon
 import { collection, getDocs, doc, writeBatch, query, where } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 
-import { saveSalesOrders } from '@/services/order-service';
+import { saveSalesOrders, filterNewOrders, getLastImportedOrderDate, orderExists, saveSalesOrdersOptimized } from '@/services/order-service';
 import type { SaleOrder } from '@/types/sale-order';
 
 
@@ -62,7 +62,6 @@ async function writeEnvVar(key: string, value: string) {
 export async function saveBlingCredentials(credentials: Partial<BlingCredentials>): Promise<void> {
     const envMap = await readEnvFile();
 
-    // The 'any' cast is a simple way to handle dynamic keys.
     const credentialKeys: (keyof BlingCredentials)[] = ['clientId', 'clientSecret', 'accessToken', 'refreshToken'];
     const envKeys: { [key in keyof BlingCredentials]: string } = {
         clientId: 'BLING_CLIENT_ID',
@@ -97,7 +96,6 @@ export async function getBlingCredentials(): Promise<Partial<BlingCredentials>> 
 }
 
 
-// Nova lógica de refresh e fetch
 async function refreshAccessToken() {
   const env = await readEnvFile();
   const clientId = env.get("BLING_CLIENT_ID");
@@ -130,11 +128,9 @@ async function refreshAccessToken() {
     throw new Error(`Refresh falhou (${res.status}): ${json?.error?.description || res.statusText}`);
   }
 
-  // salva novos tokens (guarde o novo refresh_token se vier)
   if (json.access_token) await writeEnvVar("BLING_ACCESS_TOKEN", json.access_token);
   if (json.refresh_token) await writeEnvVar("BLING_REFRESH_TOKEN", json.refresh_token);
 
-  // opcional: guardar o expires_at para refresh pró-ativo (agende -60s de buffer)
   if (json.expires_in) {
     const expiresAt = Date.now() + (Number(json.expires_in) * 1000);
     await writeEnvVar("BLING_ACCESS_EXPIRES_AT", String(expiresAt));
@@ -187,12 +183,10 @@ async function blingFetchWithRefresh(url: string, init?: RequestInit): Promise<a
     }
 }
 
-
-// Função auxiliar para chamadas GET paginadas ao Bling
 async function blingGetPaged(baseUrl: string) {
     const allData: any[] = [];
     let page = 1;
-    const limit = 100; // Bling's max limit
+    const limit = 100; 
 
     while (true) {
         const url = new URL(baseUrl);
@@ -213,25 +207,149 @@ async function blingGetPaged(baseUrl: string) {
 }
 
 
-export async function getBlingSalesOrders({ from, to }: { from?: Date, to?: Date } = {}): Promise<any> {
-    const baseUrl = new URL('https://api.bling.com.br/Api/v3/pedidos/vendas');
-    if (from) baseUrl.searchParams.set('dataInicial', format(from, 'yyyy-MM-dd'));
-    if (to) baseUrl.searchParams.set('dataFinal', format(to, 'yyyy-MM-dd'));
+async function getBlingSalesOrdersOptimized({ 
+    from, 
+    to, 
+    forceFullSync = false 
+}: { 
+    from?: Date; 
+    to?: Date; 
+    forceFullSync?: boolean 
+}) {
+    const credentials = await getBlingCredentials();
+    
+    if (!credentials.accessToken) {
+        throw new Error('Token de acesso não encontrado. Faça a conexão com o Bling primeiro.');
+    }
+
+    let queryFrom = from;
+    let queryTo = to;
+
+    if (!forceFullSync && !from) {
+        const lastImportDate = await getLastImportedOrderDate();
+        if (lastImportDate) {
+            queryFrom = lastImportDate;
+            console.log(`🔄 Sincronização incremental a partir de: ${queryFrom.toISOString()}`);
+        } else {
+            queryFrom = new Date();
+            queryFrom.setDate(queryFrom.getDate() - 30);
+            console.log(`🆕 Primeira importação - últimos 30 dias a partir de: ${queryFrom.toISOString()}`);
+        }
+    }
+
+    if(!queryFrom) {
+      queryFrom = new Date();
+      queryFrom.setDate(queryFrom.getDate() - 30);
+    }
+    if (!queryTo) {
+        queryTo = new Date();
+    }
+
+    const formatDate = (date: Date) => date.toISOString().split('T')[0];
+    const baseUrl = `https://api.bling.com.br/Api/v3/pedidos/vendas?dataInicial=${formatDate(queryFrom)}&dataFinal=${formatDate(queryTo)}`;
     
     try {
-        const allOrders = await blingGetPaged(baseUrl.toString());
-
-        if (allOrders.length > 0) {
-            const { count } = await saveSalesOrders(allOrders);
-            console.log(`${count} orders processed and saved.`);
-        }
+        console.log(`📥 Buscando pedidos de ${formatDate(queryFrom)} a ${formatDate(queryTo)}`);
         
-        return { data: allOrders, firestore: { savedCount: allOrders.length } };
+        const allOrders = await blingGetPaged(baseUrl);
+
+        if (allOrders.length === 0) {
+            console.log('📭 Nenhum pedido encontrado no período');
+            return { 
+                data: [], 
+                summary: { total: 0, new: 0, existing: 0, processed: 0 } 
+            };
+        }
+
+        const newOrders = await filterNewOrders(allOrders);
+
+        if (newOrders.length === 0) {
+            console.log('✅ Todos os pedidos já estão atualizados no banco');
+            return { 
+                data: allOrders, 
+                summary: { total: allOrders.length, new: 0, existing: allOrders.length, processed: 0 } 
+            };
+        }
+
+        console.log(`🔍 Buscando detalhes completos para ${newOrders.length} pedidos novos...`);
+        
+        const ordersWithDetails = [];
+        let processedCount = 0;
+
+        for (const order of newOrders) {
+            try {
+                const detailsData = await blingFetchWithRefresh(`https://api.bling.com.br/Api/v3/pedidos/vendas/${order.id}`);
+                if (detailsData && detailsData.data) {
+                    ordersWithDetails.push(detailsData.data);
+                    processedCount++;
+                } else {
+                    ordersWithDetails.push(order);
+                }
+            } catch (error) {
+                console.warn(`⚠️ Erro ao processar pedido ${order.id}:`, error);
+                ordersWithDetails.push(order);
+            }
+        }
+
+        const saveResult = await saveSalesOrdersOptimized(ordersWithDetails);
+
+        console.log(`✅ Importação concluída: ${saveResult.created} novos, ${saveResult.updated} atualizados`);
+
+        return {
+            data: ordersWithDetails,
+            summary: {
+                total: allOrders.length,
+                new: newOrders.length,
+                existing: allOrders.length - newOrders.length,
+                processed: processedCount,
+                saved: saveResult.count,
+                created: saveResult.created,
+                updated: saveResult.updated
+            }
+        };
 
     } catch (error: any) {
-        console.error('Falha ao buscar pedidos no Bling:', error);
-        throw new Error(`Falha na comunicação com a API do Bling: ${error.message}`);
+        console.error('Erro na importação otimizada:', error);
+        throw new Error(`Falha na importação: ${error.message}`);
     }
+}
+
+
+export async function smartSyncOrders() {
+    console.log('🧠 Iniciando sincronização inteligente...');
+    const result = await getBlingSalesOrdersOptimized({ 
+        forceFullSync: false 
+    });
+    return result;
+}
+
+export async function fullSyncOrders(from?: Date, to?: Date) {
+    console.log('🔄 Iniciando sincronização completa...');
+    const result = await getBlingSalesOrdersOptimized({ 
+        from, 
+        to, 
+        forceFullSync: true 
+    });
+    return result;
+}
+
+
+export async function checkOrderNeedsUpdate(orderId: string): Promise<boolean> {
+    try {
+        const exists = await orderExists(orderId);
+        if (!exists) {
+            return true;
+        }
+        return false; 
+    } catch (error) {
+        console.error(`Erro ao verificar pedido ${orderId}:`, error);
+        return true;
+    }
+}
+
+export async function getBlingSalesOrders({ from, to }: { from?: Date, to?: Date } = {}) {
+    const result = await getBlingSalesOrdersOptimized({ from, to, forceFullSync: true });
+    return result;
 }
 
 
@@ -257,7 +375,6 @@ export async function getBlingChannelByOrderId(orderId: string) {
     throw new Error('O ID do pedido é obrigatório.');
   }
 
-  // 1) busca o pedido pelo *id interno* do Bling
   const orderResp = await blingFetchWithRefresh(
     `https://api.bling.com.br/Api/v3/pedidos/vendas/${orderId}`
   );
@@ -266,7 +383,6 @@ export async function getBlingChannelByOrderId(orderId: string) {
   const lojaId = order?.loja?.id ?? null;
   const intermediador = order?.intermediador ?? null;
 
-  // 2) tentativa de inferência simples do marketplace
   const rastreio = String(order?.transporte?.volumes?.[0]?.codigoRastreamento || '');
   let marketplaceName: string | null = null;
   if (rastreio.startsWith('MEL')) {
@@ -274,7 +390,6 @@ export async function getBlingChannelByOrderId(orderId: string) {
   } else if (intermediador?.nomeUsuario) {
     marketplaceName = `${intermediador.nomeUsuario}`;
   } else if (lojaId) {
-    // Fallback para buscar o nome da loja se a inferência falhar
     try {
         const lojaDetails = await blingFetchWithRefresh(`https://api.bling.com.br/Api/v3/lojas/${lojaId}`);
         marketplaceName = lojaDetails?.data?.nome;
@@ -289,7 +404,7 @@ export async function getBlingChannelByOrderId(orderId: string) {
     lojaId,
     intermediador,
     marketplaceName,
-    rawOrderData: order, // Retorna o pedido completo para depuração
+    rawOrderData: order,
   };
 }
 
@@ -314,7 +429,6 @@ export async function getLogisticsBySalesOrder(orderId: string): Promise<any> {
     }
     
     try {
-        // Passo 1: Buscar o pedido de venda para obter o ID da nota fiscal.
         const orderDetails = await blingFetchWithRefresh(`https://api.bling.com.br/Api/v3/pedidos/vendas/${orderId}`);
         const invoiceId = orderDetails?.data?.notaFiscal?.id;
 
@@ -322,7 +436,6 @@ export async function getLogisticsBySalesOrder(orderId: string): Promise<any> {
             throw new Error('Nota Fiscal não encontrada para este pedido. Não é possível rastrear.');
         }
 
-        // Passo 2: Buscar a remessa de logística usando o ID da nota fiscal.
         const shippingManifests = await blingFetchWithRefresh(`https://api.bling.com.br/Api/v3/logisticas/remessas?idsDocumentos[]=${invoiceId}`);
         const shippingObjects = shippingManifests?.data?.[0]?.objetos;
 
@@ -336,7 +449,6 @@ export async function getLogisticsBySalesOrder(orderId: string): Promise<any> {
             throw new Error('ID do objeto de logística não encontrado na remessa.');
         }
 
-        // Passo 3: Com o ID do objeto de logística, buscar os detalhes do rastreio.
         const logisticsDetails = await blingFetchWithRefresh(`https://api.bling.com.br/Api/v3/logisticas/objetos/${logisticsObjectId}`);
         
         return logisticsDetails;
@@ -429,7 +541,7 @@ export async function countImportedOrders(): Promise<number> {
         return snapshot.size;
     } catch (error) {
         console.error("Failed to count imported orders:", error);
-        return 0; // Return 0 if there's an error
+        return 0;
     }
 }
 

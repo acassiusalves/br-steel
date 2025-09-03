@@ -13,12 +13,13 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
-import { getBlingCredentials, saveBlingCredentials, getBlingSalesOrders, countImportedOrders, getBlingOrderDetails, getImportedOrderIds, getBlingProducts, getBlingChannelByOrderId } from '@/app/actions';
+import { getBlingCredentials, saveBlingCredentials, countImportedOrders, getBlingOrderDetails, getImportedOrderIds, getBlingProducts, getBlingChannelByOrderId, smartSyncOrders, fullSyncOrders } from '@/app/actions';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Calendar } from '@/components/ui/calendar';
 import { cn } from '@/lib/utils';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from '@/components/ui/badge';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Separator } from '@/components/ui/separator';
 import { Progress } from '@/components/ui/progress';
 
@@ -52,21 +53,17 @@ export default function ApiPage() {
   const [importStatus, setImportStatus] = React.useState({ current: 0, total: 0 });
   const [importProgress, setImportProgress] = React.useState(0);
   
-  // New state for products testing
   const [isFetchingProducts, setIsFetchingProducts] = React.useState(false);
-
-  // New state for order details testing
   const [isFetchingOrderDetails, setIsFetchingOrderDetails] = React.useState(false);
   const [orderIdToTest, setOrderIdToTest] = React.useState('');
-
-  // New state for channel details testing
   const [isFetchingChannel, setIsFetchingChannel] = React.useState(false);
   const [orderIdForChannel, setOrderIdForChannel] = React.useState('');
 
+  const [syncMode, setSyncMode] = React.useState<'smart' | 'period'>('smart');
+  const [importSummary, setImportSummary] = React.useState<any>(null);
 
   const { toast } = useToast();
   
-  // Combina o carregamento inicial de credenciais e a contagem de pedidos
   const loadInitialData = React.useCallback(async () => {
     setIsLoading(true);
     try {
@@ -187,73 +184,103 @@ export default function ApiPage() {
     });
   }
 
-  const handleImportSales = async () => {
+  const handleSmartSync = async () => {
     setIsImporting(true);
     setApiResponse(null);
     setImportProgress(0);
     setImportStatus({ current: 0, total: 0 });
+    setImportSummary(null);
 
     try {
-      // Etapa 1: Buscar a lista de pedidos do período selecionado.
-      const responseData = await getBlingSalesOrders({ from: date?.from, to: date?.to });
-      setApiResponse(responseData);
-
-      const ordersToEnrich = responseData?.data || [];
-      const totalOrdersToEnrich = ordersToEnrich.length;
-      setImportStatus({ current: 0, total: totalOrdersToEnrich });
-
-      if (totalOrdersToEnrich === 0) {
         toast({
-          title: "Nenhum Pedido Encontrado",
-          description: "Não há novos pedidos no período selecionado para importar.",
+            title: "Sincronização Inteligente",
+            description: "Buscando apenas pedidos novos ou atualizados...",
         });
-        setIsImporting(false);
-        return;
-      }
-      
-      toast({
-          title: "Importando Pedidos...",
-          description: `Buscando detalhes completos para ${totalOrdersToEnrich} pedido(s). Isso pode levar um momento.`,
-      });
 
-      // Etapa 2: (Restaurado) Loop para enriquecer cada pedido, o que já é feito no getBlingSalesOrders, 
-      // mas mantemos para a barra de progresso.
-      for (let i = 0; i < totalOrdersToEnrich; i++) {
-          const order = ordersToEnrich[i];
-          try {
-              // A função getBlingOrderDetails já salva os detalhes no Firestore.
-              await getBlingOrderDetails(String(order.id));
-              console.log(`Detalhes do pedido ${order.id} importados e salvos com sucesso.`);
-          } catch (detailError: any) {
-              console.error(`Falha ao buscar/salvar detalhes para o pedido ${order.id}:`, detailError.message);
-              // Continuar mesmo se um pedido falhar
-          }
-          const progress = ((i + 1) / totalOrdersToEnrich) * 100;
-          setImportProgress(progress);
-          setImportStatus(prev => ({ ...prev, current: i + 1 }));
-      }
-     
-      const totalCount = await countImportedOrders();
-      setImportedCount(totalCount);
-      
-      toast({
-        title: "Sincronização Concluída!",
-        description: `${totalOrdersToEnrich} pedido(s) foram processados. Total no banco de dados: ${totalCount}`,
-      });
+        const result = await smartSyncOrders();
+        
+        setApiResponse(result);
+        setImportSummary(result.summary);
+
+        const totalCount = await countImportedOrders();
+        setImportedCount(totalCount);
+
+        if (result.summary.new === 0) {
+            toast({
+                title: "Tudo Atualizado! ✅",
+                description: `Todos os ${result.summary.total} pedidos já estão no banco de dados.`,
+            });
+        } else {
+            toast({
+                title: "Sincronização Concluída! 🎉",
+                description: `${result.summary.created} novos pedidos importados. Total: ${totalCount}`,
+            });
+        }
 
     } catch (error: any) {
-      setApiResponse({ error: "Falha na requisição", message: error.message });
-      toast({
-        variant: "destructive",
-        title: "Erro na Importação",
-        description: `Não foi possível buscar os dados do Bling: ${error.message}`,
-      });
+        setApiResponse({ error: "Falha na sincronização", message: error.message });
+        toast({
+            variant: "destructive",
+            title: "Erro na Sincronização",
+            description: error.message,
+        });
     } finally {
-      setIsImporting(false);
-      setImportProgress(0);
-      setImportStatus({ current: 0, total: 0 });
+        setIsImporting(false);
+        setImportProgress(0);
+        setImportStatus({ current: 0, total: 0 });
     }
-  }
+};
+
+const handleFullSync = async () => {
+    setIsImporting(true);
+    setApiResponse(null);
+    setImportProgress(0);
+    setImportStatus({ current: 0, total: 0 });
+    setImportSummary(null);
+
+    try {
+        toast({
+            title: "Sincronização Completa",
+            description: "Verificando todos os pedidos no período selecionado...",
+        });
+
+        const result = await fullSyncOrders(date?.from, date?.to);
+        
+        setApiResponse(result);
+        setImportSummary(result.summary);
+
+        const totalToProcess = result.summary.new;
+        for (let i = 0; i <= totalToProcess; i++) {
+            const progress = totalToProcess > 0 ? (i / totalToProcess) * 100 : 100;
+            setImportProgress(progress);
+            setImportStatus({ current: i, total: totalToProcess });
+            
+            if (i < totalToProcess) {
+                await new Promise(resolve => setTimeout(resolve, 50));
+            }
+        }
+
+        const totalCount = await countImportedOrders();
+        setImportedCount(totalCount);
+
+        toast({
+            title: "Sincronização Completa! 🎉",
+            description: `${result.summary.created} novos pedidos, ${result.summary.updated} atualizados. Total: ${totalCount}`,
+        });
+
+    } catch (error: any) {
+        setApiResponse({ error: "Falha na sincronização", message: error.message });
+        toast({
+            variant: "destructive",
+            title: "Erro na Sincronização",
+            description: error.message,
+        });
+    } finally {
+        setIsImporting(false);
+        setImportProgress(0);
+        setImportStatus({ current: 0, total: 0 });
+    }
+};
 
   const handleFetchProducts = async () => {
       setIsFetchingProducts(true);
@@ -360,7 +387,6 @@ export default function ApiPage() {
         );
     }
     
-    // Se estiver conectado, mostra a área de importação e desconexão
     if (apiStatus === 'valid') {
        return (
          <div className="space-y-8">
@@ -388,77 +414,138 @@ export default function ApiPage() {
                         </Button>
                 </div>
 
-                 <div className="space-y-4">
+                <div className="space-y-4">
                     <div className="space-y-2">
-                        <Label>Período de Importação</Label>
-                         <Popover>
-                          <PopoverTrigger asChild>
-                            <Button
-                              id="date"
-                              variant={"outline"}
-                              className={cn(
-                                "w-full justify-start text-left font-normal",
-                                !date && "text-muted-foreground"
-                              )}
-                            >
-                              <CalendarIcon className="mr-2 h-4 w-4" />
-                              {date?.from ? (
-                                date.to ? (
-                                  <>
-                                    {format(date.from, "dd/MM/yy")} -{" "}
-                                    {format(date.to, "dd/MM/yy")}
-                                  </>
-                                ) : (
-                                  format(date.from, "dd/MM/yy")
-                                )
-                              ) : (
-                                <span>Escolha um período</span>
-                              )}
-                            </Button>
-                          </PopoverTrigger>
-                          <PopoverContent className="w-auto p-0 flex" align="end">
-                           <div className="flex flex-col space-y-1 p-2 border-r">
-                                <Button variant="ghost" className="justify-start text-left font-normal h-8 px-2" onClick={() => setDatePreset('today')}>Hoje</Button>
-                                <Button variant="ghost" className="justify-start text-left font-normal h-8 px-2" onClick={() => setDatePreset('yesterday')}>Ontem</Button>
-                                <Button variant="ghost" className="justify-start text-left font-normal h-8 px-2" onClick={() => setDatePreset('last7')}>Últimos 7 dias</Button>
-                                <Button variant="ghost" className="justify-start text-left font-normal h-8 px-2" onClick={() => setDatePreset('last30')}>Últimos 30 dias</Button>
-                                <Button variant="ghost" className="justify-start text-left font-normal h-8 px-2" onClick={() => setDatePreset('last3Months')}>Últimos 3 meses</Button>
-                                <Separator />
-                                <Button variant="ghost" className="justify-start text-left font-normal h-8 px-2" onClick={() => setDatePreset('thisMonth')}>Este mês</Button>
-                                <Button variant="ghost" className="justify-start text-left font-normal h-8 px-2" onClick={() => setDatePreset('lastMonth')}>Mês passado</Button>
-                            </div>
-                            <Calendar
-                              initialFocus
-                              mode="range"
-                              defaultMonth={date?.from}
-                              selected={date}
-                              onSelect={setDate}
-                              numberOfMonths={2}
-                              locale={ptBR}
-                            />
-                          </PopoverContent>
-                        </Popover>
+                        <Label>Modo de Sincronização</Label>
+                        <Select value={syncMode} onValueChange={(value: 'smart' | 'period') => setSyncMode(value)}>
+                            <SelectTrigger>
+                                <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="smart">
+                                    <div className="flex items-center gap-2">
+                                        <span role="img" aria-label="brain">🧠</span>
+                                        <div className="text-left">
+                                            <div>Inteligente (Recomendado)</div>
+                                            <div className="text-xs text-muted-foreground">Importa apenas pedidos novos</div>
+                                        </div>
+                                    </div>
+                                </SelectItem>
+                                <SelectItem value="period">
+                                    <div className="flex items-center gap-2">
+                                        <span role="img" aria-label="calendar">📅</span>
+                                        <div className="text-left">
+                                            <div>Por Período</div>
+                                            <div className="text-xs text-muted-foreground">Verifica período selecionado</div>
+                                        </div>
+                                    </div>
+                                </SelectItem>
+                            </SelectContent>
+                        </Select>
                     </div>
+
+                    {syncMode === 'period' && (
+                        <div className="space-y-2">
+                            <Label>Período de Importação</Label>
+                            <Popover>
+                                <PopoverTrigger asChild>
+                                    <Button
+                                        id="date"
+                                        variant={"outline"}
+                                        className={cn(
+                                            "w-full justify-start text-left font-normal",
+                                            !date && "text-muted-foreground"
+                                        )}
+                                    >
+                                        <CalendarIcon className="mr-2 h-4 w-4" />
+                                        {date?.from ? (
+                                            date.to ? (
+                                                <>
+                                                    {format(date.from, "dd/MM/yy")} -{" "}
+                                                    {format(date.to, "dd/MM/yy")}
+                                                </>
+                                            ) : (
+                                                format(date.from, "dd/MM/yy")
+                                            )
+                                        ) : (
+                                            <span>Escolha um período</span>
+                                        )}
+                                    </Button>
+                                </PopoverTrigger>
+                                <PopoverContent className="w-auto p-0 flex" align="end">
+                                    <div className="flex flex-col space-y-1 p-2 border-r">
+                                        <Button variant="ghost" className="justify-start text-left font-normal h-8 px-2" onClick={() => setDatePreset('today')}>Hoje</Button>
+                                        <Button variant="ghost" className="justify-start text-left font-normal h-8 px-2" onClick={() => setDatePreset('yesterday')}>Ontem</Button>
+                                        <Button variant="ghost" className="justify-start text-left font-normal h-8 px-2" onClick={() => setDatePreset('last7')}>Últimos 7 dias</Button>
+                                        <Button variant="ghost" className="justify-start text-left font-normal h-8 px-2" onClick={() => setDatePreset('last30')}>Últimos 30 dias</Button>
+                                        <Button variant="ghost" className="justify-start text-left font-normal h-8 px-2" onClick={() => setDatePreset('last3Months')}>Últimos 3 meses</Button>
+                                        <Separator />
+                                        <Button variant="ghost" className="justify-start text-left font-normal h-8 px-2" onClick={() => setDatePreset('thisMonth')}>Este mês</Button>
+                                        <Button variant="ghost" className="justify-start text-left font-normal h-8 px-2" onClick={() => setDatePreset('lastMonth')}>Mês passado</Button>
+                                    </div>
+                                    <Calendar
+                                        initialFocus
+                                        mode="range"
+                                        defaultMonth={date?.from}
+                                        selected={date}
+                                        onSelect={setDate}
+                                        numberOfMonths={2}
+                                        locale={ptBR}
+                                    />
+                                </PopoverContent>
+                            </Popover>
+                        </div>
+                    )}
+
                     <div className="flex flex-col gap-4">
                         <div className="flex gap-2">
-                            <Button onClick={handleImportSales} disabled={isImporting} className="flex-1">
-                                {isImporting ? <Loader2 className="animate-spin" /> : <Sheet />}
-                                {isImporting ? "Sincronizando..." : "Importar/Atualizar Vendas"}
-                            </Button>
-                             <Button variant="outline" disabled className="flex-1">
+                            {syncMode === 'smart' ? (
+                                <Button onClick={handleSmartSync} disabled={isImporting} className="flex-1">
+                                    {isImporting ? <Loader2 className="animate-spin" /> : <span role="img" aria-label="brain">🧠</span>}
+                                    {isImporting ? "Sincronizando..." : "Sincronização Inteligente"}
+                                </Button>
+                            ) : (
+                                <Button onClick={handleFullSync} disabled={isImporting} className="flex-1">
+                                    {isImporting ? <Loader2 className="animate-spin" /> : <Sheet />}
+                                    {isImporting ? "Sincronizando..." : "Sincronizar Período"}
+                                </Button>
+                            )}
+                            <Button variant="outline" disabled className="flex-1">
                                 <FileDown />
                                 Exportar Dados
                             </Button>
                         </div>
-                         {isImporting && (
-                          <div className="space-y-2">
-                            <Progress value={importProgress} />
-                            <p className="text-sm text-muted-foreground text-center">
-                              {importStatus.total > 0
-                                ? `Importando ${importStatus.current} de ${importStatus.total} pedidos...`
-                                : 'Buscando lista de pedidos...'}
-                            </p>
-                          </div>
+
+                        {isImporting && (
+                            <div className="space-y-2">
+                                <Progress value={importProgress} />
+                                <p className="text-sm text-muted-foreground text-center">
+                                    {importStatus.total > 0
+                                        ? `Processando ${importStatus.current} de ${importStatus.total} pedidos novos...`
+                                        : 'Verificando pedidos existentes...'}
+                                </p>
+                            </div>
+                        )}
+
+                        {importSummary && (
+                            <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-sm">
+                                <div className="bg-blue-50 p-2 rounded text-center">
+                                    <div className="font-bold text-blue-600">{importSummary.total}</div>
+                                    <div className="text-blue-500">Total Encontrado</div>
+                                </div>
+                                <div className="bg-green-50 p-2 rounded text-center">
+                                    <div className="font-bold text-green-600">{importSummary.new}</div>
+                                    <div className="text-green-500">Novos</div>
+                                </div>
+                                <div className="bg-yellow-50 p-2 rounded text-center">
+                                    <div className="font-bold text-yellow-600">{importSummary.existing}</div>
+                                    <div className="text-yellow-500">Já Existentes</div>
+                                </div>
+                                <div className="bg-purple-50 p-2 rounded text-center">
+                                    <div className="font-bold text-purple-600">{importSummary.created || 0}</div>
+                                    <div className="text-purple-500">Importados</div>
+                                </div>
+                            </div>
                         )}
                     </div>
                 </div>
@@ -471,7 +558,6 @@ export default function ApiPage() {
                  <p className="text-sm text-muted-foreground -mt-4">
                    Use as seções abaixo para fazer chamadas individuais à API do Bling e inspecionar a resposta.
                 </p>
-                {/* Order Details Test Section */}
                 <Card className="bg-muted/40">
                   <CardHeader>
                     <CardTitle className="text-base">Detalhes do Pedido</CardTitle>
@@ -499,7 +585,6 @@ export default function ApiPage() {
                   </CardContent>
                 </Card>
 
-                {/* Channel Details Test Section */}
                  <Card className="bg-muted/40">
                   <CardHeader>
                     <CardTitle className="text-base">Detalhes do Canal de Venda (Marketplace)</CardTitle>
@@ -527,7 +612,6 @@ export default function ApiPage() {
                   </CardContent>
                 </Card>
 
-                {/* Products Test Section */}
                 <Card className="bg-muted/40">
                   <CardHeader>
                     <CardTitle className="text-base">Lista de Produtos</CardTitle>
@@ -549,7 +633,6 @@ export default function ApiPage() {
         );
     }
     
-    // Se não estiver conectado, mostra o formulário de conexão
     return (
         <div className="flex flex-col items-start gap-6 max-w-lg">
             <div className="w-full space-y-2">
@@ -705,4 +788,3 @@ export default function ApiPage() {
     </DashboardLayout>
   );
 }
-
