@@ -210,11 +210,13 @@ async function blingGetPaged(baseUrl: string) {
 async function getBlingSalesOrdersOptimized({ 
     from, 
     to, 
-    forceFullSync = false 
+    forceFullSync = false,
+    useIntelligentDates = true 
 }: { 
     from?: Date; 
     to?: Date; 
-    forceFullSync?: boolean 
+    forceFullSync?: boolean;
+    useIntelligentDates?: boolean;
 }) {
     const credentials = await getBlingCredentials();
     
@@ -225,7 +227,7 @@ async function getBlingSalesOrdersOptimized({
     let queryFrom = from;
     let queryTo = to;
 
-    if (!forceFullSync && !from) {
+    if (useIntelligentDates && !forceFullSync && !from) {
         const lastImportDate = await getLastImportedOrderDate();
         if (lastImportDate) {
             queryFrom = lastImportDate;
@@ -315,10 +317,13 @@ async function getBlingSalesOrdersOptimized({
 }
 
 
-export async function smartSyncOrders() {
+export async function smartSyncOrders(from?: Date, to?: Date) {
     console.log('🧠 Iniciando sincronização inteligente...');
     const result = await getBlingSalesOrdersOptimized({ 
-        forceFullSync: false 
+        from,
+        to,
+        forceFullSync: false,
+        useIntelligentDates: !from 
     });
     return result;
 }
@@ -328,7 +333,8 @@ export async function fullSyncOrders(from?: Date, to?: Date) {
     const result = await getBlingSalesOrdersOptimized({ 
         from, 
         to, 
-        forceFullSync: true 
+        forceFullSync: true,
+        useIntelligentDates: false 
     });
     return result;
 }

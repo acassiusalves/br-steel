@@ -192,12 +192,16 @@ export default function ApiPage() {
     setImportSummary(null);
 
     try {
+        const hasCustomDates = date?.from && date?.to;
+        
         toast({
             title: "Sincronização Inteligente",
-            description: "Buscando apenas pedidos novos ou atualizados...",
+            description: hasCustomDates 
+                ? `Buscando pedidos novos entre ${format(date.from, "dd/MM/yy")} e ${format(date.to, "dd/MM/yy")}...`
+                : "Buscando apenas pedidos novos ou atualizados...",
         });
 
-        const result = await smartSyncOrders();
+        const result = await smartSyncOrders(date?.from, date?.to);
         
         setApiResponse(result);
         setImportSummary(result.summary);
@@ -415,140 +419,178 @@ const handleFullSync = async () => {
                 </div>
 
                 <div className="space-y-4">
-                    <div className="space-y-2">
-                        <Label>Modo de Sincronização</Label>
-                        <Select value={syncMode} onValueChange={(value: 'smart' | 'period') => setSyncMode(value)}>
-                            <SelectTrigger>
-                                <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                                <SelectItem value="smart">
-                                    <div className="flex items-center gap-2">
-                                        <span role="img" aria-label="brain">🧠</span>
-                                        <div className="text-left">
-                                            <div>Inteligente (Recomendado)</div>
-                                            <div className="text-xs text-muted-foreground">Importa apenas pedidos novos</div>
-                                        </div>
-                                    </div>
-                                </SelectItem>
-                                <SelectItem value="period">
-                                    <div className="flex items-center gap-2">
-                                        <span role="img" aria-label="calendar">📅</span>
-                                        <div className="text-left">
-                                            <div>Por Período</div>
-                                            <div className="text-xs text-muted-foreground">Verifica período selecionado</div>
-                                        </div>
-                                    </div>
-                                </SelectItem>
-                            </SelectContent>
-                        </Select>
+    <div className="space-y-2">
+        <Label>Modo de Sincronização</Label>
+        <Select value={syncMode} onValueChange={(value: 'smart' | 'period') => setSyncMode(value)}>
+            <SelectTrigger>
+                <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+                <SelectItem value="smart">
+                    <div className="flex items-center gap-2">
+                        <span role="img" aria-label="brain">🧠</span>
+                        <div className="text-left">
+                            <div>Inteligente (Recomendado)</div>
+                            <div className="text-xs text-muted-foreground">
+                                Evita duplicatas automaticamente
+                            </div>
+                        </div>
                     </div>
-
-                    {syncMode === 'period' && (
-                        <div className="space-y-2">
-                            <Label>Período de Importação</Label>
-                            <Popover>
-                                <PopoverTrigger asChild>
-                                    <Button
-                                        id="date"
-                                        variant={"outline"}
-                                        className={cn(
-                                            "w-full justify-start text-left font-normal",
-                                            !date && "text-muted-foreground"
-                                        )}
-                                    >
-                                        <CalendarIcon className="mr-2 h-4 w-4" />
-                                        {date?.from ? (
-                                            date.to ? (
-                                                <>
-                                                    {format(date.from, "dd/MM/yy")} -{" "}
-                                                    {format(date.to, "dd/MM/yy")}
-                                                </>
-                                            ) : (
-                                                format(date.from, "dd/MM/yy")
-                                            )
-                                        ) : (
-                                            <span>Escolha um período</span>
-                                        )}
-                                    </Button>
-                                </PopoverTrigger>
-                                <PopoverContent className="w-auto p-0 flex" align="end">
-                                    <div className="flex flex-col space-y-1 p-2 border-r">
-                                        <Button variant="ghost" className="justify-start text-left font-normal h-8 px-2" onClick={() => setDatePreset('today')}>Hoje</Button>
-                                        <Button variant="ghost" className="justify-start text-left font-normal h-8 px-2" onClick={() => setDatePreset('yesterday')}>Ontem</Button>
-                                        <Button variant="ghost" className="justify-start text-left font-normal h-8 px-2" onClick={() => setDatePreset('last7')}>Últimos 7 dias</Button>
-                                        <Button variant="ghost" className="justify-start text-left font-normal h-8 px-2" onClick={() => setDatePreset('last30')}>Últimos 30 dias</Button>
-                                        <Button variant="ghost" className="justify-start text-left font-normal h-8 px-2" onClick={() => setDatePreset('last3Months')}>Últimos 3 meses</Button>
-                                        <Separator />
-                                        <Button variant="ghost" className="justify-start text-left font-normal h-8 px-2" onClick={() => setDatePreset('thisMonth')}>Este mês</Button>
-                                        <Button variant="ghost" className="justify-start text-left font-normal h-8 px-2" onClick={() => setDatePreset('lastMonth')}>Mês passado</Button>
-                                    </div>
-                                    <Calendar
-                                        initialFocus
-                                        mode="range"
-                                        defaultMonth={date?.from}
-                                        selected={date}
-                                        onSelect={setDate}
-                                        numberOfMonths={2}
-                                        locale={ptBR}
-                                    />
-                                </PopoverContent>
-                            </Popover>
+                </SelectItem>
+                <SelectItem value="period">
+                    <div className="flex items-center gap-2">
+                        <span role="img" aria-label="calendar">📅</span>
+                        <div className="text-left">
+                            <div>Sincronização Completa</div>
+                            <div className="text-xs text-muted-foreground">
+                                Força verificação de todo período
+                            </div>
                         </div>
+                    </div>
+                </SelectItem>
+            </SelectContent>
+        </Select>
+    </div>
+
+    <div className="space-y-2">
+        <Label>Período {syncMode === 'smart' ? '(Opcional)' : ''}</Label>
+        <Popover>
+            <PopoverTrigger asChild>
+                <Button
+                    id="date"
+                    variant={"outline"}
+                    className={cn(
+                        "w-full justify-start text-left font-normal",
+                        !date && "text-muted-foreground"
                     )}
-
-                    <div className="flex flex-col gap-4">
-                        <div className="flex gap-2">
-                            {syncMode === 'smart' ? (
-                                <Button onClick={handleSmartSync} disabled={isImporting} className="flex-1">
-                                    {isImporting ? <Loader2 className="animate-spin" /> : <span role="img" aria-label="brain">🧠</span>}
-                                    {isImporting ? "Sincronizando..." : "Sincronização Inteligente"}
-                                </Button>
-                            ) : (
-                                <Button onClick={handleFullSync} disabled={isImporting} className="flex-1">
-                                    {isImporting ? <Loader2 className="animate-spin" /> : <Sheet />}
-                                    {isImporting ? "Sincronizando..." : "Sincronizar Período"}
-                                </Button>
-                            )}
-                            <Button variant="outline" disabled className="flex-1">
-                                <FileDown />
-                                Exportar Dados
-                            </Button>
-                        </div>
-
-                        {isImporting && (
-                            <div className="space-y-2">
-                                <Progress value={importProgress} />
-                                <p className="text-sm text-muted-foreground text-center">
-                                    {importStatus.total > 0
-                                        ? `Processando ${importStatus.current} de ${importStatus.total} pedidos novos...`
-                                        : 'Verificando pedidos existentes...'}
-                                </p>
-                            </div>
-                        )}
-
-                        {importSummary && (
-                            <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-sm">
-                                <div className="bg-blue-50 p-2 rounded text-center">
-                                    <div className="font-bold text-blue-600">{importSummary.total}</div>
-                                    <div className="text-blue-500">Total Encontrado</div>
-                                </div>
-                                <div className="bg-green-50 p-2 rounded text-center">
-                                    <div className="font-bold text-green-600">{importSummary.new}</div>
-                                    <div className="text-green-500">Novos</div>
-                                </div>
-                                <div className="bg-yellow-50 p-2 rounded text-center">
-                                    <div className="font-bold text-yellow-600">{importSummary.existing}</div>
-                                    <div className="text-yellow-500">Já Existentes</div>
-                                </div>
-                                <div className="bg-purple-50 p-2 rounded text-center">
-                                    <div className="font-bold text-purple-600">{importSummary.created || 0}</div>
-                                    <div className="text-purple-500">Importados</div>
-                                </div>
-                            </div>
-                        )}
+                >
+                    <CalendarIcon className="mr-2 h-4 w-4" />
+                    {date?.from ? (
+                        date.to ? (
+                            <>
+                                {format(date.from, "dd/MM/yy")} -{" "}
+                                {format(date.to, "dd/MM/yy")}
+                            </>
+                        ) : (
+                            format(date.from, "dd/MM/yy")
+                        )
+                    ) : (
+                        <span>
+                            {syncMode === 'smart' 
+                                ? 'Escolha um período (ou deixe vazio para automático)' 
+                                : 'Escolha um período'
+                            }
+                        </span>
+                    )}
+                </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-auto p-0 flex" align="end">
+                <div className="flex flex-col space-y-1 p-2 border-r">
+                    <Button variant="ghost" className="justify-start text-left font-normal h-8 px-2" onClick={() => setDatePreset('today')}>Hoje</Button>
+                    <Button variant="ghost" className="justify-start text-left font-normal h-8 px-2" onClick={() => setDatePreset('yesterday')}>Ontem</Button>
+                    <Button variant="ghost" className="justify-start text-left font-normal h-8 px-2" onClick={() => setDatePreset('last7')}>Últimos 7 dias</Button>
+                    <Button variant="ghost" className="justify-start text-left font-normal h-8 px-2" onClick={() => setDatePreset('last30')}>Últimos 30 dias</Button>
+                    <Button variant="ghost" className="justify-start text-left font-normal h-8 px-2" onClick={() => setDatePreset('last3Months')}>Últimos 3 meses</Button>
+                    <Separator />
+                    <Button variant="ghost" className="justify-start text-left font-normal h-8 px-2" onClick={() => setDatePreset('thisMonth')}>Este mês</Button>
+                    <Button variant="ghost" className="justify-start text-left font-normal h-8 px-2" onClick={() => setDatePreset('lastMonth')}>Mês passado</Button>
+                    <Separator />
+                    {syncMode === 'smart' && (
+                        <Button variant="ghost" className="justify-start text-left font-normal h-8 px-2" onClick={() => setDate(undefined)}>
+                            <span role="img" aria-label="brain" className="mr-2">🧠</span>
+                            Automático
+                        </Button>
+                    )}
+                </div>
+                <Calendar
+                    initialFocus
+                    mode="range"
+                    defaultMonth={date?.from}
+                    selected={date}
+                    onSelect={setDate}
+                    numberOfMonths={2}
+                    locale={ptBR}
+                />
+            </PopoverContent>
+        </Popover>
+        
+        {syncMode === 'smart' && !date?.from && (
+            <div className="bg-blue-50 border border-blue-200 rounded-md p-3">
+                <div className="flex items-start gap-2">
+                    <span role="img" aria-label="info" className="text-blue-600 mt-0.5">ℹ️</span>
+                    <div className="text-xs text-blue-700">
+                        <p className="font-medium mb-1">Modo Automático Ativo</p>
+                        <p>O sistema buscará automaticamente a partir da data do último pedido importado, ou dos últimos 30 dias se for a primeira importação.</p>
                     </div>
                 </div>
+            </div>
+        )}
+        
+        {syncMode === 'smart' && date?.from && (
+            <div className="bg-green-50 border border-green-200 rounded-md p-3">
+                <div className="flex items-start gap-2">
+                    <span role="img" aria-label="smart" className="text-green-600 mt-0.5">🎯</span>
+                    <div className="text-xs text-green-700">
+                        <p className="font-medium mb-1">Período Personalizado + Inteligente</p>
+                        <p>Verificará apenas pedidos novos no período selecionado, evitando duplicatas.</p>
+                    </div>
+                </div>
+            </div>
+        )}
+    </div>
+
+    <div className="flex flex-col gap-4">
+        <div className="flex gap-2">
+            {syncMode === 'smart' ? (
+                <Button onClick={handleSmartSync} disabled={isImporting} className="flex-1">
+                    {isImporting ? <Loader2 className="animate-spin" /> : <span role="img" aria-label="brain">🧠</span>}
+                    {isImporting ? "Sincronizando..." : "Sincronização Inteligente"}
+                </Button>
+            ) : (
+                <Button onClick={handleFullSync} disabled={isImporting || !date?.from} className="flex-1">
+                    {isImporting ? <Loader2 className="animate-spin" /> : <Sheet />}
+                    {isImporting ? "Sincronizando..." : "Sincronização Completa"}
+                </Button>
+            )}
+            <Button variant="outline" disabled className="flex-1">
+                <FileDown />
+                Exportar Dados
+            </Button>
+        </div>
+
+        {isImporting && (
+            <div className="space-y-2">
+                <Progress value={importProgress} />
+                <p className="text-sm text-muted-foreground text-center">
+                    {importStatus.total > 0
+                        ? `Processando ${importStatus.current} de ${importStatus.total} pedidos novos...`
+                        : 'Verificando pedidos existentes...'}
+                </p>
+            </div>
+        )}
+
+        {importSummary && (
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-sm">
+                <div className="bg-blue-50 p-2 rounded text-center">
+                    <div className="font-bold text-blue-600">{importSummary.total}</div>
+                    <div className="text-blue-500">Total Encontrado</div>
+                </div>
+                <div className="bg-green-50 p-2 rounded text-center">
+                    <div className="font-bold text-green-600">{importSummary.new}</div>
+                    <div className="text-green-500">Novos</div>
+                </div>
+                <div className="bg-yellow-50 p-2 rounded text-center">
+                    <div className="font-bold text-yellow-600">{importSummary.existing}</div>
+                    <div className="text-yellow-500">Já Existentes</div>
+                </div>
+                <div className="bg-purple-50 p-2 rounded text-center">
+                    <div className="font-bold text-purple-600">{importSummary.created || 0}</div>
+                    <div className="text-purple-500">Importados</div>
+                </div>
+            </div>
+        )}
+    </div>
+</div>
             </div>
             
             <Separator />
