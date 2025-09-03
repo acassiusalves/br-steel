@@ -1,5 +1,4 @@
 
-
 "use client";
 
 import * as React from 'react';
@@ -195,6 +194,7 @@ export default function ApiPage() {
     setImportStatus({ current: 0, total: 0 });
 
     try {
+      // Etapa 1: Buscar a lista de pedidos do período selecionado.
       const responseData = await getBlingSalesOrders({ from: date?.from, to: date?.to });
       setApiResponse(responseData);
 
@@ -216,13 +216,17 @@ export default function ApiPage() {
           description: `Buscando detalhes completos para ${totalOrdersToEnrich} pedido(s). Isso pode levar um momento.`,
       });
 
+      // Etapa 2: (Restaurado) Loop para enriquecer cada pedido, o que já é feito no getBlingSalesOrders, 
+      // mas mantemos para a barra de progresso.
       for (let i = 0; i < totalOrdersToEnrich; i++) {
           const order = ordersToEnrich[i];
           try {
+              // A função getBlingOrderDetails já salva os detalhes no Firestore.
               await getBlingOrderDetails(String(order.id));
               console.log(`Detalhes do pedido ${order.id} importados e salvos com sucesso.`);
           } catch (detailError: any) {
               console.error(`Falha ao buscar/salvar detalhes para o pedido ${order.id}:`, detailError.message);
+              // Continuar mesmo se um pedido falhar
           }
           const progress = ((i + 1) / totalOrdersToEnrich) * 100;
           setImportProgress(progress);

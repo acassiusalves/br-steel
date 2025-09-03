@@ -209,7 +209,7 @@ export default function VendasPage() {
         return 'Mercado Livre';
     }
     if (sale.intermediador?.nomeUsuario) {
-        return `Marketplace (${sale.intermediador.nomeUsuario})`;
+        return sale.intermediador.nomeUsuario;
     }
     return sale.loja?.nome || 'N/A';
   }
@@ -382,11 +382,12 @@ export default function VendasPage() {
                               <TableCell>
                                 {sale.itens && sale.itens.length > 0 ? (
                                   <ul className="text-xs space-y-1">
-                                    {sale.itens.map((item, index) => (
-                                      <li key={item.id || index} title={item.descricao} className="flex items-start gap-2">
-                                        <span>{item.descricao}</span>
+                                    {sale.itens.slice(0, 2).map((item, index) => (
+                                      <li key={item.id || index} title={item.descricao} className="truncate max-w-xs">
+                                        {item.descricao}
                                       </li>
                                     ))}
+                                    {sale.itens.length > 2 && <li className="text-muted-foreground">e mais {sale.itens.length - 2}...</li>}
                                   </ul>
                                 ) : 'Sem itens'}
                               </TableCell>
@@ -489,3 +490,4 @@ export default function VendasPage() {
     </DashboardLayout>
   );
 }
+

@@ -50,6 +50,14 @@ async function writeEnvFile(envMap: Map<string, string>): Promise<void> {
     await fs.writeFile(envPath, content, 'utf-8');
 }
 
+async function writeEnvVar(key: string, value: string) {
+  const env = await readEnvFile();
+  env.set(key, value);
+  let content = "";
+  for (const [k, v] of env.entries()) content += `${k}=${v}\n`;
+  await fs.writeFile(envPath, content, "utf-8");
+}
+
 
 export async function saveBlingCredentials(credentials: Partial<BlingCredentials>): Promise<void> {
     const envMap = await readEnvFile();
@@ -88,25 +96,100 @@ export async function getBlingCredentials(): Promise<Partial<BlingCredentials>> 
     };
 }
 
-// Função auxiliar para chamadas GET genéricas ao Bling
-async function blingGet(url: string, token: string) {
-  const response = await fetch(url, {
-    method: 'GET',
-    headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
-    cache: 'no-store', // Evita cache para dados que podem mudar
+
+// Nova lógica de refresh e fetch
+async function refreshAccessToken() {
+  const env = await readEnvFile();
+  const clientId = env.get("BLING_CLIENT_ID");
+  const clientSecret = env.get("BLING_CLIENT_SECRET");
+  const refreshToken = env.get("BLING_REFRESH_TOKEN");
+
+  if (!clientId || !clientSecret || !refreshToken) {
+      throw new Error("Credenciais do Bling incompletas para renovar o token.");
+  }
+
+  const basic = Buffer.from(`${clientId}:${clientSecret}`).toString("base64");
+  const body = new URLSearchParams({
+    grant_type: "refresh_token",
+    refresh_token: refreshToken,
   });
 
-  const data = await response.json();
+  const res = await fetch("https://www.bling.com.br/Api/v3/oauth/token", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+      "Authorization": `Basic ${basic}`,
+      "Accept": "1.0",
+    },
+    body: body.toString(),
+    cache: "no-store",
+  });
 
-  if (!response.ok) {
-    const errorMessage = data?.error?.description || response.statusText;
-    throw new Error(`Erro do Bling (${response.status}): ${errorMessage}`);
+  const json = await res.json();
+  if (!res.ok) {
+    throw new Error(`Refresh falhou (${res.status}): ${json?.error?.description || res.statusText}`);
   }
-  return data;
+
+  // salva novos tokens (guarde o novo refresh_token se vier)
+  if (json.access_token) await writeEnvVar("BLING_ACCESS_TOKEN", json.access_token);
+  if (json.refresh_token) await writeEnvVar("BLING_REFRESH_TOKEN", json.refresh_token);
+
+  // opcional: guardar o expires_at para refresh pró-ativo (agende -60s de buffer)
+  if (json.expires_in) {
+    const expiresAt = Date.now() + (Number(json.expires_in) * 1000);
+    await writeEnvVar("BLING_ACCESS_EXPIRES_AT", String(expiresAt));
+  }
+  return json;
 }
 
+async function blingFetchWithRefresh(url: string, init?: RequestInit): Promise<any> {
+    const env = await readEnvFile();
+    let accessToken = env.get("BLING_ACCESS_TOKEN");
+
+    if (!accessToken) {
+        throw new Error('Access Token do Bling não encontrado. Por favor, conecte sua conta primeiro.');
+    }
+
+    const doCall = async (token: string) => {
+        const res = await fetch(url, {
+            ...init,
+            headers: {
+                "Accept": "application/json",
+                "Authorization": `Bearer ${token}`,
+                ...(init?.headers || {}),
+            },
+            cache: "no-store",
+        });
+        return { res, text: await res.text() };
+    };
+
+    let { res, text } = await doCall(accessToken);
+
+    if (res.status === 401) {
+        console.log("Token de acesso expirado. Tentando renovar...");
+        const newTokens = await refreshAccessToken();
+        accessToken = newTokens.access_token;
+        ({ res, text } = await doCall(accessToken));
+    }
+
+    if (!res.ok) {
+        let payload: any;
+        try { payload = JSON.parse(text); } catch {}
+        const msg = payload?.error?.description || res.statusText || text;
+        throw new Error(`Erro do Bling (${res.status}): ${msg}`);
+    }
+
+    try {
+        return text ? JSON.parse(text) : null;
+    } catch (e) {
+        console.error("Failed to parse Bling API response as JSON:", text);
+        throw new Error("A resposta da API do Bling não era um JSON válido.");
+    }
+}
+
+
 // Função auxiliar para chamadas GET paginadas ao Bling
-async function blingGetPaged(baseUrl: string, token: string) {
+async function blingGetPaged(baseUrl: string) {
     const allData: any[] = [];
     let page = 1;
     const limit = 100; // Bling's max limit
@@ -116,17 +199,8 @@ async function blingGetPaged(baseUrl: string, token: string) {
         url.searchParams.set('pagina', String(page));
         url.searchParams.set('limite', String(limit));
 
-        const response = await fetch(url.toString(), {
-            method: 'GET',
-            headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/json' },
-        });
-
-        const responseData = await response.json();
-
-        if (!response.ok) {
-            throw new Error(`Erro do Bling: ${responseData.error.description || response.statusText}`);
-        }
-
+        const responseData = await blingFetchWithRefresh(url.toString());
+        
         const dataOnPage = responseData.data || [];
         allData.push(...dataOnPage);
 
@@ -140,19 +214,12 @@ async function blingGetPaged(baseUrl: string, token: string) {
 
 
 export async function getBlingSalesOrders({ from, to }: { from?: Date, to?: Date } = {}): Promise<any> {
-    const envMap = await readEnvFile();
-    const accessToken = envMap.get('BLING_ACCESS_TOKEN');
-
-    if (!accessToken) {
-        throw new Error('Access Token do Bling não encontrado. Por favor, conecte sua conta primeiro.');
-    }
-    
     const baseUrl = new URL('https://api.bling.com.br/Api/v3/pedidos/vendas');
     if (from) baseUrl.searchParams.set('dataInicial', format(from, 'yyyy-MM-dd'));
     if (to) baseUrl.searchParams.set('dataFinal', format(to, 'yyyy-MM-dd'));
     
     try {
-        const allOrders = await blingGetPaged(baseUrl.toString(), accessToken);
+        const allOrders = await blingGetPaged(baseUrl.toString());
 
         if (allOrders.length > 0) {
             const { count } = await saveSalesOrders(allOrders);
@@ -172,26 +239,13 @@ export async function getBlingOrderDetails(orderId: string): Promise<any> {
     if (!orderId) {
         throw new Error('O ID do pedido é obrigatório.');
     }
-
-    const envMap = await readEnvFile();
-    const accessToken = envMap.get('BLING_ACCESS_TOKEN');
-
-    if (!accessToken) {
-        throw new Error('Access Token do Bling não encontrado. Por favor, conecte sua conta primeiro.');
-    }
-
     const url = `https://api.bling.com.br/Api/v3/pedidos/vendas/${orderId}`;
-
     try {
-        const data = await blingGet(url, accessToken);
-        
-        // Se a busca for bem-sucedida, salva os detalhes no Firestore
+        const data = await blingFetchWithRefresh(url);
         if (data && data.data) {
-           await saveSalesOrders([data.data]); // Reutiliza a função para salvar com merge
+           await saveSalesOrders([data.data]);
         }
-
         return data;
-
     } catch (error: any) {
         console.error(`Falha ao buscar detalhes do pedido ${orderId}:`, error);
         throw new Error(`Falha na comunicação com a API do Bling: ${error.message}`);
@@ -203,16 +257,9 @@ export async function getBlingChannelByOrderId(orderId: string) {
     throw new Error('O ID do pedido é obrigatório.');
   }
 
-  const env = await readEnvFile();
-  const accessToken = env.get('BLING_ACCESS_TOKEN');
-  if (!accessToken) {
-    throw new Error('Access Token do Bling não encontrado.');
-  }
-
   // 1) busca o pedido pelo *id interno* do Bling
-  const orderResp = await blingGet(
-    `https://api.bling.com.br/Api/v3/pedidos/vendas/${orderId}`,
-    accessToken
+  const orderResp = await blingFetchWithRefresh(
+    `https://api.bling.com.br/Api/v3/pedidos/vendas/${orderId}`
   );
 
   const order = orderResp?.data ?? {};
@@ -225,10 +272,18 @@ export async function getBlingChannelByOrderId(orderId: string) {
   if (rastreio.startsWith('MEL')) {
     marketplaceName = 'Mercado Livre';
   } else if (intermediador?.nomeUsuario) {
-    marketplaceName = `Marketplace (usuário ${intermediador.nomeUsuario})`;
-  } else if (order.loja?.nome) {
-    marketplaceName = order.loja.nome;
+    marketplaceName = `${intermediador.nomeUsuario}`;
+  } else if (lojaId) {
+    // Fallback para buscar o nome da loja se a inferência falhar
+    try {
+        const lojaDetails = await blingFetchWithRefresh(`https://api.bling.com.br/Api/v3/lojas/${lojaId}`);
+        marketplaceName = lojaDetails?.data?.nome;
+    } catch (e) {
+        console.warn(`Could not fetch store name for lojaId ${lojaId}`, e);
+        marketplaceName = `Loja ID ${lojaId}`;
+    }
   }
+
 
   return {
     lojaId,
@@ -240,20 +295,12 @@ export async function getBlingChannelByOrderId(orderId: string) {
 
 
 export async function getBlingProducts(limit: number = 100): Promise<any> {
-    const envMap = await readEnvFile();
-    const accessToken = envMap.get('BLING_ACCESS_TOKEN');
-
-    if (!accessToken) {
-        throw new Error('Access Token do Bling não encontrado. Por favor, conecte sua conta primeiro.');
-    }
-    
     const baseUrl = new URL('https://api.bling.com.br/Api/v3/produtos');
     baseUrl.searchParams.set('limite', String(limit));
     
     try {
-        const products = await blingGet(baseUrl.toString(), accessToken);
+        const products = await blingFetchWithRefresh(baseUrl.toString());
         return products;
-
     } catch (error: any) {
         console.error('Falha ao buscar produtos no Bling:', error);
         throw new Error(`Falha na comunicação com a API do Bling: ${error.message}`);
@@ -265,17 +312,10 @@ export async function getLogisticsBySalesOrder(orderId: string): Promise<any> {
     if (!orderId) {
         throw new Error('O ID do pedido de venda é obrigatório.');
     }
-
-    const envMap = await readEnvFile();
-    const accessToken = envMap.get('BLING_ACCESS_TOKEN');
-
-    if (!accessToken) {
-        throw new Error('Access Token do Bling não encontrado. Por favor, conecte sua conta primeiro.');
-    }
-
+    
     try {
         // Passo 1: Buscar o pedido de venda para obter o ID da nota fiscal.
-        const orderDetails = await blingGet(`https://api.bling.com.br/Api/v3/pedidos/vendas/${orderId}`, accessToken);
+        const orderDetails = await blingFetchWithRefresh(`https://api.bling.com.br/Api/v3/pedidos/vendas/${orderId}`);
         const invoiceId = orderDetails?.data?.notaFiscal?.id;
 
         if (!invoiceId) {
@@ -283,15 +323,13 @@ export async function getLogisticsBySalesOrder(orderId: string): Promise<any> {
         }
 
         // Passo 2: Buscar a remessa de logística usando o ID da nota fiscal.
-        // A API de remessas permite filtrar pelo ID do documento (que é a nota fiscal).
-        const shippingManifests = await blingGet(`https://api.bling.com.br/Api/v3/logisticas/remessas?idsDocumentos[]=${invoiceId}`, accessToken);
+        const shippingManifests = await blingFetchWithRefresh(`https://api.bling.com.br/Api/v3/logisticas/remessas?idsDocumentos[]=${invoiceId}`);
         const shippingObjects = shippingManifests?.data?.[0]?.objetos;
 
         if (!shippingObjects || shippingObjects.length === 0) {
             throw new Error('Nenhum objeto de logística encontrado para a nota fiscal deste pedido.');
         }
         
-        // Assumimos que queremos o primeiro objeto de logística da remessa
         const logisticsObjectId = shippingObjects[0]?.id;
 
         if (!logisticsObjectId) {
@@ -299,13 +337,12 @@ export async function getLogisticsBySalesOrder(orderId: string): Promise<any> {
         }
 
         // Passo 3: Com o ID do objeto de logística, buscar os detalhes do rastreio.
-        const logisticsDetails = await blingGet(`https://api.bling.com.br/Api/v3/logisticas/objetos/${logisticsObjectId}`, accessToken);
+        const logisticsDetails = await blingFetchWithRefresh(`https://api.bling.com.br/Api/v3/logisticas/objetos/${logisticsObjectId}`);
         
         return logisticsDetails;
 
     } catch (error: any) {
         console.error(`Falha na cadeia de busca de logística para o pedido ${orderId}:`, error);
-        // Retorna a mensagem de erro original para o cliente
         throw new Error(error.message);
     }
 }
@@ -327,26 +364,16 @@ export type ProductStock = {
 };
 
 export async function getProductsStock(): Promise<{ data: ProductStock[], isSimulated?: boolean }> {
-    const envMap = await readEnvFile();
-    const accessToken = envMap.get('BLING_ACCESS_TOKEN');
-
-    if (!accessToken) {
-        throw new Error('Access Token do Bling não encontrado.');
-    }
-
     console.log('🚀 INICIANDO BUSCA DE ESTOQUE');
-
     try {
-        // Tentar endpoint principal de estoques
         const stockUrl = 'https://api.bling.com.br/Api/v3/produtos';
         console.log('🔍 Tentando endpoint:', stockUrl);
         
-        const stockData = await blingGetPaged(stockUrl, accessToken);
+        const stockData = await blingGetPaged(stockUrl);
         console.log('📦 Dados recebidos do estoque:', stockData?.length || 0, 'itens');
         
         if (stockData && stockData.length > 0) {
             console.log('✅ SUCESSO: DADOS REAIS DE ESTOQUE');
-            console.log('📋 Primeiro item:', stockData[0]);
             
             const formattedData: ProductStock[] = stockData.map((item: any) => ({
                 produto: {
@@ -364,19 +391,14 @@ export async function getProductsStock(): Promise<{ data: ProductStock[], isSimu
                 saldoVirtualTotal: item.estoque?.saldoVirtualTotal || item.estoque?.saldoVirtual || 0,
             }));
             
-            console.log('🎯 RETORNANDO DADOS REAIS, isSimulated = false');
             return { data: formattedData, isSimulated: false };
         }
     } catch (error: any) {
         console.log('❌ Erro no endpoint de estoque:', error.message);
     }
-
-    // Fallback para produtos (neste caso, a tentativa principal já é produtos, então isso é redundante, mas mantido por segurança)
+    
     console.log('🔄 Usando fallback - buscando produtos...');
-    const productsData = await blingGetPaged('https://api.bling.com.br/Api/v3/produtos', accessToken);
-    
-    console.log('👥 Produtos encontrados:', productsData?.length || 0);
-    
+    const productsData = await blingGetPaged('https://api.bling.com.br/Api/v3/produtos');
     if (productsData && productsData.length > 0) {
         console.log('⚠️ GERANDO DADOS SIMULADOS');
         
@@ -393,7 +415,6 @@ export async function getProductsStock(): Promise<{ data: ProductStock[], isSimu
             saldoVirtualTotal: Math.floor(Math.random() * 100),
         }));
         
-        console.log('🎲 RETORNANDO DADOS SIMULADOS, isSimulated = true');
         return { data: simulatedData, isSimulated: true };
     }
 
@@ -415,12 +436,10 @@ export async function countImportedOrders(): Promise<number> {
 export async function getImportedOrderIds(): Promise<Set<string>> {
   try {
     const ordersCollection = collection(db, 'salesOrders');
-    // For performance, we only need the document IDs, not the full data.
     const q = query(ordersCollection);
     const snapshot = await getDocs(q);
     const ids = new Set<string>();
     snapshot.forEach(doc => {
-      // We only add IDs of orders that have been enriched (have 'itens').
       if (doc.data().itens) {
         ids.add(doc.id);
       }
@@ -456,10 +475,6 @@ export async function getSalesDashboardData(
   const fromDateStr = format(from, 'yyyy-MM-dd');
   const toDateStr = format(to, 'yyyy-MM-dd');
 
-  // Firestore can't compare dates as strings directly with inequality.
-  // The query will fetch all documents and filtering will be done in memory.
-  // For larger datasets, this is inefficient and should be optimized by
-  // storing dates as Firestore Timestamps. For this app's scope, it's acceptable.
   const q = query(salesCollection);
   
   const snapshot = await getDocs(q);
@@ -467,9 +482,7 @@ export async function getSalesDashboardData(
   const orders: SaleOrder[] = [];
   snapshot.forEach(doc => {
     const order = doc.data() as SaleOrder;
-    // Manual date filtering
     if (order.data >= fromDateStr && order.data <= toDateStr) {
-      // We only consider orders that have been enriched (have items)
       if(order.itens && order.itens.length > 0) {
         orders.push(order);
       }
@@ -483,12 +496,10 @@ export async function getSalesDashboardData(
   const customerIds = new Set(orders.map(order => order.contato.id));
   const uniqueCustomers = customerIds.size;
 
-  // Product sales ranking calculation
   const productSales = new Map<string, { total: number, revenue: number }>();
   const stateSales = new Map<string, number>();
 
   orders.forEach(order => {
-      // Aggregate product sales
       order.itens?.forEach(item => {
           const productName = item.descricao || 'Produto sem nome';
           const currentData = productSales.get(productName) || { total: 0, revenue: 0 };
@@ -497,7 +508,6 @@ export async function getSalesDashboardData(
           productSales.set(productName, currentData);
       });
 
-      // Aggregate sales by state (UF)
       const state = order.transporte?.etiqueta?.uf || 'N/A';
       const currentRevenue = stateSales.get(state) || 0;
       stateSales.set(state, currentRevenue + (order.total || 0));
@@ -513,9 +523,7 @@ export async function getSalesDashboardData(
       .sort((a, b) => b.revenue - a.revenue);
   
 
-  // Mocking percentage changes for now as calculating them requires
-  // fetching data from the previous period.
-  const mockChange = () => parseFloat((Math.random() * 40 - 10).toFixed(1)); // Random change between -10% and +30%
+  const mockChange = () => parseFloat((Math.random() * 40 - 10).toFixed(1));
 
   return {
     totalRevenue,
@@ -549,14 +557,12 @@ export async function getProductionDemand(
 
     const salesCollection = collection(db, 'salesOrders');
     
-    // Base query: filter for orders that have an issued invoice
     const q = query(salesCollection, where('notaFiscal.id', '!=', null));
     const snapshot = await getDocs(q);
 
     const fromDateStr = format(from, 'yyyy-MM-dd');
     const toDateStr = format(to, 'yyyy-MM-dd');
     
-    // Calculate the number of weeks in the period. Minimum 1 to avoid division by zero.
     const days = differenceInDays(to, from) + 1;
     const weeks = Math.max(1, days / 7);
 
@@ -565,7 +571,6 @@ export async function getProductionDemand(
     snapshot.forEach(doc => {
         const order = doc.data() as SaleOrder;
         
-        // Manual date filtering, as we can't combine `!=` with range filters in Firestore.
         const isDateInRange = order.data >= fromDateStr && order.data <= toDateStr;
 
         if (isDateInRange && order.notaFiscal && order.notaFiscal.id) {
@@ -589,6 +594,3 @@ export async function getProductionDemand(
 
     return result;
 }
-
-    
-    
