@@ -224,7 +224,7 @@ export default function SalesDashboard() {
               description: `${result.summary.created} novo(s) pedido(s) foram importados.`,
             });
             // Recarrega os dados do painel se houve mudança
-            fetchData(date); 
+            if(date) fetchData(date); 
         } else {
              if(isManual) {
                 toast({ title: "Tudo certo!", description: "Seu painel já está atualizado com os últimos pedidos." });
@@ -516,5 +516,3 @@ export default function SalesDashboard() {
     </div>
   );
 }
-
-      
