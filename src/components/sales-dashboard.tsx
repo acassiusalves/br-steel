@@ -178,6 +178,7 @@ export default function SalesDashboard() {
   const [data, setData] = React.useState<Awaited<ReturnType<typeof getSalesDashboardData>> | null>(null);
   const [isSyncing, setIsSyncing] = React.useState(false);
   const [initialSyncDone, setInitialSyncDone] = React.useState(false);
+  const [lastSyncTime, setLastSyncTime] = React.useState<Date | null>(null);
 
   const { toast } = useToast();
 
@@ -202,63 +203,68 @@ export default function SalesDashboard() {
       }
   }, [toast]);
   
+  const autoSyncBling = React.useCallback(async (isManual: boolean = false) => {
+    if (isSyncing) return;
+
+    const credentials = await getBlingCredentials();
+    if (!credentials.accessToken) {
+        if(isManual) {
+            toast({
+                variant: 'destructive',
+                title: 'Não Conectado',
+                description: 'A conexão com o Bling não foi configurada. Vá para a página de API.'
+            });
+        }
+        return;
+    }
+    
+    setIsSyncing(true);
+    if(isManual) {
+        toast({ title: "Sincronizando...", description: "Buscando novos pedidos do Bling." });
+    }
+
+    try {
+        const result = await smartSyncOrders(); 
+        if (result.summary.created > 0) {
+            toast({
+              title: "Painel Atualizado!",
+              description: `${result.summary.created} novo(s) pedido(s) foram importados.`,
+            });
+            fetchData(date); 
+        } else {
+             if(isManual) {
+                toast({ title: "Tudo certo!", description: "Seu painel já está atualizado com os últimos pedidos." });
+            }
+        }
+        setLastSyncTime(new Date());
+    } catch (error: any) {
+        console.error("Auto-sync failed:", error);
+        if (isManual) {
+            toast({ variant: 'destructive', title: 'Erro na Sincronização', description: error.message });
+        }
+    } finally {
+        setIsSyncing(false);
+    }
+  }, [isSyncing, date, fetchData, toast]);
+
   React.useEffect(() => {
     fetchData(date);
   }, [date, fetchData]); 
 
   React.useEffect(() => {
-    const autoSyncBling = async (isManual: boolean = false) => {
-      if (isSyncing) return;
-  
-      const credentials = await getBlingCredentials();
-      if (!credentials.accessToken) {
-          if(isManual) {
-              toast({
-                  variant: 'destructive',
-                  title: 'Não Conectado',
-                  description: 'A conexão com o Bling não foi configurada. Vá para a página de API.'
-              });
-          }
-          return;
-      }
-      
-      setIsSyncing(true);
-      if(isManual) {
-          toast({ title: "Sincronizando...", description: "Buscando novos pedidos do Bling." });
-      }
-  
-      try {
-          const result = await smartSyncOrders(); 
-          if (result.summary.created > 0) {
-              toast({
-                title: "Painel Atualizado!",
-                description: `${result.summary.created} novo(s) pedido(s) foram importados.`,
-              });
-              fetchData(date); 
-          } else {
-               if(isManual) {
-                  toast({ title: "Tudo certo!", description: "Seu painel já está atualizado com os últimos pedidos." });
-              }
-          }
-      } catch (error: any) {
-          console.error("Auto-sync failed:", error);
-          if (isManual) {
-              toast({ variant: 'destructive', title: 'Erro na Sincronização', description: error.message });
-          }
-      } finally {
-          setIsSyncing(false);
-      }
-    };
-    
     if (!initialSyncDone) {
         autoSyncBling(false);
         setInitialSyncDone(true);
     }
-
-  }, [initialSyncDone, isSyncing, toast, date, fetchData]); 
+  }, [initialSyncDone, autoSyncBling]); 
 
   const handleFilter = () => {
     fetchData(date);
+  };
+  
+  const formatLastSyncTime = (syncTime: Date | null): string => {
+    if (!syncTime) return 'Sincronizando...';
+    return `Última sincronização: ${syncTime.toLocaleDateString('pt-BR')} às ${syncTime.toLocaleTimeString('pt-BR')}`;
   };
 
   const setDatePreset = (preset: 'today' | 'yesterday' | 'last7' | 'last30' | 'last3Months' | 'thisMonth' | 'lastMonth') => {
@@ -371,11 +377,17 @@ export default function SalesDashboard() {
         </div>
       </div>
       
-       {isSyncing && (
+       {isSyncing ? (
           <Badge variant="secondary" className="animate-pulse w-fit">
             <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
             Sincronizando pedidos em segundo plano...
           </Badge>
+        ) : (
+          lastSyncTime && (
+            <Badge variant="outline" className="text-muted-foreground font-normal w-fit">
+              {formatLastSyncTime(lastSyncTime)}
+            </Badge>
+          )
         )}
 
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
