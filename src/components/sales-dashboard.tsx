@@ -169,8 +169,8 @@ export default function SalesDashboard() {
   const [date, setDate] = React.useState<DateRange | undefined>(() => {
     const today = new Date();
     return {
-      from: startOfMonth(subMonths(today, 2)),
-      to: today,
+      from: startOfMonth(today),
+      to: endOfMonth(today),
     };
   });
   
