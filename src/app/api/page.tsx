@@ -4,10 +4,9 @@
 
 import * as React from 'react';
 import { KeyRound, Loader2, Copy, Save, CheckCircle, XCircle, FileJson, Send, Calendar as CalendarIcon, Plug, Sheet, Database, FileDown, Search, Truck, Package, Store } from 'lucide-react';
-import { format } from "date-fns";
+import { format, subDays, startOfMonth, endOfMonth, startOfYesterday, endOfYesterday, startOfWeek, endOfWeek, lastDayOfWeek, subWeeks, startOfISOWeek, endOfISOWeek, subMonths, lastDayOfMonth } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import type { DateRange } from "react-day-picker";
-import { startOfMonth, endOfMonth } from 'date-fns';
 
 import DashboardLayout from '@/components/dashboard-layout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -196,7 +195,6 @@ export default function ApiPage() {
     setImportStatus({ current: 0, total: 0 });
 
     try {
-      // 1. Busca a lista de pedidos (sem detalhes)
       const responseData = await getBlingSalesOrders({ from: date?.from, to: date?.to });
       setApiResponse(responseData);
 
@@ -213,7 +211,6 @@ export default function ApiPage() {
         return;
       }
       
-      // 2. Itera sobre cada pedido para buscar os detalhes completos e salvar
       toast({
           title: "Importando Pedidos...",
           description: `Buscando detalhes completos para ${totalOrdersToEnrich} pedido(s). Isso pode levar um momento.`,
@@ -222,12 +219,10 @@ export default function ApiPage() {
       for (let i = 0; i < totalOrdersToEnrich; i++) {
           const order = ordersToEnrich[i];
           try {
-              // getBlingOrderDetails já busca e salva o pedido completo
               await getBlingOrderDetails(String(order.id));
               console.log(`Detalhes do pedido ${order.id} importados e salvos com sucesso.`);
           } catch (detailError: any) {
               console.error(`Falha ao buscar/salvar detalhes para o pedido ${order.id}:`, detailError.message);
-              // Opcional: notificar sobre falha em pedido específico
           }
           const progress = ((i + 1) / totalOrdersToEnrich) * 100;
           setImportProgress(progress);
@@ -320,6 +315,37 @@ export default function ApiPage() {
         setIsFetchingChannel(false);
     }
   }
+  
+    const setDatePreset = (preset: 'today' | 'yesterday' | 'last7' | 'last30' | 'last3Months' | 'thisMonth' | 'lastMonth') => {
+      const today = new Date();
+      switch (preset) {
+          case 'today':
+              setDate({ from: today, to: today });
+              break;
+          case 'yesterday':
+              const yesterday = subDays(today, 1);
+              setDate({ from: yesterday, to: yesterday });
+              break;
+          case 'last7':
+              setDate({ from: subDays(today, 6), to: today });
+              break;
+          case 'last30':
+              setDate({ from: subDays(today, 29), to: today });
+              break;
+          case 'last3Months':
+              setDate({ from: subMonths(today, 3), to: today });
+              break;
+          case 'thisMonth':
+              setDate({ from: startOfMonth(today), to: endOfMonth(today) });
+              break;
+          case 'lastMonth':
+              const lastMonthStart = startOfMonth(subMonths(today, 1));
+              const lastMonthEnd = endOfMonth(subMonths(today, 1));
+              setDate({ from: lastMonthStart, to: lastMonthEnd });
+              break;
+      }
+  }
+
 
   const renderConnectionContent = () => {
     if (isLoading) {
@@ -386,7 +412,17 @@ export default function ApiPage() {
                               )}
                             </Button>
                           </PopoverTrigger>
-                          <PopoverContent className="w-auto p-0" align="end">
+                          <PopoverContent className="w-auto p-0 flex" align="end">
+                           <div className="flex flex-col space-y-1 p-2 border-r">
+                                <Button variant="ghost" className="justify-start text-left font-normal h-8 px-2" onClick={() => setDatePreset('today')}>Hoje</Button>
+                                <Button variant="ghost" className="justify-start text-left font-normal h-8 px-2" onClick={() => setDatePreset('yesterday')}>Ontem</Button>
+                                <Button variant="ghost" className="justify-start text-left font-normal h-8 px-2" onClick={() => setDatePreset('last7')}>Últimos 7 dias</Button>
+                                <Button variant="ghost" className="justify-start text-left font-normal h-8 px-2" onClick={() => setDatePreset('last30')}>Últimos 30 dias</Button>
+                                <Button variant="ghost" className="justify-start text-left font-normal h-8 px-2" onClick={() => setDatePreset('last3Months')}>Últimos 3 meses</Button>
+                                <Separator />
+                                <Button variant="ghost" className="justify-start text-left font-normal h-8 px-2" onClick={() => setDatePreset('thisMonth')}>Este mês</Button>
+                                <Button variant="ghost" className="justify-start text-left font-normal h-8 px-2" onClick={() => setDatePreset('lastMonth')}>Mês passado</Button>
+                            </div>
                             <Calendar
                               initialFocus
                               mode="range"
@@ -665,3 +701,4 @@ export default function ApiPage() {
     </DashboardLayout>
   );
 }
+

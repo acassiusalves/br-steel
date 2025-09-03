@@ -85,7 +85,7 @@ export default function ProducaoPage() {
     fetchData(date);
   };
   
-  const setDatePreset = (preset: 'today' | 'yesterday' | 'last7' | 'last30' | 'thisMonth' | 'lastMonth' | 'last3Months') => {
+    const setDatePreset = (preset: 'today' | 'yesterday' | 'last7' | 'last30' | 'last3Months' | 'thisMonth' | 'lastMonth') => {
       const today = new Date();
       switch (preset) {
           case 'today':
@@ -102,7 +102,7 @@ export default function ProducaoPage() {
               setDate({ from: subDays(today, 29), to: today });
               break;
           case 'last3Months':
-              setDate({ from: subDays(today, 89), to: today });
+              setDate({ from: subMonths(today, 3), to: today });
               break;
           case 'thisMonth':
               setDate({ from: startOfMonth(today), to: endOfMonth(today) });
@@ -153,15 +153,15 @@ export default function ProducaoPage() {
                     </Button>
                   </PopoverTrigger>
                   <PopoverContent className="w-auto p-0 flex" align="end">
-                    <div className="flex flex-col space-y-2 p-2 border-r">
-                        <Button variant="ghost" className="justify-start" onClick={() => setDatePreset('today')}>Hoje</Button>
-                        <Button variant="ghost" className="justify-start" onClick={() => setDatePreset('yesterday')}>Ontem</Button>
-                        <Button variant="ghost" className="justify-start" onClick={() => setDatePreset('last7')}>Últimos 7 dias</Button>
-                        <Button variant="ghost" className="justify-start" onClick={() => setDatePreset('last30')}>Últimos 30 dias</Button>
-                        <Button variant="ghost" className="justify-start" onClick={() => setDatePreset('last3Months')}>Últimos 3 meses</Button>
+                    <div className="flex flex-col space-y-1 p-2 border-r">
+                        <Button variant="ghost" className="justify-start text-left font-normal h-8 px-2" onClick={() => setDatePreset('today')}>Hoje</Button>
+                        <Button variant="ghost" className="justify-start text-left font-normal h-8 px-2" onClick={() => setDatePreset('yesterday')}>Ontem</Button>
+                        <Button variant="ghost" className="justify-start text-left font-normal h-8 px-2" onClick={() => setDatePreset('last7')}>Últimos 7 dias</Button>
+                        <Button variant="ghost" className="justify-start text-left font-normal h-8 px-2" onClick={() => setDatePreset('last30')}>Últimos 30 dias</Button>
+                        <Button variant="ghost" className="justify-start text-left font-normal h-8 px-2" onClick={() => setDatePreset('last3Months')}>Últimos 3 meses</Button>
                         <Separator />
-                        <Button variant="ghost" className="justify-start" onClick={() => setDatePreset('thisMonth')}>Este mês</Button>
-                        <Button variant="ghost" className="justify-start" onClick={() => setDatePreset('lastMonth')}>Mês passado</Button>
+                        <Button variant="ghost" className="justify-start text-left font-normal h-8 px-2" onClick={() => setDatePreset('thisMonth')}>Este mês</Button>
+                        <Button variant="ghost" className="justify-start text-left font-normal h-8 px-2" onClick={() => setDatePreset('lastMonth')}>Mês passado</Button>
                     </div>
                     <Calendar
                       initialFocus
