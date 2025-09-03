@@ -10,6 +10,7 @@ import {
   ShoppingCart,
   Users,
   Loader2,
+  RefreshCw,
 } from "lucide-react";
 import { Bar, BarChart, ResponsiveContainer, XAxis, YAxis, Tooltip, CartesianGrid, TooltipProps, PieChart, Pie, Cell, Legend, LegendProps } from "recharts";
 import { format, subDays, startOfMonth, endOfMonth, subMonths } from "date-fns";
@@ -39,11 +40,12 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
-import { getSalesDashboardData } from "@/app/actions";
+import { getSalesDashboardData, getBlingCredentials, smartSyncOrders } from "@/app/actions";
 import { Skeleton } from "./ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { ScrollArea } from "./ui/scroll-area";
 import { Separator } from "./ui/separator";
+import { Badge } from "./ui/badge";
 
 
 // Helper to format currency
@@ -168,6 +170,9 @@ export default function SalesDashboard() {
   
   const [isLoading, setIsLoading] = React.useState(true);
   const [data, setData] = React.useState<Awaited<ReturnType<typeof getSalesDashboardData>> | null>(null);
+  const [isSyncing, setIsSyncing] = React.useState(false);
+  const [initialSyncDone, setInitialSyncDone] = React.useState(false);
+
   const { toast } = useToast();
 
   const fetchData = React.useCallback(async (currentDate: DateRange | undefined) => {
@@ -190,16 +195,66 @@ export default function SalesDashboard() {
         setIsLoading(false);
       }
   }, [toast]);
+
+  const autoSyncBling = React.useCallback(async (isManual: boolean = false) => {
+    if (isSyncing) return;
+
+    const credentials = await getBlingCredentials();
+    if (!credentials.accessToken) {
+        if(isManual) {
+            toast({
+                variant: 'destructive',
+                title: 'Não Conectado',
+                description: 'A conexão com o Bling não foi configurada. Vá para a página de API.'
+            });
+        }
+        return;
+    }
+    
+    setIsSyncing(true);
+    if(isManual) {
+        toast({ title: "Sincronizando...", description: "Buscando novos pedidos do Bling." });
+    }
+
+    try {
+        const result = await smartSyncOrders(); // Usa a sincronização inteligente sem data
+        if (result.summary.created > 0) {
+            toast({
+              title: "Painel Atualizado!",
+              description: `${result.summary.created} novo(s) pedido(s) foram importados.`,
+            });
+            // Recarrega os dados do painel se houve mudança
+            fetchData(date); 
+        } else {
+             if(isManual) {
+                toast({ title: "Tudo certo!", description: "Seu painel já está atualizado com os últimos pedidos." });
+            }
+        }
+    } catch (error: any) {
+        console.error("Auto-sync failed:", error);
+        if (isManual) {
+            toast({ variant: 'destructive', title: 'Erro na Sincronização', description: error.message });
+        }
+    } finally {
+        setIsSyncing(false);
+    }
+  }, [isSyncing, toast, date, fetchData]);
   
   React.useEffect(() => {
     const today = new Date();
     const initialDate = {
-        from: new Date(today.getFullYear(), 0, 1),
+        from: startOfMonth(subMonths(today, 2)), // Últimos 3 meses
         to: today,
     };
     setDate(initialDate);
     fetchData(initialDate);
-  }, [fetchData]); 
+
+    if (!initialSyncDone) {
+        autoSyncBling(false); // Sincronização silenciosa na primeira carga
+        setInitialSyncDone(true);
+    }
+
+  }, [fetchData, initialSyncDone, autoSyncBling]); 
   
   const handleFilter = () => {
     fetchData(date);
@@ -314,6 +369,13 @@ export default function SalesDashboard() {
           </Button>
         </div>
       </div>
+      
+       {isSyncing && (
+          <Badge variant="secondary" className="animate-pulse w-fit">
+            <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
+            Sincronizando pedidos em segundo plano...
+          </Badge>
+        )}
 
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         <StatCard 
@@ -455,4 +517,4 @@ export default function SalesDashboard() {
   );
 }
 
-    
+      
