@@ -166,7 +166,13 @@ const CustomLegend = ({ payload, totalRevenue }: { payload: any[], totalRevenue:
 
 
 export default function SalesDashboard() {
-  const [date, setDate] = React.useState<DateRange | undefined>(undefined);
+  const [date, setDate] = React.useState<DateRange | undefined>(() => {
+    const today = new Date();
+    return {
+      from: startOfMonth(subMonths(today, 2)),
+      to: today,
+    };
+  });
   
   const [isLoading, setIsLoading] = React.useState(true);
   const [data, setData] = React.useState<Awaited<ReturnType<typeof getSalesDashboardData>> | null>(null);
@@ -195,67 +201,62 @@ export default function SalesDashboard() {
         setIsLoading(false);
       }
   }, [toast]);
-
-  const autoSyncBling = React.useCallback(async (isManual: boolean = false) => {
-    if (isSyncing) return;
-
-    const credentials = await getBlingCredentials();
-    if (!credentials.accessToken) {
-        if(isManual) {
-            toast({
-                variant: 'destructive',
-                title: 'Não Conectado',
-                description: 'A conexão com o Bling não foi configurada. Vá para a página de API.'
-            });
-        }
-        return;
-    }
-    
-    setIsSyncing(true);
-    if(isManual) {
-        toast({ title: "Sincronizando...", description: "Buscando novos pedidos do Bling." });
-    }
-
-    try {
-        const result = await smartSyncOrders(); // Usa a sincronização inteligente sem data
-        if (result.summary.created > 0) {
-            toast({
-              title: "Painel Atualizado!",
-              description: `${result.summary.created} novo(s) pedido(s) foram importados.`,
-            });
-            // Recarrega os dados do painel se houve mudança
-            if(date) fetchData(date); 
-        } else {
-             if(isManual) {
-                toast({ title: "Tudo certo!", description: "Seu painel já está atualizado com os últimos pedidos." });
-            }
-        }
-    } catch (error: any) {
-        console.error("Auto-sync failed:", error);
-        if (isManual) {
-            toast({ variant: 'destructive', title: 'Erro na Sincronização', description: error.message });
-        }
-    } finally {
-        setIsSyncing(false);
-    }
-  }, [isSyncing, toast, date, fetchData]);
   
   React.useEffect(() => {
-    const today = new Date();
-    const initialDate = {
-        from: startOfMonth(subMonths(today, 2)), // Últimos 3 meses
-        to: today,
-    };
-    setDate(initialDate);
-    fetchData(initialDate);
+    fetchData(date);
+  }, [date, fetchData]); 
 
+  React.useEffect(() => {
+    const autoSyncBling = async (isManual: boolean = false) => {
+      if (isSyncing) return;
+  
+      const credentials = await getBlingCredentials();
+      if (!credentials.accessToken) {
+          if(isManual) {
+              toast({
+                  variant: 'destructive',
+                  title: 'Não Conectado',
+                  description: 'A conexão com o Bling não foi configurada. Vá para a página de API.'
+              });
+          }
+          return;
+      }
+      
+      setIsSyncing(true);
+      if(isManual) {
+          toast({ title: "Sincronizando...", description: "Buscando novos pedidos do Bling." });
+      }
+  
+      try {
+          const result = await smartSyncOrders(); 
+          if (result.summary.created > 0) {
+              toast({
+                title: "Painel Atualizado!",
+                description: `${result.summary.created} novo(s) pedido(s) foram importados.`,
+              });
+              fetchData(date); 
+          } else {
+               if(isManual) {
+                  toast({ title: "Tudo certo!", description: "Seu painel já está atualizado com os últimos pedidos." });
+              }
+          }
+      } catch (error: any) {
+          console.error("Auto-sync failed:", error);
+          if (isManual) {
+              toast({ variant: 'destructive', title: 'Erro na Sincronização', description: error.message });
+          }
+      } finally {
+          setIsSyncing(false);
+      }
+    };
+    
     if (!initialSyncDone) {
-        autoSyncBling(false); // Sincronização silenciosa na primeira carga
+        autoSyncBling(false);
         setInitialSyncDone(true);
     }
 
-  }, [fetchData, initialSyncDone, autoSyncBling]); 
-  
+  }, [initialSyncDone, isSyncing, toast, date, fetchData]); 
+
   const handleFilter = () => {
     fetchData(date);
   };
