@@ -15,6 +15,8 @@ import {
   LogOut,
   Menu,
   ChevronDown,
+  PackagePlus,
+  Boxes,
 } from "lucide-react";
 import * as React from "react";
 
@@ -56,7 +58,15 @@ const navItems = [
         ]
     },
     { href: "/producao", icon: Factory, label: "Produção" },
-    { href: "/insumos", icon: ClipboardList, label: "Insumos" },
+    { 
+        href: "/insumos", 
+        icon: ClipboardList, 
+        label: "Insumos",
+        subItems: [
+            { href: "/insumos?tab=cadastro", icon: PackagePlus, label: "Cadastro" },
+            { href: "/insumos?tab=estoque", icon: Boxes, label: "Estoque de Insumo" },
+        ]
+    },
     { href: "/estoque", icon: Warehouse, label: "Estoque" },
     { href: "/api", icon: Code, label: "API" },
 ];
@@ -131,19 +141,59 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
     router.push('/login');
   };
 
-  const MobileNavLink = ({ href, icon: Icon, label, subItems }: typeof navItems[0]) => (
-     <Link
-        href={href}
-        onClick={() => setOpen(false)}
-        className={cn(
-            "flex items-center gap-4 px-2.5 py-2 text-muted-foreground hover:text-foreground",
-            pathname === href && "text-foreground bg-accent rounded-md"
-        )}
-        >
-        <Icon className="h-5 w-5" />
-        {label}
-    </Link>
-  )
+  const MobileNavLink = ({ item }: { item: typeof navItems[0]}) => {
+    const isActive = item.subItems ? pathname.startsWith(item.href) : pathname === item.href;
+    const [isSubMenuOpen, setIsSubMenuOpen] = React.useState(isActive);
+
+    if (item.subItems) {
+      return (
+        <div>
+          <button
+            onClick={() => setIsSubMenuOpen(!isSubMenuOpen)}
+            className="flex w-full items-center justify-between gap-4 px-2.5 py-2 text-muted-foreground hover:text-foreground"
+          >
+            <div className="flex items-center gap-4">
+              <item.icon className="h-5 w-5" />
+              {item.label}
+            </div>
+            <ChevronDown className={cn("h-4 w-4 transition-transform", isSubMenuOpen && "rotate-180")} />
+          </button>
+          {isSubMenuOpen && (
+            <div className="flex flex-col pl-8 pt-2">
+              {item.subItems.map(sub => (
+                <Link
+                  key={sub.href}
+                  href={sub.href}
+                  onClick={() => setOpen(false)}
+                  className={cn(
+                      "flex items-center gap-4 px-2.5 py-2 text-muted-foreground hover:text-foreground text-sm",
+                      pathname === sub.href && "text-foreground bg-accent rounded-md"
+                  )}
+                >
+                  <sub.icon className="h-4 w-4" />
+                  {sub.label}
+                </Link>
+              ))}
+            </div>
+          )}
+        </div>
+      );
+    }
+    
+    return (
+       <Link
+          href={item.href}
+          onClick={() => setOpen(false)}
+          className={cn(
+              "flex items-center gap-4 px-2.5 py-2 text-muted-foreground hover:text-foreground",
+              pathname === item.href && "text-foreground bg-accent rounded-md"
+          )}
+          >
+          <item.icon className="h-5 w-5" />
+          {item.label}
+      </Link>
+    )
+  }
 
   return (
      <div className="flex min-h-screen w-full flex-col bg-muted/40">
@@ -178,7 +228,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
                 >
                   <Logo />
                 </Link>
-                 {navItems.map(item => <MobileNavLink key={item.href} {...item} />)}
+                 {navItems.map(item => <MobileNavLink key={item.href} item={item} />)}
               </nav>
             </SheetContent>
           </Sheet>

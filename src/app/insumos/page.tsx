@@ -28,6 +28,7 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useToast } from '@/hooks/use-toast';
 import { getBlingProducts } from '@/app/actions';
+import { useSearchParams } from 'next/navigation';
 
 type BlingProduct = {
     id: number;
@@ -35,18 +36,16 @@ type BlingProduct = {
     codigo: string;
 }
 
-export default function InsumosPage() {
-  const [isLoading, setIsLoading] = React.useState(true);
+const CadastroInsumo = () => {
   const [isFormOpen, setIsFormOpen] = React.useState(false);
   const [products, setProducts] = React.useState<BlingProduct[]>([]);
   const [isLoadingProducts, setIsLoadingProducts] = React.useState(false);
-
   const { toast } = useToast();
 
   const fetchProducts = React.useCallback(async () => {
     setIsLoadingProducts(true);
     try {
-        const productData = await getBlingProducts(1000); // Fetch a good amount of products
+        const productData = await getBlingProducts(1000);
         if (productData && productData.data) {
             setProducts(productData.data);
         }
@@ -62,15 +61,9 @@ export default function InsumosPage() {
   }, [toast]);
 
   React.useEffect(() => {
-    // Simula o carregamento de dados da página principal
-    const timer = setTimeout(() => setIsLoading(false), 1000);
-    
-    // Busca produtos quando o componente é montado
     fetchProducts();
-    
-    return () => clearTimeout(timer);
   }, [fetchProducts]);
-  
+
   const handleSaveSupply = (event: React.FormEvent) => {
     event.preventDefault();
     // TODO: Implementar lógica de salvamento
@@ -80,13 +73,12 @@ export default function InsumosPage() {
     });
     setIsFormOpen(false);
   }
-
+  
   return (
-    <DashboardLayout>
-      <div className="flex-1 space-y-8 p-4 pt-6 md:p-8">
+      <div className="space-y-8">
         <div className="flex items-center justify-between">
             <div>
-                <h2 className="text-3xl font-bold tracking-tight">Gestão de Insumos</h2>
+                <h2 className="text-3xl font-bold tracking-tight">Cadastro de Insumos</h2>
                 <p className="text-muted-foreground">
                     Cadastre e gerencie os insumos utilizados na sua produção.
                 </p>
@@ -174,23 +166,66 @@ export default function InsumosPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {isLoading ? (
-                  <TableRow>
-                    <TableCell colSpan={5} className="h-24 text-center">
-                      <Loader2 className="mx-auto h-6 w-6 animate-spin" />
-                    </TableCell>
-                  </TableRow>
-                ) : (
-                  <TableRow>
+                <TableRow>
                     <TableCell colSpan={5} className="h-24 text-center">
                       Nenhum insumo cadastrado. Comece clicando em "Cadastrar Novo Insumo".
                     </TableCell>
-                  </TableRow>
-                )}
+                </TableRow>
               </TableBody>
             </Table>
           </CardContent>
         </Card>
+      </div>
+  )
+}
+
+const EstoqueInsumo = () => {
+    return (
+        <div className="space-y-8">
+            <div>
+                <h2 className="text-3xl font-bold tracking-tight">Estoque de Insumos</h2>
+                <p className="text-muted-foreground">
+                    Visualize o estoque atual dos seus insumos.
+                </p>
+            </div>
+            <Card>
+                <CardHeader>
+                    <CardTitle>Níveis de Estoque</CardTitle>
+                    <CardDescription>
+                        A lista abaixo mostra os níveis de estoque para cada insumo.
+                    </CardDescription>
+                </CardHeader>
+                <CardContent>
+                     <Table>
+                        <TableHeader>
+                            <TableRow>
+                            <TableHead>Nome do Insumo</TableHead>
+                            <TableHead>Estoque Atual</TableHead>
+                            <TableHead>Status</TableHead>
+                            </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                            <TableRow>
+                                <TableCell colSpan={3} className="h-24 text-center">
+                                    Funcionalidade em desenvolvimento.
+                                </TableCell>
+                            </TableRow>
+                        </TableBody>
+                    </Table>
+                </CardContent>
+            </Card>
+        </div>
+    )
+}
+
+export default function InsumosPage() {
+  const searchParams = useSearchParams();
+  const tab = searchParams.get('tab') || 'cadastro'; 
+
+  return (
+    <DashboardLayout>
+      <div className="flex-1 p-4 pt-6 md:p-8">
+        {tab === 'cadastro' ? <CadastroInsumo /> : <EstoqueInsumo />}
       </div>
     </DashboardLayout>
   );
