@@ -102,7 +102,13 @@ export default function VendasPage() {
   const [rowsPerPage, setRowsPerPage] = React.useState(10);
   
   // Date filter state
-  const [date, setDate] = React.useState<DateRange | undefined>(undefined);
+  const [date, setDate] = React.useState<DateRange | undefined>(() => {
+    const today = new Date();
+    return {
+      from: startOfMonth(today),
+      to: endOfMonth(today),
+    };
+  });
 
   // Stats state
   const [stats, setStats] = React.useState({
@@ -131,36 +137,15 @@ export default function VendasPage() {
         });
 
         setAllSales(sales);
-        
-        // Aplica o filtro de data atual aos novos dados
-        if (date?.from && date?.to) {
-            const newFilteredSales = sales.filter(sale => {
-                try {
-                    const saleDate = parseISO(sale.data);
-                    return saleDate >= date.from! && saleDate <= date.to!;
-                } catch (e) {
-                    return false;
-                }
-            });
-            setFilteredSales(newFilteredSales);
-        } else {
-             setFilteredSales(sales);
-        }
-
         setIsLoading(false);
     }, (error) => {
         console.error("Erro ao buscar pedidos do Firestore em tempo real:", error);
         setIsLoading(false);
     });
     
-    // Define a data inicial quando o componente monta pela primeira vez
-    const today = new Date();
-    const initialDate = { from: new Date(today.getFullYear(), 0, 1), to: today };
-    setDate(initialDate);
-
     // Limpa o listener quando o componente é desmontado
     return () => unsubscribe();
-  }, []); // A dependência de 'date' foi removida para que o listener seja criado apenas uma vez
+  }, []); 
   
   // Recalculate stats and apply date filter whenever allSales or date changes
   React.useEffect(() => {
@@ -504,5 +489,7 @@ export default function VendasPage() {
     </DashboardLayout>
   );
 }
+
+    
 
     
