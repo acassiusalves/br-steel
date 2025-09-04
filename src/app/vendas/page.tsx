@@ -12,7 +12,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { collection, getDocs, query, orderBy } from 'firebase/firestore';
+import { collection, query, orderBy, onSnapshot } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { Badge } from '@/components/ui/badge';
 import SaleOrderDetailModal from '@/components/sale-order-detail-modal';
@@ -28,30 +28,6 @@ import { ptBR } from "date-fns/locale";
 import type { DateRange } from "react-day-picker";
 import { Skeleton } from '@/components/ui/skeleton';
 import { Separator } from '@/components/ui/separator';
-
-// Função para buscar os pedidos do Firestore
-async function getSalesFromFirestore(): Promise<SaleOrder[]> {
-  try {
-    const ordersCollection = collection(db, 'salesOrders');
-    const q = query(ordersCollection, orderBy('data', 'desc'));
-    const snapshot = await getDocs(q);
-
-    if (snapshot.empty) {
-      console.log("Nenhum pedido encontrado no Firestore.");
-      return [];
-    }
-
-    const sales: SaleOrder[] = [];
-    snapshot.forEach(doc => {
-      sales.push(doc.data() as SaleOrder);
-    });
-    
-    return sales;
-  } catch (error) {
-    console.error("Erro ao buscar pedidos do Firestore:", error);
-    return [];
-  }
-}
 
 // Função para formatar a data
 const formatDate = (dateString: string) => {
@@ -136,30 +112,60 @@ export default function VendasPage() {
   });
 
   React.useEffect(() => {
-    async function fetchData() {
-      setIsLoading(true);
-      const data = await getSalesFromFirestore();
-      setAllSales(data);
-      setFilteredSales(data); // Initially, show all sales
-      
-      const today = new Date();
-      const initialDate = { from: new Date(today.getFullYear(), 0, 1), to: today };
-      setDate(initialDate);
-      
-      setIsLoading(false);
-    }
-    fetchData();
-  }, []);
-  
-  // Recalculate stats whenever filteredSales changes
-  React.useEffect(() => {
-    const totalRevenue = filteredSales.reduce((sum, order) => sum + (order.total || 0), 0);
-    const totalSales = filteredSales.length;
-    const averageTicket = totalSales > 0 ? totalRevenue / totalSales : 0;
+    setIsLoading(true);
+    const ordersCollection = collection(db, 'salesOrders');
+    const q = query(ordersCollection, orderBy('data', 'desc'));
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+        if (snapshot.empty) {
+            console.log("Nenhum pedido encontrado no Firestore.");
+            setAllSales([]);
+            setFilteredSales([]);
+            setIsLoading(false);
+            return;
+        }
+
+        const sales: SaleOrder[] = [];
+        snapshot.forEach(doc => {
+            sales.push(doc.data() as SaleOrder);
+        });
+
+        setAllSales(sales);
+        
+        // Aplica o filtro de data atual aos novos dados
+        if (date?.from && date?.to) {
+            const newFilteredSales = sales.filter(sale => {
+                try {
+                    const saleDate = parseISO(sale.data);
+                    return saleDate >= date.from! && saleDate <= date.to!;
+                } catch (e) {
+                    return false;
+                }
+            });
+            setFilteredSales(newFilteredSales);
+        } else {
+             setFilteredSales(sales);
+        }
+
+        setIsLoading(false);
+    }, (error) => {
+        console.error("Erro ao buscar pedidos do Firestore em tempo real:", error);
+        setIsLoading(false);
+    });
     
-    setStats({ totalRevenue, totalSales, averageTicket });
-    setCurrentPage(1); // Reset to first page on filter change
-  }, [filteredSales]);
+    // Define a data inicial quando o componente monta pela primeira vez
+    const today = new Date();
+    const initialDate = { from: new Date(today.getFullYear(), 0, 1), to: today };
+    setDate(initialDate);
+
+    // Limpa o listener quando o componente é desmontado
+    return () => unsubscribe();
+  }, []); // A dependência de 'date' foi removida para que o listener seja criado apenas uma vez
+  
+  // Recalculate stats and apply date filter whenever allSales or date changes
+  React.useEffect(() => {
+      handleFilter();
+  }, [allSales, date]);
 
 
   const handleFilter = React.useCallback(() => {
@@ -178,6 +184,14 @@ export default function VendasPage() {
     }
 
     setFilteredSales(newFilteredSales);
+    setCurrentPage(1); // Reset to first page on filter change
+    
+    const totalRevenue = newFilteredSales.reduce((sum, order) => sum + (order.total || 0), 0);
+    const totalSales = newFilteredSales.length;
+    const averageTicket = totalSales > 0 ? totalRevenue / totalSales : 0;
+    
+    setStats({ totalRevenue, totalSales, averageTicket });
+    
     // Give a small delay to show the loader, improving UX
     setTimeout(() => setIsFiltering(false), 300);
   }, [allSales, date]);
@@ -491,3 +505,4 @@ export default function VendasPage() {
   );
 }
 
+    
