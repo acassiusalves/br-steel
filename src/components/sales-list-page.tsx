@@ -487,3 +487,5 @@ const SalesListPage = () => {
     </>
   );
 };
+
+export default SalesListPage;
