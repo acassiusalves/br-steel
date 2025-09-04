@@ -1,4 +1,5 @@
 
+
 'use client';
 
 import * as React from 'react';
@@ -28,6 +29,9 @@ import { ptBR } from "date-fns/locale";
 import type { DateRange } from "react-day-picker";
 import { Skeleton } from '@/components/ui/skeleton';
 import { Separator } from '@/components/ui/separator';
+import SalesDashboard from '@/components/sales-dashboard';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { useSearchParams, useRouter } from 'next/navigation';
 
 // Função para formatar a data
 const formatDate = (dateString: string) => {
@@ -90,7 +94,7 @@ const StatCard = ({ title, value, icon: Icon, isLoading, valueFormatter = (v) =>
 };
 
 
-export default function VendasPage() {
+const SalesListPage = () => {
   const [allSales, setAllSales] = React.useState<SaleOrder[]>([]);
   const [filteredSales, setFilteredSales] = React.useState<SaleOrder[]>([]);
   const [isLoading, setIsLoading] = React.useState(true);
@@ -243,242 +247,239 @@ export default function VendasPage() {
       }
   }
 
-
   return (
-    <DashboardLayout>
-      <div className="flex-1 space-y-8 p-4 pt-6 md:p-8">
-        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-            <div>
-                <h2 className="text-3xl font-bold tracking-tight">Vendas</h2>
-                <p className="text-muted-foreground">
-                    Liste e gerencie todos os pedidos de venda dos seus marketplaces.
-                </p>
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-                <Popover>
-                  <PopoverTrigger asChild>
-                    <Button
-                      id="date"
-                      variant={"outline"}
-                      className={cn(
-                        "w-full sm:w-[260px] justify-start text-left font-normal",
-                        !date && "text-muted-foreground"
-                      )}
-                    >
-                      <CalendarIcon className="mr-2 h-4 w-4" />
-                      {date?.from ? (
-                        date.to ? (
-                          <>
-                            {format(date.from, "dd/MM/yy")} -{" "}
-                            {format(date.to, "dd/MM/yy")}
-                          </>
-                        ) : (
-                          format(date.from, "dd/MM/yy")
-                        )
+    <>
+      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+          <div>
+              <h2 className="text-3xl font-bold tracking-tight">Listagem de Vendas</h2>
+              <p className="text-muted-foreground">
+                  Liste e gerencie todos os pedidos de venda dos seus marketplaces.
+              </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button
+                    id="date"
+                    variant={"outline"}
+                    className={cn(
+                      "w-full sm:w-[260px] justify-start text-left font-normal",
+                      !date && "text-muted-foreground"
+                    )}
+                  >
+                    <CalendarIcon className="mr-2 h-4 w-4" />
+                    {date?.from ? (
+                      date.to ? (
+                        <>
+                          {format(date.from, "dd/MM/yy")} -{" "}
+                          {format(date.to, "dd/MM/yy")}
+                        </>
                       ) : (
-                        <span>Escolha um período</span>
-                      )}
-                    </Button>
-                  </PopoverTrigger>
-                  <PopoverContent className="w-auto p-0 flex" align="end">
-                    <div className="flex flex-col space-y-1 p-2 border-r">
-                        <Button variant="ghost" className="justify-start text-left font-normal h-8 px-2" onClick={() => setDatePreset('today')}>Hoje</Button>
-                        <Button variant="ghost" className="justify-start text-left font-normal h-8 px-2" onClick={() => setDatePreset('yesterday')}>Ontem</Button>
-                        <Button variant="ghost" className="justify-start text-left font-normal h-8 px-2" onClick={() => setDatePreset('last7')}>Últimos 7 dias</Button>
-                        <Button variant="ghost" className="justify-start text-left font-normal h-8 px-2" onClick={() => setDatePreset('last30')}>Últimos 30 dias</Button>
-                        <Button variant="ghost" className="justify-start text-left font-normal h-8 px-2" onClick={() => setDatePreset('last3Months')}>Últimos 3 meses</Button>
-                        <Separator />
-                        <Button variant="ghost" className="justify-start text-left font-normal h-8 px-2" onClick={() => setDatePreset('thisMonth')}>Este mês</Button>
-                        <Button variant="ghost" className="justify-start text-left font-normal h-8 px-2" onClick={() => setDatePreset('lastMonth')}>Mês passado</Button>
-                    </div>
-                    <Calendar
-                      initialFocus
-                      mode="range"
-                      defaultMonth={date?.from}
-                      selected={date}
-                      onSelect={setDate}
-                      numberOfMonths={2}
-                      locale={ptBR}
-                    />
-                  </PopoverContent>
-                </Popover>
-              <Button onClick={handleFilter} disabled={isFiltering} className="w-full sm:w-auto">
-                {isFiltering ? (
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                ) : (
-                  <Filter className="mr-2 h-4 w-4" />
-                )}
-                Filtrar
-              </Button>
-            </div>
-        </div>
+                        format(date.from, "dd/MM/yy")
+                      )
+                    ) : (
+                      <span>Escolha um período</span>
+                    )}
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-auto p-0 flex" align="end">
+                  <div className="flex flex-col space-y-1 p-2 border-r">
+                      <Button variant="ghost" className="justify-start text-left font-normal h-8 px-2" onClick={() => setDatePreset('today')}>Hoje</Button>
+                      <Button variant="ghost" className="justify-start text-left font-normal h-8 px-2" onClick={() => setDatePreset('yesterday')}>Ontem</Button>
+                      <Button variant="ghost" className="justify-start text-left font-normal h-8 px-2" onClick={() => setDatePreset('last7')}>Últimos 7 dias</Button>
+                      <Button variant="ghost" className="justify-start text-left font-normal h-8 px-2" onClick={() => setDatePreset('last30')}>Últimos 30 dias</Button>
+                      <Button variant="ghost" className="justify-start text-left font-normal h-8 px-2" onClick={() => setDatePreset('last3Months')}>Últimos 3 meses</Button>
+                      <Separator />
+                      <Button variant="ghost" className="justify-start text-left font-normal h-8 px-2" onClick={() => setDatePreset('thisMonth')}>Este mês</Button>
+                      <Button variant="ghost" className="justify-start text-left font-normal h-8 px-2" onClick={() => setDatePreset('lastMonth')}>Mês passado</Button>
+                  </div>
+                  <Calendar
+                    initialFocus
+                    mode="range"
+                    defaultMonth={date?.from}
+                    selected={date}
+                    onSelect={setDate}
+                    numberOfMonths={2}
+                    locale={ptBR}
+                  />
+                </PopoverContent>
+              </Popover>
+            <Button onClick={handleFilter} disabled={isFiltering} className="w-full sm:w-auto">
+              {isFiltering ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <Filter className="mr-2 h-4 w-4" />
+              )}
+              Filtrar
+            </Button>
+          </div>
+      </div>
 
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-            <StatCard 
-              title="Receita Total"
-              value={stats.totalRevenue}
-              icon={DollarSign}
-              isLoading={isFiltering}
-              valueFormatter={formatCurrency}
-            />
-             <StatCard 
-              title="Vendas"
-              value={stats.totalSales}
-              icon={ShoppingCart}
-              isLoading={isFiltering}
-            />
-            <StatCard 
-              title="Ticket Médio"
-              value={stats.averageTicket}
-              icon={DollarSign}
-              isLoading={isFiltering}
-              valueFormatter={formatCurrency}
-            />
-        </div>
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 mt-8">
+          <StatCard 
+            title="Receita Total"
+            value={stats.totalRevenue}
+            icon={DollarSign}
+            isLoading={isFiltering}
+            valueFormatter={formatCurrency}
+          />
+           <StatCard 
+            title="Vendas"
+            value={stats.totalSales}
+            icon={ShoppingCart}
+            isLoading={isFiltering}
+          />
+          <StatCard 
+            title="Ticket Médio"
+            value={stats.averageTicket}
+            icon={DollarSign}
+            isLoading={isFiltering}
+            valueFormatter={formatCurrency}
+          />
+      </div>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>Pedidos Importados</CardTitle>
-            <CardDescription>
-              Uma lista detalhada dos seus pedidos de venda. Clique em um pedido para ver todos os detalhes.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="w-full overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>ID Pedido</TableHead>
-                    <TableHead>Nº Pedido</TableHead>
-                    <TableHead>Nº Loja</TableHead>
-                    <TableHead>Data</TableHead>
-                    <TableHead>Cliente</TableHead>
-                    <TableHead>Marketplace</TableHead>
-                    <TableHead>Qtd. Itens</TableHead>
-                    <TableHead>Itens</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead>Vendedor</TableHead>
-                    <TableHead className="text-right">Total Pedido</TableHead>
+      <Card className="mt-8">
+        <CardHeader>
+          <CardTitle>Pedidos Importados</CardTitle>
+          <CardDescription>
+            Uma lista detalhada dos seus pedidos de venda. Clique em um pedido para ver todos os detalhes.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="w-full overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>ID Pedido</TableHead>
+                  <TableHead>Nº Pedido</TableHead>
+                  <TableHead>Nº Loja</TableHead>
+                  <TableHead>Data</TableHead>
+                  <TableHead>Cliente</TableHead>
+                  <TableHead>Marketplace</TableHead>
+                  <TableHead>Qtd. Itens</TableHead>
+                  <TableHead>Itens</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead>Vendedor</TableHead>
+                  <TableHead className="text-right">Total Pedido</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {isLoading || isFiltering ? (
+                   <TableRow>
+                      <TableCell colSpan={11} className="text-center h-24">
+                         <Loader2 className="mx-auto h-6 w-6 animate-spin" />
+                      </TableCell>
                   </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {isLoading || isFiltering ? (
-                     <TableRow>
+                ) : paginatedSales.length > 0 ? (
+                    paginatedSales.map((sale) => (
+                        <TableRow key={sale.id} onClick={() => handleRowClick(sale)} className="cursor-pointer">
+                            <TableCell className="font-medium">{sale.id}</TableCell>
+                            <TableCell>{sale.numero || 'N/A'}</TableCell>
+                            <TableCell>{sale.numeroLoja || 'N/A'}</TableCell>
+                            <TableCell className="whitespace-nowrap">{formatDate(sale.data)}</TableCell>
+                            <TableCell>{sale.contato?.nome || 'N/A'}</TableCell>
+                            <TableCell>{getMarketplaceName(sale)}</TableCell>
+                             <TableCell className="text-center">{getTotalQuantity(sale.itens)}</TableCell>
+                            <TableCell>
+                              {sale.itens && sale.itens.length > 0 ? (
+                                <ul className="text-xs space-y-1">
+                                  {sale.itens.slice(0, 2).map((item, index) => (
+                                    <li key={item.id || index} title={item.descricao} className="truncate max-w-xs">
+                                      {item.descricao}
+                                    </li>
+                                  ))}
+                                  {sale.itens.length > 2 && <li className="text-muted-foreground">e mais {sale.itens.length - 2}...</li>}
+                                </ul>
+                              ) : 'Sem itens'}
+                            </TableCell>
+                            <TableCell>
+                                <StatusBadge statusName={sale.situacao?.nome || 'Desconhecido'} />
+                            </TableCell>
+                            <TableCell>{sale.vendedor?.nome || 'N/A'}</TableCell>
+                            <TableCell className="text-right whitespace-nowrap">{formatCurrency(sale.total)}</TableCell>
+                        </TableRow>
+                    ))
+                ) : (
+                    <TableRow>
                         <TableCell colSpan={11} className="text-center h-24">
-                           <Loader2 className="mx-auto h-6 w-6 animate-spin" />
+                           Nenhum pedido encontrado. <a href="/api" className="text-primary underline">Importe seus pedidos aqui.</a>
                         </TableCell>
                     </TableRow>
-                  ) : paginatedSales.length > 0 ? (
-                      paginatedSales.map((sale) => (
-                          <TableRow key={sale.id} onClick={() => handleRowClick(sale)} className="cursor-pointer">
-                              <TableCell className="font-medium">{sale.id}</TableCell>
-                              <TableCell>{sale.numero || 'N/A'}</TableCell>
-                              <TableCell>{sale.numeroLoja || 'N/A'}</TableCell>
-                              <TableCell className="whitespace-nowrap">{formatDate(sale.data)}</TableCell>
-                              <TableCell>{sale.contato?.nome || 'N/A'}</TableCell>
-                              <TableCell>{getMarketplaceName(sale)}</TableCell>
-                               <TableCell className="text-center">{getTotalQuantity(sale.itens)}</TableCell>
-                              <TableCell>
-                                {sale.itens && sale.itens.length > 0 ? (
-                                  <ul className="text-xs space-y-1">
-                                    {sale.itens.slice(0, 2).map((item, index) => (
-                                      <li key={item.id || index} title={item.descricao} className="truncate max-w-xs">
-                                        {item.descricao}
-                                      </li>
-                                    ))}
-                                    {sale.itens.length > 2 && <li className="text-muted-foreground">e mais {sale.itens.length - 2}...</li>}
-                                  </ul>
-                                ) : 'Sem itens'}
-                              </TableCell>
-                              <TableCell>
-                                  <StatusBadge statusName={sale.situacao?.nome || 'Desconhecido'} />
-                              </TableCell>
-                              <TableCell>{sale.vendedor?.nome || 'N/A'}</TableCell>
-                              <TableCell className="text-right whitespace-nowrap">{formatCurrency(sale.total)}</TableCell>
-                          </TableRow>
-                      ))
-                  ) : (
-                      <TableRow>
-                          <TableCell colSpan={11} className="text-center h-24">
-                             Nenhum pedido encontrado. <a href="/api" className="text-primary underline">Importe seus pedidos aqui.</a>
-                          </TableCell>
-                      </TableRow>
-                  )}
-                </TableBody>
-              </Table>
+                )}
+              </TableBody>
+            </Table>
+          </div>
+        </CardContent>
+         <CardFooter className="flex items-center justify-between">
+          <div className="text-sm text-muted-foreground">
+            Total de {filteredSales.length} pedidos.
+          </div>
+          <div className="flex items-center space-x-6 lg:space-x-8">
+            <div className="flex items-center space-x-2">
+              <p className="text-sm font-medium">Itens por página</p>
+              <Select
+                value={`${rowsPerPage}`}
+                onValueChange={(value) => {
+                  setRowsPerPage(Number(value))
+                  setCurrentPage(1)
+                }}
+              >
+                <SelectTrigger className="h-8 w-[70px]">
+                  <SelectValue placeholder={rowsPerPage} />
+                </SelectTrigger>
+                <SelectContent side="top">
+                  {[10, 20, 30, 40, 50].map((pageSize) => (
+                    <SelectItem key={pageSize} value={`${pageSize}`}>
+                      {pageSize}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
-          </CardContent>
-           <CardFooter className="flex items-center justify-between">
-            <div className="text-sm text-muted-foreground">
-              Total de {filteredSales.length} pedidos.
+            <div className="flex w-[100px] items-center justify-center text-sm font-medium">
+              Página {currentPage} de {totalPages}
             </div>
-            <div className="flex items-center space-x-6 lg:space-x-8">
-              <div className="flex items-center space-x-2">
-                <p className="text-sm font-medium">Itens por página</p>
-                <Select
-                  value={`${rowsPerPage}`}
-                  onValueChange={(value) => {
-                    setRowsPerPage(Number(value))
-                    setCurrentPage(1)
-                  }}
-                >
-                  <SelectTrigger className="h-8 w-[70px]">
-                    <SelectValue placeholder={rowsPerPage} />
-                  </SelectTrigger>
-                  <SelectContent side="top">
-                    {[10, 20, 30, 40, 50].map((pageSize) => (
-                      <SelectItem key={pageSize} value={`${pageSize}`}>
-                        {pageSize}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="flex w-[100px] items-center justify-center text-sm font-medium">
-                Página {currentPage} de {totalPages}
-              </div>
-              <div className="flex items-center space-x-2">
-                <Button
-                  variant="outline"
-                  className="hidden h-8 w-8 p-0 lg:flex"
-                  onClick={() => setCurrentPage(1)}
-                  disabled={currentPage === 1}
-                >
-                  <span className="sr-only">Go to first page</span>
-                  <ChevronsLeft className="h-4 w-4" />
-                </Button>
-                <Button
-                  variant="outline"
-                  className="h-8 w-8 p-0"
-                  onClick={() => setCurrentPage(currentPage - 1)}
-                  disabled={currentPage === 1}
-                >
-                  <span className="sr-only">Go to previous page</span>
-                  <ChevronLeft className="h-4 w-4" />
-                </Button>
-                <Button
-                  variant="outline"
-                  className="h-8 w-8 p-0"
-                  onClick={() => setCurrentPage(currentPage + 1)}
-                  disabled={currentPage === totalPages}
-                >
-                  <span className="sr-only">Go to next page</span>
-                  <ChevronRight className="h-4 w-4" />
-                </Button>
-                <Button
-                  variant="outline"
-                  className="hidden h-8 w-8 p-0 lg:flex"
-                  onClick={() => setCurrentPage(totalPages)}
-                  disabled={currentPage === totalPages}
-                >
-                  <span className="sr-only">Go to last page</span>
-                  <ChevronsRight className="h-4 w-4" />
-                </Button>
-              </div>
+            <div className="flex items-center space-x-2">
+              <Button
+                variant="outline"
+                className="hidden h-8 w-8 p-0 lg:flex"
+                onClick={() => setCurrentPage(1)}
+                disabled={currentPage === 1}
+              >
+                <span className="sr-only">Go to first page</span>
+                <ChevronsLeft className="h-4 w-4" />
+              </Button>
+              <Button
+                variant="outline"
+                className="h-8 w-8 p-0"
+                onClick={() => setCurrentPage(currentPage - 1)}
+                disabled={currentPage === 1}
+              >
+                <span className="sr-only">Go to previous page</span>
+                <ChevronLeft className="h-4 w-4" />
+              </Button>
+              <Button
+                variant="outline"
+                className="h-8 w-8 p-0"
+                onClick={() => setCurrentPage(currentPage + 1)}
+                disabled={currentPage === totalPages}
+              >
+                <span className="sr-only">Go to next page</span>
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+              <Button
+                variant="outline"
+                className="hidden h-8 w-8 p-0 lg:flex"
+                onClick={() => setCurrentPage(totalPages)}
+                disabled={currentPage === totalPages}
+              >
+                <span className="sr-only">Go to last page</span>
+                <ChevronsRight className="h-4 w-4" />
+              </Button>
             </div>
-          </CardFooter>
-        </Card>
-      </div>
+          </div>
+        </CardFooter>
+      </Card>
       {selectedOrder && (
         <SaleOrderDetailModal 
           order={selectedOrder} 
@@ -486,10 +487,37 @@ export default function VendasPage() {
           onClose={handleModalClose}
         />
       )}
+    </>
+  );
+};
+
+
+export default function VendasPage() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const tab = searchParams.get('tab') || 'dashboard';
+
+  const onTabChange = (value: string) => {
+    router.push(`/vendas?tab=${value}`);
+  }
+
+  return (
+    <DashboardLayout>
+      <div className="flex-1 space-y-8 p-4 pt-6 md:p-8">
+        <Tabs value={tab} onValueChange={onTabChange} className="w-full">
+            <TabsList className="grid w-full grid-cols-2 max-w-lg mb-6">
+                <TabsTrigger value="dashboard">Dashboard</TabsTrigger>
+                <TabsTrigger value="listagem">Listagem</TabsTrigger>
+            </TabsList>
+            
+            <TabsContent value="dashboard">
+                <SalesDashboard />
+            </TabsContent>
+            <TabsContent value="listagem">
+                <SalesListPage />
+            </TabsContent>
+        </Tabs>
+      </div>
     </DashboardLayout>
   );
 }
-
-    
-
-    

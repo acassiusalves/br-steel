@@ -14,6 +14,7 @@ import {
   ClipboardList,
   LogOut,
   Menu,
+  ChevronDown,
 } from "lucide-react";
 import * as React from "react";
 
@@ -45,25 +46,67 @@ const Logo = () => (
 );
 
 const navItems = [
-    { href: "/dashboard", icon: LayoutDashboard, label: "Painel de Vendas" },
-    { href: "/vendas", icon: ShoppingCart, label: "Vendas" },
+    { 
+        href: "/vendas", 
+        icon: ShoppingCart, 
+        label: "Vendas",
+        subItems: [
+            { href: "/vendas?tab=dashboard", icon: LayoutDashboard, label: "Dashboard" },
+            { href: "/vendas?tab=listagem", icon: ShoppingCart, label: "Listagem" },
+        ]
+    },
     { href: "/producao", icon: Factory, label: "Produção" },
     { href: "/insumos", icon: ClipboardList, label: "Insumos" },
     { href: "/estoque", icon: Warehouse, label: "Estoque" },
     { href: "/api", icon: Code, label: "API" },
 ];
 
-const NavLink = ({ href, label, isActive }: { href: string, label: string, isActive: boolean }) => (
-     <Link
-        href={href}
-        className={cn(
-            "transition-colors text-sm font-medium hover:text-primary",
-            isActive ? "text-primary" : "text-muted-foreground"
-        )}
+const NavLink = ({ item, pathname }: { item: typeof navItems[0], pathname: string }) => {
+    const isActive = item.subItems ? 
+        pathname.startsWith(item.href) : 
+        pathname === item.href;
+
+    if (item.subItems) {
+        return (
+             <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                    <Button
+                        variant="ghost"
+                        className={cn(
+                            "transition-colors text-sm font-medium hover:text-primary gap-1",
+                            isActive ? "text-primary" : "text-muted-foreground"
+                        )}
+                    >
+                        {item.label}
+                        <ChevronDown className="h-4 w-4" />
+                    </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent>
+                    {item.subItems.map(subItem => (
+                        <Link key={subItem.href} href={subItem.href} passHref>
+                             <DropdownMenuItem>
+                                <subItem.icon className="mr-2 h-4 w-4" />
+                                {subItem.label}
+                            </DropdownMenuItem>
+                        </Link>
+                    ))}
+                </DropdownMenuContent>
+            </DropdownMenu>
+        )
+    }
+
+    return (
+        <Link
+            href={item.href}
+            className={cn(
+                "transition-colors text-sm font-medium hover:text-primary",
+                isActive ? "text-primary" : "text-muted-foreground"
+            )}
         >
-        {label}
-    </Link>
-);
+            {item.label}
+        </Link>
+    );
+};
 
 
 export default function DashboardLayout({ children }: { children: ReactNode }) {
@@ -88,7 +131,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
     router.push('/login');
   };
 
-  const MobileNavLink = ({ href, icon: Icon, label }: typeof navItems[0]) => (
+  const MobileNavLink = ({ href, icon: Icon, label, subItems }: typeof navItems[0]) => (
      <Link
         href={href}
         onClick={() => setOpen(false)}
@@ -107,12 +150,12 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
         <header className="sticky top-0 flex h-16 items-center gap-4 border-b bg-background px-4 md:px-6 z-50">
             <nav className="hidden flex-col gap-6 text-lg font-medium md:flex md:flex-row md:items-center md:gap-5 md:text-sm lg:gap-6">
                 <Link
-                href="/dashboard"
+                href="/vendas?tab=dashboard"
                 className="flex items-center gap-2 text-lg font-semibold md:text-base"
                 >
                     <Logo />
                 </Link>
-                {navItems.map(item => <NavLink key={item.href} href={item.href} label={item.label} isActive={pathname === item.href} />)}
+                {navItems.map(item => <NavLink key={item.href} item={item} pathname={pathname} />)}
             </nav>
           
           <Sheet open={open} onOpenChange={setOpen}>
@@ -129,7 +172,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
             <SheetContent side="left" className="flex flex-col">
               <nav className="grid gap-2 text-lg font-medium">
                 <Link
-                  href="/dashboard"
+                  href="/vendas?tab=dashboard"
                   onClick={() => setOpen(false)}
                   className="flex items-center gap-2 text-lg font-semibold mb-4"
                 >
