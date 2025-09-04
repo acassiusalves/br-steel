@@ -2,7 +2,7 @@
 'use client';
 
 import * as React from 'react';
-import { PlusCircle, Loader2 } from 'lucide-react';
+import { PlusCircle, Loader2, RefreshCw } from 'lucide-react';
 import DashboardLayout from '@/components/dashboard-layout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import {
@@ -14,15 +14,72 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Button } from '@/components/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import { Label } from '@/components/ui/label';
+import { Input } from '@/components/ui/input';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { useToast } from '@/hooks/use-toast';
+import { getBlingProducts } from '@/app/actions';
+
+type BlingProduct = {
+    id: number;
+    nome: string;
+    codigo: string;
+}
 
 export default function InsumosPage() {
   const [isLoading, setIsLoading] = React.useState(true);
+  const [isFormOpen, setIsFormOpen] = React.useState(false);
+  const [products, setProducts] = React.useState<BlingProduct[]>([]);
+  const [isLoadingProducts, setIsLoadingProducts] = React.useState(false);
+
+  const { toast } = useToast();
+
+  const fetchProducts = React.useCallback(async () => {
+    setIsLoadingProducts(true);
+    try {
+        const productData = await getBlingProducts(1000); // Fetch a good amount of products
+        if (productData && productData.data) {
+            setProducts(productData.data);
+        }
+    } catch (error: any) {
+        toast({
+            variant: 'destructive',
+            title: 'Erro ao Buscar Produtos',
+            description: error.message
+        });
+    } finally {
+        setIsLoadingProducts(false);
+    }
+  }, [toast]);
 
   React.useEffect(() => {
-    // Simula o carregamento de dados
-    const timer = setTimeout(() => setIsLoading(false), 1500);
+    // Simula o carregamento de dados da página principal
+    const timer = setTimeout(() => setIsLoading(false), 1000);
+    
+    // Busca produtos quando o componente é montado
+    fetchProducts();
+    
     return () => clearTimeout(timer);
-  }, []);
+  }, [fetchProducts]);
+  
+  const handleSaveSupply = (event: React.FormEvent) => {
+    event.preventDefault();
+    // TODO: Implementar lógica de salvamento
+    toast({
+        title: "Em Desenvolvimento",
+        description: "A lógica para salvar o insumo ainda será implementada."
+    });
+    setIsFormOpen(false);
+  }
 
   return (
     <DashboardLayout>
@@ -34,10 +91,69 @@ export default function InsumosPage() {
                     Cadastre e gerencie os insumos utilizados na sua produção.
                 </p>
             </div>
-            <Button>
-                <PlusCircle className="mr-2 h-4 w-4" />
-                Cadastrar Novo Insumo
-            </Button>
+            <Dialog open={isFormOpen} onOpenChange={setIsFormOpen}>
+                <DialogTrigger asChild>
+                    <Button>
+                        <PlusCircle className="mr-2 h-4 w-4" />
+                        Cadastrar Novo Insumo
+                    </Button>
+                </DialogTrigger>
+                <DialogContent className="sm:max-w-[425px]">
+                    <form onSubmit={handleSaveSupply}>
+                        <DialogHeader>
+                            <DialogTitle>Cadastrar Novo Insumo</DialogTitle>
+                            <DialogDescription>
+                                Vincule um insumo a um produto e defina suas regras de estoque.
+                            </DialogDescription>
+                        </DialogHeader>
+                        <div className="grid gap-4 py-4">
+                            <div className="grid grid-cols-4 items-center gap-4">
+                                <Label htmlFor="produto" className="text-right">
+                                    Produto
+                                </Label>
+                                <div className="col-span-3 flex items-center gap-2">
+                                     <Select required>
+                                        <SelectTrigger disabled={isLoadingProducts}>
+                                            <SelectValue placeholder={isLoadingProducts ? "Carregando..." : "Selecione um produto"} />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            {products.map(p => (
+                                                <SelectItem key={p.id} value={String(p.id)}>
+                                                    <span title={p.nome}>{p.nome}</span>
+                                                </SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                    <Button type="button" variant="ghost" size="icon" onClick={fetchProducts} disabled={isLoadingProducts}>
+                                        <RefreshCw className={`h-4 w-4 ${isLoadingProducts ? 'animate-spin' : ''}`} />
+                                    </Button>
+                                </div>
+                            </div>
+                             <div className="grid grid-cols-4 items-center gap-4">
+                                <Label htmlFor="min-stock" className="text-right">
+                                    Estoque Mínimo
+                                </Label>
+                                <Input id="min-stock" type="number" required className="col-span-3" />
+                            </div>
+                            <div className="grid grid-cols-4 items-center gap-4">
+                                <Label htmlFor="max-stock" className="text-right">
+                                    Estoque Máximo
+                                </Label>
+                                <Input id="max-stock" type="number" required className="col-span-3" />
+                            </div>
+                            <div className="grid grid-cols-4 items-center gap-4">
+                                <Label htmlFor="delivery-time" className="text-right">
+                                    Entrega (dias)
+                                </Label>
+                                <Input id="delivery-time" type="number" required className="col-span-3" placeholder="Tempo médio"/>
+                            </div>
+                        </div>
+                        <DialogFooter>
+                            <Button type="submit">Salvar Insumo</Button>
+                        </DialogFooter>
+                    </form>
+                </DialogContent>
+            </Dialog>
         </div>
         <Card>
           <CardHeader>
