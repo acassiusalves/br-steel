@@ -29,6 +29,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useToast } from '@/hooks/use-toast';
 import { getBlingProducts } from '@/app/actions';
 import { useSearchParams } from 'next/navigation';
+import { collection, query, orderBy, onSnapshot } from 'firebase/firestore';
+import { db } from '@/lib/firebase';
+import type { Supply } from '@/types/supply';
+import { addSupply } from '@/services/supply-service';
+import { getSupplies } from '@/services/supply-service';
+
 
 type BlingProduct = {
     id: number;
@@ -39,7 +45,11 @@ type BlingProduct = {
 const CadastroInsumo = () => {
   const [isFormOpen, setIsFormOpen] = React.useState(false);
   const [products, setProducts] = React.useState<BlingProduct[]>([]);
+  const [supplies, setSupplies] = React.useState<Supply[]>([]);
   const [isLoadingProducts, setIsLoadingProducts] = React.useState(false);
+  const [isSaving, setIsSaving] = React.useState(false);
+  const [isLoadingSupplies, setIsLoadingSupplies] = React.useState(true);
+  
   const { toast } = useToast();
 
   const fetchProducts = React.useCallback(async () => {
@@ -63,15 +73,66 @@ const CadastroInsumo = () => {
   React.useEffect(() => {
     fetchProducts();
   }, [fetchProducts]);
+  
+  React.useEffect(() => {
+      const q = getSupplies();
+      const unsubscribe = onSnapshot(q, (querySnapshot) => {
+          const suppliesData: Supply[] = [];
+          querySnapshot.forEach((doc) => {
+              suppliesData.push({ id: doc.id, ...(doc.data() as Omit<Supply, 'id'>) });
+          });
+          setSupplies(suppliesData);
+          setIsLoadingSupplies(false);
+      }, (error) => {
+          console.error("Error fetching supplies:", error);
+          toast({
+              variant: 'destructive',
+              title: 'Erro ao Listar Insumos',
+              description: 'Não foi possível buscar os insumos cadastrados.'
+          });
+          setIsLoadingSupplies(false);
+      });
 
-  const handleSaveSupply = (event: React.FormEvent) => {
+      return () => unsubscribe();
+  }, [toast]);
+
+
+  const handleSaveSupply = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    // TODO: Implementar lógica de salvamento
-    toast({
-        title: "Em Desenvolvimento",
-        description: "A lógica para salvar o insumo ainda será implementada."
-    });
-    setIsFormOpen(false);
+    setIsSaving(true);
+    
+    const formData = new FormData(event.currentTarget);
+    const productId = formData.get('produto-id') as string;
+    const productName = products.find(p => String(p.id) === productId)?.nome || 'Nome não encontrado';
+
+    const supplyData: Omit<Supply, 'id'> = {
+        produto: {
+            id: productId,
+            nome: productName
+        },
+        estoqueMinimo: Number(formData.get('min-stock')),
+        estoqueMaximo: Number(formData.get('max-stock')),
+        tempoEntrega: Number(formData.get('delivery-time')),
+        custoUnitario: Number(formData.get('unit-cost')),
+        fornecedor: formData.get('supplier') as string,
+    };
+    
+    try {
+        await addSupply(supplyData);
+        toast({
+            title: "Sucesso!",
+            description: "O insumo foi cadastrado com sucesso."
+        });
+        setIsFormOpen(false);
+    } catch (error: any) {
+         toast({
+            variant: 'destructive',
+            title: 'Erro ao Salvar',
+            description: error.message
+        });
+    } finally {
+        setIsSaving(false);
+    }
   }
   
   return (
@@ -100,11 +161,11 @@ const CadastroInsumo = () => {
                         </DialogHeader>
                         <div className="grid gap-4 py-4">
                             <div className="grid grid-cols-4 items-center gap-4">
-                                <Label htmlFor="produto" className="text-right">
+                                <Label htmlFor="produto-id" className="text-right">
                                     Produto
                                 </Label>
                                 <div className="col-span-3 flex items-center gap-2">
-                                     <Select required>
+                                     <Select name="produto-id" required>
                                         <SelectTrigger disabled={isLoadingProducts}>
                                             <SelectValue placeholder={isLoadingProducts ? "Carregando..." : "Selecione um produto"} />
                                         </SelectTrigger>
@@ -121,27 +182,42 @@ const CadastroInsumo = () => {
                                     </Button>
                                 </div>
                             </div>
+                            <div className="grid grid-cols-4 items-center gap-4">
+                                <Label htmlFor="unit-cost" className="text-right">
+                                    Custo Unitário
+                                </Label>
+                                <Input id="unit-cost" name="unit-cost" type="number" step="0.01" required className="col-span-3" />
+                            </div>
+                            <div className="grid grid-cols-4 items-center gap-4">
+                                <Label htmlFor="supplier" className="text-right">
+                                    Fornecedor
+                                </Label>
+                                <Input id="supplier" name="supplier" required className="col-span-3" />
+                            </div>
                              <div className="grid grid-cols-4 items-center gap-4">
                                 <Label htmlFor="min-stock" className="text-right">
                                     Estoque Mínimo
                                 </Label>
-                                <Input id="min-stock" type="number" required className="col-span-3" />
+                                <Input id="min-stock" name="min-stock" type="number" required className="col-span-3" />
                             </div>
                             <div className="grid grid-cols-4 items-center gap-4">
                                 <Label htmlFor="max-stock" className="text-right">
                                     Estoque Máximo
                                 </Label>
-                                <Input id="max-stock" type="number" required className="col-span-3" />
+                                <Input id="max-stock" name="max-stock" type="number" required className="col-span-3" />
                             </div>
                             <div className="grid grid-cols-4 items-center gap-4">
                                 <Label htmlFor="delivery-time" className="text-right">
                                     Entrega (dias)
                                 </Label>
-                                <Input id="delivery-time" type="number" required className="col-span-3" placeholder="Tempo médio"/>
+                                <Input id="delivery-time" name="delivery-time" type="number" required className="col-span-3" placeholder="Tempo médio"/>
                             </div>
                         </div>
                         <DialogFooter>
-                            <Button type="submit">Salvar Insumo</Button>
+                            <Button type="submit" disabled={isSaving}>
+                                {isSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                                Salvar Insumo
+                            </Button>
                         </DialogFooter>
                     </form>
                 </DialogContent>
@@ -158,19 +234,37 @@ const CadastroInsumo = () => {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Nome do Insumo</TableHead>
-                  <TableHead>Unidade de Medida</TableHead>
-                  <TableHead>Fornecedor Principal</TableHead>
+                  <TableHead>Nome do Insumo (Produto)</TableHead>
+                  <TableHead>Fornecedor</TableHead>
                   <TableHead className="text-right">Custo Unitário</TableHead>
-                  <TableHead className="text-right">Ações</TableHead>
+                  <TableHead className="text-right">Estoque Mínimo</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                <TableRow>
-                    <TableCell colSpan={5} className="h-24 text-center">
-                      Nenhum insumo cadastrado. Comece clicando em "Cadastrar Novo Insumo".
-                    </TableCell>
-                </TableRow>
+                {isLoadingSupplies ? (
+                    <TableRow>
+                        <TableCell colSpan={4} className="h-24 text-center">
+                            <Loader2 className="mx-auto h-6 w-6 animate-spin" />
+                        </TableCell>
+                    </TableRow>
+                ) : supplies.length > 0 ? (
+                    supplies.map(supply => (
+                        <TableRow key={supply.id}>
+                            <TableCell className="font-medium">{supply.produto.nome}</TableCell>
+                            <TableCell>{supply.fornecedor}</TableCell>
+                            <TableCell className="text-right">
+                                {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(supply.custoUnitario)}
+                            </TableCell>
+                            <TableCell className="text-right">{supply.estoqueMinimo}</TableCell>
+                        </TableRow>
+                    ))
+                ) : (
+                    <TableRow>
+                        <TableCell colSpan={5} className="h-24 text-center">
+                        Nenhum insumo cadastrado. Comece clicando em "Cadastrar Novo Insumo".
+                        </TableCell>
+                    </TableRow>
+                )}
               </TableBody>
             </Table>
           </CardContent>
@@ -230,3 +324,5 @@ export default function InsumosPage() {
     </DashboardLayout>
   );
 }
+
+    

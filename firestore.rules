@@ -1,0 +1,17 @@
+
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Regras existentes...
+    match /salesOrders/{orderId} {
+      allow read, write: if true; // Regra temporária para desenvolvimento
+    }
+
+    // Regra para a nova coleção de insumos
+    match /supplies/{supplyId} {
+      allow read, write: if true; // Regra temporária para desenvolvimento. Em produção, use request.auth != null
+    }
+  }
+}
+    
