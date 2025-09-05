@@ -49,7 +49,7 @@ export default function LoginPage() {
         description: "Redirecionando para o painel...",
       });
 
-      router.push('/dashboard');
+      router.push('/vendas?tab=dashboard');
       setIsLoading(false);
     }, 1000);
   };
