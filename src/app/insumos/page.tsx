@@ -377,7 +377,6 @@ const EstoqueInsumo = () => {
     const [isLoading, setIsLoading] = React.useState(true);
     const [searchTerm, setSearchTerm] = React.useState('');
     const [isMovementDialogOpen, setIsMovementDialogOpen] = React.useState(false);
-    const [movementDate, setMovementDate] = React.useState<Date | undefined>(new Date());
     const { toast } = useToast();
 
     const fetchInventory = React.useCallback(async () => {
@@ -483,41 +482,9 @@ const EstoqueInsumo = () => {
                                             </SelectContent>
                                         </Select>
                                     </div>
-                                    <div className="grid grid-cols-2 gap-4">
-                                        <div className="space-y-2">
-                                            <Label htmlFor="quantidade">Quantidade</Label>
-                                            <Input id="quantidade" name="quantidade" type="number" required placeholder="0"/>
-                                        </div>
-                                        <div className="space-y-2">
-                                            <Label htmlFor="data">Data da Movimentação</Label>
-                                            <Popover>
-                                                <PopoverTrigger asChild>
-                                                    <Button
-                                                    variant={"outline"}
-                                                    className={cn(
-                                                        "w-full justify-start text-left font-normal",
-                                                        !movementDate && "text-muted-foreground"
-                                                    )}
-                                                    >
-                                                    <CalendarIcon className="mr-2 h-4 w-4" />
-                                                    {movementDate ? format(movementDate, "dd/MM/yyyy") : <span>Escolha uma data</span>}
-                                                    </Button>
-                                                </PopoverTrigger>
-                                                <PopoverContent className="w-auto p-0">
-                                                    <Calendar
-                                                    mode="single"
-                                                    selected={movementDate}
-                                                    onSelect={setMovementDate}
-                                                    initialFocus
-                                                    locale={ptBR}
-                                                    />
-                                                </PopoverContent>
-                                            </Popover>
-                                        </div>
-                                    </div>
                                     <div className="space-y-2">
-                                        <Label htmlFor="responsavel">Responsável</Label>
-                                        <Input id="responsavel" name="responsavel" required placeholder="Nome do responsável"/>
+                                        <Label htmlFor="quantidade">Quantidade</Label>
+                                        <Input id="quantidade" name="quantidade" type="number" required placeholder="0"/>
                                     </div>
                                      <div className="space-y-2">
                                         <Label htmlFor="observacao">Observação</Label>
@@ -657,5 +624,3 @@ export default function InsumosPage() {
     </DashboardLayout>
   );
 }
-
-    
