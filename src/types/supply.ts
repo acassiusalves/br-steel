@@ -4,7 +4,11 @@ export interface Supply {
     nome: string;
     codigo: string;
     gtin: string;
+    unidade: string;
+    precoCusto: number;
     estoqueMinimo: number;
     estoqueMaximo: number;
-    tempoEntrega: number;
+    tempoEntrega: number; // em dias
+    createdAt?: string;
+    updatedAt?: string;
 }

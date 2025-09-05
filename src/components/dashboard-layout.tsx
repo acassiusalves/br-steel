@@ -71,9 +71,12 @@ const navItems = [
     { href: "/api", icon: Code, label: "API" },
 ];
 
-const NavLink = ({ item, pathname }: { item: typeof navItems[0], pathname: string }) => {
+const NavLink = ({ item, pathname, searchParams }: { item: typeof navItems[0], pathname: string, searchParams: URLSearchParams }) => {
+    const currentTab = searchParams.get('tab');
+    const baseIsActive = pathname.startsWith(item.href);
+
     const isActive = item.subItems ? 
-        pathname.startsWith(item.href) : 
+        baseIsActive : 
         pathname === item.href;
 
     if (item.subItems) {
@@ -92,14 +95,17 @@ const NavLink = ({ item, pathname }: { item: typeof navItems[0], pathname: strin
                     </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent>
-                    {item.subItems.map(subItem => (
-                        <Link key={subItem.href} href={subItem.href} passHref>
-                             <DropdownMenuItem>
-                                <subItem.icon className="mr-2 h-4 w-4" />
-                                {subItem.label}
-                            </DropdownMenuItem>
-                        </Link>
-                    ))}
+                    {item.subItems.map(subItem => {
+                        const isSubItemActive = baseIsActive && currentTab === subItem.href.split('tab=')[1];
+                        return (
+                            <Link key={subItem.href} href={subItem.href} passHref>
+                                <DropdownMenuItem className={cn(isSubItemActive && "bg-accent")}>
+                                    <subItem.icon className="mr-2 h-4 w-4" />
+                                    {subItem.label}
+                                </DropdownMenuItem>
+                            </Link>
+                        )
+                    })}
                 </DropdownMenuContent>
             </DropdownMenu>
         )
@@ -121,6 +127,7 @@ const NavLink = ({ item, pathname }: { item: typeof navItems[0], pathname: strin
 
 export default function DashboardLayout({ children }: { children: ReactNode }) {
   const pathname = usePathname();
+  const searchParams = new URLSearchParams(usePathname().split('?')[1] || '');
   const router = useRouter();
   const { toast } = useToast();
   const [open, setOpen] = React.useState(false);
@@ -142,8 +149,8 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
   };
 
   const MobileNavLink = ({ item }: { item: typeof navItems[0]}) => {
-    const isActive = item.subItems ? pathname.startsWith(item.href) : pathname === item.href;
-    const [isSubMenuOpen, setIsSubMenuOpen] = React.useState(isActive);
+    const baseIsActive = pathname.startsWith(item.href);
+    const [isSubMenuOpen, setIsSubMenuOpen] = React.useState(baseIsActive);
 
     if (item.subItems) {
       return (
@@ -160,20 +167,24 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
           </button>
           {isSubMenuOpen && (
             <div className="flex flex-col pl-8 pt-2">
-              {item.subItems.map(sub => (
-                <Link
-                  key={sub.href}
-                  href={sub.href}
-                  onClick={() => setOpen(false)}
-                  className={cn(
-                      "flex items-center gap-4 px-2.5 py-2 text-muted-foreground hover:text-foreground text-sm",
-                      pathname === sub.href && "text-foreground bg-accent rounded-md"
-                  )}
-                >
-                  <sub.icon className="h-4 w-4" />
-                  {sub.label}
-                </Link>
-              ))}
+              {item.subItems.map(sub => {
+                  const currentTab = searchParams.get('tab');
+                  const isSubItemActive = baseIsActive && currentTab === sub.href.split('tab=')[1];
+                  return (
+                    <Link
+                      key={sub.href}
+                      href={sub.href}
+                      onClick={() => setOpen(false)}
+                      className={cn(
+                          "flex items-center gap-4 px-2.5 py-2 text-muted-foreground hover:text-foreground text-sm",
+                          isSubItemActive && "text-foreground bg-accent rounded-md"
+                      )}
+                    >
+                      <sub.icon className="h-4 w-4" />
+                      {sub.label}
+                    </Link>
+                  )
+              })}
             </div>
           )}
         </div>
@@ -205,7 +216,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
                 >
                     <Logo />
                 </Link>
-                {navItems.map(item => <NavLink key={item.href} item={item} pathname={pathname} />)}
+                {navItems.map(item => <NavLink key={item.href} item={item} pathname={pathname} searchParams={searchParams} />)}
             </nav>
           
           <Sheet open={open} onOpenChange={setOpen}>

@@ -29,7 +29,7 @@ export async function addSupply(supplyData: Omit<Supply, 'id'>) {
  * @param id - O ID do insumo a ser atualizado.
  * @param supplyData - Os novos dados para o insumo.
  */
-export async function updateSupply(id: string, supplyData: Partial<Omit<Supply, 'id'>>) {
+export async function updateSupply(id: string, supplyData: Partial<Omit<Supply, 'id' | 'createdAt'>>) {
     const supplyDocRef = doc(db, 'supplies', id);
     try {
         await updateDoc(supplyDocRef, {
