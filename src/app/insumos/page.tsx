@@ -46,7 +46,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
 import { useSearchParams } from 'next/navigation';
-import { collection, query, orderBy, onSnapshot, getDocs } from 'firebase/firestore';
+import { collection, query, orderBy, getDocs } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import type { Supply } from '@/types/supply';
 import type { InventoryItem } from '@/types/inventory';
@@ -63,38 +63,18 @@ import { Textarea } from '@/components/ui/textarea';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 
 
-const CadastroInsumo = () => {
+const CadastroInsumo = ({ supplies, isLoading, fetchSupplies, onAction }: { 
+    supplies: Supply[], 
+    isLoading: boolean, 
+    fetchSupplies: () => void,
+    onAction: () => void
+}) => {
   const [isFormOpen, setIsFormOpen] = React.useState(false);
-  const [supplies, setSupplies] = React.useState<Supply[]>([]);
   const [isSaving, setIsSaving] = React.useState(false);
-  const [isLoadingSupplies, setIsLoadingSupplies] = React.useState(true);
   const [editingSupply, setEditingSupply] = React.useState<Supply | null>(null);
   const [deletingSupply, setDeletingSupply] = React.useState<Supply | null>(null);
   
   const { toast } = useToast();
-
-  React.useEffect(() => {
-      const q = query(collection(db, "supplies"), orderBy('nome', 'asc'));
-      const unsubscribe = onSnapshot(q, (querySnapshot) => {
-          const suppliesData: Supply[] = [];
-          querySnapshot.forEach((doc) => {
-              suppliesData.push({ id: doc.id, ...(doc.data() as Omit<Supply, 'id'>) });
-          });
-          setSupplies(suppliesData);
-          setIsLoadingSupplies(false);
-      }, (error) => {
-          console.error("Error fetching supplies:", error);
-          toast({
-              variant: 'destructive',
-              title: 'Erro ao Listar Insumos',
-              description: 'Não foi possível buscar os insumos cadastrados.'
-          });
-          setIsLoadingSupplies(false);
-      });
-
-      return () => unsubscribe();
-  }, [toast]);
-
 
   const handleOpenForm = (supply: Supply | null = null) => {
     setEditingSupply(supply);
@@ -138,6 +118,7 @@ const CadastroInsumo = () => {
             });
         }
         handleCloseForm();
+        onAction(); // Trigger parent data refresh
     } catch (error: any) {
          toast({
             variant: 'destructive',
@@ -158,6 +139,7 @@ const CadastroInsumo = () => {
             description: `O insumo "${deletingSupply.nome}" foi removido.`
         });
         setDeletingSupply(null); // Fecha o AlertDialog
+        onAction(); // Trigger parent data refresh
     } catch(error: any) {
          toast({
             variant: 'destructive',
@@ -204,7 +186,7 @@ const CadastroInsumo = () => {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {isLoadingSupplies ? (
+                {isLoading ? (
                     <TableRow>
                         <TableCell colSpan={9} className="h-24 text-center">
                             <Loader2 className="mx-auto h-6 w-6 animate-spin" />
@@ -366,57 +348,24 @@ const StockStatusBadge = ({ item }: { item: InventoryItem }) => {
     );
 };
 
-const EstoqueInsumo = () => {
-    const [inventory, setInventory] = React.useState<InventoryItem[]>([]);
+const EstoqueInsumo = ({ inventory, isLoading, fetchSupplies, onAction }: { 
+    inventory: InventoryItem[], 
+    isLoading: boolean,
+    fetchSupplies: () => void,
+    onAction: () => void
+}) => {
     const [filteredInventory, setFilteredInventory] = React.useState<InventoryItem[]>([]);
-    const [isLoading, setIsLoading] = React.useState(true);
     const [isSaving, setIsSaving] = React.useState(false);
     const [searchTerm, setSearchTerm] = React.useState('');
     const [isMovementDialogOpen, setIsMovementDialogOpen] = React.useState(false);
     const [movementType, setMovementType] = React.useState<'entrada' | 'saida'>('entrada');
     const { toast } = useToast();
-
-    const fetchInventory = React.useCallback(async () => {
-        setIsLoading(true);
-        try {
-            const q = query(collection(db, "supplies"), orderBy('nome', 'asc'));
-            const querySnapshot = await getDocs(q);
-
-            const inventoryItems: InventoryItem[] = querySnapshot.docs.map(doc => {
-                 const supply = { id: doc.id, ...doc.data() } as Supply;
-                 const estoqueAtual = supply.estoqueAtual || 0;
-                 const valorEmEstoque = estoqueAtual > 0 ? estoqueAtual * supply.precoCusto : 0;
-
-                 return {
-                     supply: supply,
-                     estoqueAtual: estoqueAtual,
-                     estoqueMinimo: supply.estoqueMinimo,
-                     valorEmEstoque: valorEmEstoque,
-                     status: estoqueAtual <= 0 ? 'esgotado' : (estoqueAtual < supply.estoqueMinimo ? 'baixo' : 'em_estoque'),
-                 };
-            });
-            setInventory(inventoryItems);
-        } catch (error) {
-            console.error("Error fetching inventory:", error);
-            toast({
-                variant: 'destructive',
-                title: 'Erro ao Listar Estoque',
-                description: 'Não foi possível buscar o estoque dos insumos.'
-            });
-        } finally {
-            setIsLoading(false);
-        }
-    }, [toast]);
-
-    React.useEffect(() => {
-        fetchInventory();
-    }, [fetchInventory]);
-
+    
     React.useEffect(() => {
         const filtered = inventory.filter(item => {
             const term = searchTerm.toLowerCase();
-            const nameMatch = item.supply?.nome?.toLowerCase().includes(term) || false;
-            const codeMatch = item.supply?.codigo?.toLowerCase().includes(term) || false;
+            const nameMatch = item.supply?.nome?.toLowerCase().includes(term);
+            const codeMatch = item.supply?.codigo?.toLowerCase().includes(term);
             return nameMatch || codeMatch;
         });
         setFilteredInventory(filtered);
@@ -456,7 +405,7 @@ const EstoqueInsumo = () => {
 
             toast({ title: "Sucesso!", description: `Movimentação de ${movementType} registrada.` });
             setIsMovementDialogOpen(false);
-            fetchInventory(); // Re-fetch data after successful movement
+            onAction(); // Re-fetch data after successful movement
 
         } catch (error: any) {
              toast({
@@ -676,10 +625,73 @@ export default function InsumosPage() {
   const searchParams = useSearchParams();
   const tab = searchParams.get('tab') || 'cadastro'; 
 
+  const [supplies, setSupplies] = React.useState<Supply[]>([]);
+  const [inventory, setInventory] = React.useState<InventoryItem[]>([]);
+  const [isLoading, setIsLoading] = React.useState(true);
+  const { toast } = useToast();
+
+  const fetchSupplies = React.useCallback(async () => {
+    setIsLoading(true);
+    try {
+        const q = query(collection(db, "supplies"), orderBy('nome', 'asc'));
+        const querySnapshot = await getDocs(q);
+
+        const suppliesData: Supply[] = [];
+        const inventoryItems: InventoryItem[] = [];
+
+        querySnapshot.forEach(doc => {
+            const supply = { id: doc.id, ...doc.data() } as Supply;
+            suppliesData.push(supply);
+
+            const estoqueAtual = supply.estoqueAtual || 0;
+            const valorEmEstoque = estoqueAtual > 0 ? estoqueAtual * supply.precoCusto : 0;
+            inventoryItems.push({
+                supply: supply,
+                estoqueAtual: estoqueAtual,
+                estoqueMinimo: supply.estoqueMinimo,
+                valorEmEstoque: valorEmEstoque,
+                status: estoqueAtual <= 0 ? 'esgotado' : (estoqueAtual < supply.estoqueMinimo ? 'baixo' : 'em_estoque'),
+            });
+        });
+        
+        setSupplies(suppliesData);
+        setInventory(inventoryItems);
+
+    } catch (error) {
+        console.error("Error fetching supplies:", error);
+        toast({
+            variant: 'destructive',
+            title: 'Erro ao Buscar Dados',
+            description: 'Não foi possível carregar os insumos e o estoque.'
+        });
+    } finally {
+        setIsLoading(false);
+    }
+  }, [toast]);
+  
+  React.useEffect(() => {
+    fetchSupplies();
+  }, [fetchSupplies]);
+
+
   return (
     <DashboardLayout>
       <div className="flex-1 p-4 pt-6 md:p-8">
-        {tab === 'cadastro' ? <CadastroInsumo /> : <EstoqueInsumo />}
+        {tab === 'cadastro' ? (
+          <CadastroInsumo 
+            supplies={supplies} 
+            isLoading={isLoading} 
+            fetchSupplies={fetchSupplies} 
+            onAction={fetchSupplies}
+          />
+        ) : (
+          <EstoqueInsumo 
+            inventory={inventory} 
+            isLoading={isLoading} 
+            fetchSupplies={fetchSupplies} 
+            onAction={fetchSupplies}
+          />
+        )}
       </div>
     </DashboardLayout>
   );
