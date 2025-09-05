@@ -8,3 +8,14 @@ export interface InventoryItem {
     valorEmEstoque: number;
     status: 'em_estoque' | 'baixo' | 'esgotado';
 }
+
+
+export interface InventoryMovement {
+    id: string;
+    supplyId: string;
+    type: 'entrada' | 'saida';
+    quantity: number;
+    unitCost?: number; // Opcional, usado principalmente para entradas
+    notes?: string;
+    createdAt: string;
+}

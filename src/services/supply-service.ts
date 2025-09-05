@@ -10,11 +10,12 @@ import type { Supply } from '@/types/supply';
  * @param supplyData - Os dados do insumo a serem salvos.
  * @returns O ID do documento recém-criado.
  */
-export async function addSupply(supplyData: Omit<Supply, 'id'>) {
+export async function addSupply(supplyData: Omit<Supply, 'id' | 'estoqueAtual'>) {
     const suppliesCollection = collection(db, 'supplies');
     try {
         const docRef = await addDoc(suppliesCollection, {
             ...supplyData,
+            estoqueAtual: 0, // Inicializa o estoque como 0
             createdAt: new Date().toISOString(),
         });
         return { id: docRef.id };
@@ -29,7 +30,7 @@ export async function addSupply(supplyData: Omit<Supply, 'id'>) {
  * @param id - O ID do insumo a ser atualizado.
  * @param supplyData - Os novos dados para o insumo.
  */
-export async function updateSupply(id: string, supplyData: Partial<Omit<Supply, 'id' | 'createdAt'>>) {
+export async function updateSupply(id: string, supplyData: Partial<Omit<Supply, 'id' | 'createdAt' | 'estoqueAtual'>>) {
     const supplyDocRef = doc(db, 'supplies', id);
     try {
         await updateDoc(supplyDocRef, {

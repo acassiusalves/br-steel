@@ -9,6 +9,7 @@ export interface Supply {
     estoqueMinimo: number;
     estoqueMaximo: number;
     tempoEntrega: number; // em dias
+    estoqueAtual: number; // Campo para o estoque atual
     createdAt?: string;
     updatedAt?: string;
 }

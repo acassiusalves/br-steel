@@ -1,5 +1,4 @@
 
-
 'use client';
 
 import * as React from 'react';
@@ -51,7 +50,7 @@ import { db } from '@/lib/firebase';
 import type { Supply } from '@/types/supply';
 import type { InventoryItem } from '@/types/inventory';
 import { addSupply, updateSupply, deleteSupply } from '@/services/supply-service';
-import { getInventory } from '@/services/inventory-service';
+import { getInventory, addInventoryMovement } from '@/services/inventory-service';
 import {
   Select,
   SelectContent,
@@ -117,7 +116,7 @@ const CadastroInsumo = () => {
     
     const formData = new FormData(event.currentTarget);
 
-    const supplyData: Omit<Supply, 'id'> = {
+    const supplyData: Omit<Supply, 'id' | 'estoqueAtual'> = {
         nome: formData.get('nome') as string,
         codigo: formData.get('codigo') as string,
         gtin: formData.get('gtin') as string,
@@ -375,6 +374,7 @@ const EstoqueInsumo = () => {
     const [inventory, setInventory] = React.useState<InventoryItem[]>([]);
     const [filteredInventory, setFilteredInventory] = React.useState<InventoryItem[]>([]);
     const [isLoading, setIsLoading] = React.useState(true);
+    const [isSaving, setIsSaving] = React.useState(false);
     const [searchTerm, setSearchTerm] = React.useState('');
     const [isMovementDialogOpen, setIsMovementDialogOpen] = React.useState(false);
     const [movementType, setMovementType] = React.useState<'entrada' | 'saida'>('entrada');
@@ -383,22 +383,27 @@ const EstoqueInsumo = () => {
     const fetchInventory = React.useCallback(async () => {
         setIsLoading(true);
         try {
-            const data = await getInventory();
-            setInventory(data);
-            setFilteredInventory(data);
+            const unsubscribe = await getInventory((data) => {
+                setInventory(data);
+                setFilteredInventory(data);
+                setIsLoading(false);
+            });
+            return unsubscribe;
         } catch (error: any) {
             toast({
                 variant: 'destructive',
                 title: 'Erro ao buscar estoque',
                 description: error.message
             });
-        } finally {
             setIsLoading(false);
         }
     }, [toast]);
 
     React.useEffect(() => {
-        fetchInventory();
+        const unsubscribePromise = fetchInventory();
+        return () => {
+            unsubscribePromise.then(unsubscribe => unsubscribe && unsubscribe());
+        };
     }, [fetchInventory]);
 
     React.useEffect(() => {
@@ -418,11 +423,43 @@ const EstoqueInsumo = () => {
         return { totalValue, lowStockCount, outOfStockCount };
     }, [inventory]);
 
-    const handleSaveMovement = (event: React.FormEvent<HTMLFormElement>) => {
+    const handleSaveMovement = async (event: React.FormEvent<HTMLFormElement>) => {
         event.preventDefault();
-        // TODO: Implement save logic
-        toast({ title: "Funcionalidade em desenvolvimento" });
-        setIsMovementDialogOpen(false);
+        setIsSaving(true);
+        const formData = new FormData(event.currentTarget);
+        
+        const supplyId = formData.get('insumo') as string;
+        const quantity = Number(formData.get('quantidade'));
+        const unitCost = formData.get('custoUnitario') ? Number(formData.get('custoUnitario')) : undefined;
+        const notes = formData.get('observacao') as string;
+
+        if (!supplyId || !quantity) {
+            toast({ variant: 'destructive', title: "Dados incompletos", description: "Selecione o insumo e a quantidade." });
+            setIsSaving(false);
+            return;
+        }
+
+        try {
+            await addInventoryMovement({
+                supplyId,
+                type: movementType,
+                quantity,
+                unitCost,
+                notes,
+            });
+
+            toast({ title: "Sucesso!", description: `Movimentação de ${movementType} registrada.` });
+            setIsMovementDialogOpen(false);
+
+        } catch (error: any) {
+             toast({
+                variant: 'destructive',
+                title: 'Erro ao Salvar Movimentação',
+                description: error.message
+            });
+        } finally {
+            setIsSaving(false);
+        }
     }
 
     return (
@@ -474,7 +511,7 @@ const EstoqueInsumo = () => {
                                     </div>
                                     <div className="space-y-2">
                                         <Label htmlFor="insumo">Insumo</Label>
-                                        <Select name="insumo">
+                                        <Select name="insumo" required>
                                             <SelectTrigger>
                                                 <SelectValue placeholder="Selecione um insumo" />
                                             </SelectTrigger>
@@ -506,7 +543,10 @@ const EstoqueInsumo = () => {
                                 </div>
                                 <DialogFooter>
                                     <Button type="button" variant="ghost" onClick={() => setIsMovementDialogOpen(false)}>Cancelar</Button>
-                                    <Button type="submit">Salvar Movimentação</Button>
+                                    <Button type="submit" disabled={isSaving}>
+                                      {isSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                                      Salvar Movimentação
+                                    </Button>
                                 </DialogFooter>
                             </form>
                         </DialogContent>
