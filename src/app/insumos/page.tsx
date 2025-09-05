@@ -33,7 +33,6 @@ import { collection, query, orderBy, onSnapshot } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import type { Supply } from '@/types/supply';
 import { addSupply } from '@/services/supply-service';
-import { getSupplies } from '@/services/supply-service';
 
 
 type BlingProduct = {
@@ -75,7 +74,7 @@ const CadastroInsumo = () => {
   }, [fetchProducts]);
   
   React.useEffect(() => {
-      const q = getSupplies();
+      const q = query(collection(db, "supplies"), orderBy('produto.nome', 'asc'));
       const unsubscribe = onSnapshot(q, (querySnapshot) => {
           const suppliesData: Supply[] = [];
           querySnapshot.forEach((doc) => {
@@ -113,8 +112,8 @@ const CadastroInsumo = () => {
         estoqueMinimo: Number(formData.get('min-stock')),
         estoqueMaximo: Number(formData.get('max-stock')),
         tempoEntrega: Number(formData.get('delivery-time')),
-        custoUnitario: Number(formData.get('unit-cost')),
-        fornecedor: formData.get('supplier') as string,
+        custoUnitario: 0, // Campo removido do form
+        fornecedor: '', // Campo removido do form
     };
     
     try {
@@ -182,18 +181,6 @@ const CadastroInsumo = () => {
                                     </Button>
                                 </div>
                             </div>
-                            <div className="grid grid-cols-4 items-center gap-4">
-                                <Label htmlFor="unit-cost" className="text-right">
-                                    Custo Unitário
-                                </Label>
-                                <Input id="unit-cost" name="unit-cost" type="number" step="0.01" required className="col-span-3" />
-                            </div>
-                            <div className="grid grid-cols-4 items-center gap-4">
-                                <Label htmlFor="supplier" className="text-right">
-                                    Fornecedor
-                                </Label>
-                                <Input id="supplier" name="supplier" required className="col-span-3" />
-                            </div>
                              <div className="grid grid-cols-4 items-center gap-4">
                                 <Label htmlFor="min-stock" className="text-right">
                                     Estoque Mínimo
@@ -235,8 +222,6 @@ const CadastroInsumo = () => {
               <TableHeader>
                 <TableRow>
                   <TableHead>Nome do Insumo (Produto)</TableHead>
-                  <TableHead>Fornecedor</TableHead>
-                  <TableHead className="text-right">Custo Unitário</TableHead>
                   <TableHead className="text-right">Estoque Mínimo</TableHead>
                 </TableRow>
               </TableHeader>
@@ -251,10 +236,6 @@ const CadastroInsumo = () => {
                     supplies.map(supply => (
                         <TableRow key={supply.id}>
                             <TableCell className="font-medium">{supply.produto.nome}</TableCell>
-                            <TableCell>{supply.fornecedor}</TableCell>
-                            <TableCell className="text-right">
-                                {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(supply.custoUnitario)}
-                            </TableCell>
                             <TableCell className="text-right">{supply.estoqueMinimo}</TableCell>
                         </TableRow>
                     ))
@@ -324,5 +305,3 @@ export default function InsumosPage() {
     </DashboardLayout>
   );
 }
-
-    

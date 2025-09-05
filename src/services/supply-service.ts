@@ -2,10 +2,8 @@
 "use server";
 
 import { db } from '@/lib/firebase';
-import { collection, addDoc, query, orderBy } from 'firebase/firestore';
+import { collection, addDoc } from 'firebase/firestore';
 import type { Supply } from '@/types/supply';
-
-const suppliesCollection = collection('supplies');
 
 /**
  * Adiciona um novo insumo ao banco de dados.
@@ -13,6 +11,7 @@ const suppliesCollection = collection('supplies');
  * @returns O ID do documento recém-criado.
  */
 export async function addSupply(supplyData: Omit<Supply, 'id'>) {
+    const suppliesCollection = collection(db, 'supplies');
     try {
         const docRef = await addDoc(suppliesCollection, {
             ...supplyData,
@@ -24,13 +23,3 @@ export async function addSupply(supplyData: Omit<Supply, 'id'>) {
         throw new Error("Falha ao salvar o insumo no banco de dados.");
     }
 }
-
-/**
- * Retorna uma consulta para buscar todos os insumos, ordenados por nome.
- * @returns Uma consulta do Firestore.
- */
-export function getSupplies() {
-    return query(suppliesCollection, orderBy('produto.nome', 'asc'));
-}
-
-    
