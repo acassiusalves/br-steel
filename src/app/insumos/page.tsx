@@ -385,10 +385,9 @@ const EstoqueInsumo = () => {
         try {
             const unsubscribe = await getInventory((data) => {
                 setInventory(data);
-                setFilteredInventory(data);
                 setIsLoading(false);
             });
-            return unsubscribe;
+            return unsubscribe; // Retorna a função para desinscrever
         } catch (error: any) {
             toast({
                 variant: 'destructive',
@@ -400,11 +399,35 @@ const EstoqueInsumo = () => {
     }, [toast]);
 
     React.useEffect(() => {
-        const unsubscribePromise = fetchInventory();
-        return () => {
-            unsubscribePromise.then(unsubscribe => unsubscribe && unsubscribe());
-        };
-    }, [fetchInventory]);
+        const q = query(collection(db, "supplies"), orderBy('nome', 'asc'));
+        const unsubscribe = onSnapshot(q, (snapshot) => {
+            const inventoryItems: InventoryItem[] = snapshot.docs.map(doc => {
+                 const supply = { id: doc.id, ...doc.data() } as Supply;
+                 const estoqueAtual = supply.estoqueAtual || 0;
+                 const valorEmEstoque = estoqueAtual > 0 ? estoqueAtual * supply.precoCusto : 0;
+
+                 return {
+                     supply: supply,
+                     estoqueAtual: estoqueAtual,
+                     estoqueMinimo: supply.estoqueMinimo,
+                     valorEmEstoque: valorEmEstoque,
+                     status: estoqueAtual <= 0 ? 'esgotado' : (estoqueAtual < supply.estoqueMinimo ? 'baixo' : 'em_estoque'),
+                 };
+            });
+            setInventory(inventoryItems);
+            setIsLoading(false);
+        }, (error) => {
+             console.error("Error fetching inventory:", error);
+             toast({
+                 variant: 'destructive',
+                 title: 'Erro ao Listar Estoque',
+                 description: 'Não foi possível buscar o estoque dos insumos.'
+             });
+             setIsLoading(false);
+        });
+
+        return () => unsubscribe();
+    }, [toast]);
 
     React.useEffect(() => {
         const filtered = inventory.filter(item => {
