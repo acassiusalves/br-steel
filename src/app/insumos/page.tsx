@@ -377,6 +377,7 @@ const EstoqueInsumo = () => {
     const [isLoading, setIsLoading] = React.useState(true);
     const [searchTerm, setSearchTerm] = React.useState('');
     const [isMovementDialogOpen, setIsMovementDialogOpen] = React.useState(false);
+    const [movementType, setMovementType] = React.useState<'entrada' | 'saida'>('entrada');
     const { toast } = useToast();
 
     const fetchInventory = React.useCallback(async () => {
@@ -450,7 +451,11 @@ const EstoqueInsumo = () => {
                                 <div className="space-y-4 py-4">
                                     <div className="space-y-2">
                                         <Label>Tipo de Movimentação</Label>
-                                        <RadioGroup defaultValue="entrada" className="grid grid-cols-2 gap-4">
+                                        <RadioGroup 
+                                            value={movementType} 
+                                            onValueChange={(value: 'entrada' | 'saida') => setMovementType(value)}
+                                            className="grid grid-cols-2 gap-4"
+                                        >
                                             <div>
                                                 <RadioGroupItem value="entrada" id="entrada" className="peer sr-only" />
                                                 <Label htmlFor="entrada" className="flex flex-col items-center justify-between rounded-md border-2 border-muted bg-popover p-4 hover:bg-accent hover:text-accent-foreground peer-data-[state=checked]:border-primary [&:has([data-state=checked])]:border-primary">
@@ -482,9 +487,17 @@ const EstoqueInsumo = () => {
                                             </SelectContent>
                                         </Select>
                                     </div>
-                                    <div className="space-y-2">
-                                        <Label htmlFor="quantidade">Quantidade</Label>
-                                        <Input id="quantidade" name="quantidade" type="number" required placeholder="0"/>
+                                     <div className="grid grid-cols-2 gap-4">
+                                        <div className="space-y-2">
+                                            <Label htmlFor="quantidade">Quantidade</Label>
+                                            <Input id="quantidade" name="quantidade" type="number" required placeholder="0"/>
+                                        </div>
+                                        {movementType === 'entrada' && (
+                                            <div className="space-y-2">
+                                                <Label htmlFor="custoUnitario">Custo Unitário</Label>
+                                                <Input id="custoUnitario" name="custoUnitario" type="number" step="0.01" placeholder="R$ 0,00" />
+                                            </div>
+                                        )}
                                     </div>
                                      <div className="space-y-2">
                                         <Label htmlFor="observacao">Observação</Label>
