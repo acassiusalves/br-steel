@@ -1,8 +1,9 @@
 
+
 'use client';
 
 import * as React from 'react';
-import { PlusCircle, Loader2, MoreHorizontal, Pencil, Trash2, Search, Package, AlertTriangle, CheckCircle, BellRing, Boxes, ShoppingCart, ArrowRightLeft } from 'lucide-react';
+import { PlusCircle, Loader2, MoreHorizontal, Pencil, Trash2, Search, Package, AlertTriangle, CheckCircle, BellRing, Boxes, ShoppingCart, ArrowRightLeft, Calendar as CalendarIcon, ArrowUp, ArrowDown } from 'lucide-react';
 import DashboardLayout from '@/components/dashboard-layout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card';
 import {
@@ -51,6 +52,20 @@ import type { Supply } from '@/types/supply';
 import type { InventoryItem } from '@/types/inventory';
 import { addSupply, updateSupply, deleteSupply } from '@/services/supply-service';
 import { getInventory } from '@/services/inventory-service';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Textarea } from '@/components/ui/textarea';
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Calendar } from '@/components/ui/calendar';
+import { format } from "date-fns";
+import { ptBR } from 'date-fns/locale';
+import { cn } from '@/lib/utils';
 
 
 const CadastroInsumo = () => {
@@ -361,6 +376,8 @@ const EstoqueInsumo = () => {
     const [filteredInventory, setFilteredInventory] = React.useState<InventoryItem[]>([]);
     const [isLoading, setIsLoading] = React.useState(true);
     const [searchTerm, setSearchTerm] = React.useState('');
+    const [isMovementDialogOpen, setIsMovementDialogOpen] = React.useState(false);
+    const [movementDate, setMovementDate] = React.useState<Date | undefined>(new Date());
     const { toast } = useToast();
 
     const fetchInventory = React.useCallback(async () => {
@@ -401,6 +418,13 @@ const EstoqueInsumo = () => {
         return { totalValue, lowStockCount, outOfStockCount };
     }, [inventory]);
 
+    const handleSaveMovement = (event: React.FormEvent<HTMLFormElement>) => {
+        event.preventDefault();
+        // TODO: Implement save logic
+        toast({ title: "Funcionalidade em desenvolvimento" });
+        setIsMovementDialogOpen(false);
+    }
+
     return (
         <div className="space-y-8">
             <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
@@ -412,7 +436,101 @@ const EstoqueInsumo = () => {
                 </div>
                  <div className="flex items-center gap-2">
                     <Button variant="outline"><ShoppingCart className="mr-2" /> Gerar Ordem de Compra</Button>
-                    <Button><ArrowRightLeft className="mr-2" /> Nova Entrada/Saída</Button>
+                    <Dialog open={isMovementDialogOpen} onOpenChange={setIsMovementDialogOpen}>
+                        <DialogTrigger asChild>
+                            <Button><ArrowRightLeft className="mr-2" /> Nova Entrada/Saída</Button>
+                        </DialogTrigger>
+                        <DialogContent className="sm:max-w-md">
+                           <form onSubmit={handleSaveMovement}>
+                                <DialogHeader>
+                                    <DialogTitle>Registrar Movimentação de Insumo</DialogTitle>
+                                    <DialogDescription>
+                                        Selecione o tipo de movimentação e preencha os detalhes abaixo.
+                                    </DialogDescription>
+                                </DialogHeader>
+                                <div className="space-y-4 py-4">
+                                    <div className="space-y-2">
+                                        <Label>Tipo de Movimentação</Label>
+                                        <RadioGroup defaultValue="entrada" className="grid grid-cols-2 gap-4">
+                                            <div>
+                                                <RadioGroupItem value="entrada" id="entrada" className="peer sr-only" />
+                                                <Label htmlFor="entrada" className="flex flex-col items-center justify-between rounded-md border-2 border-muted bg-popover p-4 hover:bg-accent hover:text-accent-foreground peer-data-[state=checked]:border-primary [&:has([data-state=checked])]:border-primary">
+                                                    <ArrowDown className="mb-3 h-6 w-6 text-green-500"/>
+                                                    Entrada
+                                                </Label>
+                                            </div>
+                                            <div>
+                                                <RadioGroupItem value="saida" id="saida" className="peer sr-only" />
+                                                <Label htmlFor="saida" className="flex flex-col items-center justify-between rounded-md border-2 border-muted bg-popover p-4 hover:bg-accent hover:text-accent-foreground peer-data-[state=checked]:border-primary [&:has([data-state=checked])]:border-primary">
+                                                    <ArrowUp className="mb-3 h-6 w-6 text-red-500"/>
+                                                    Saída
+                                                </Label>
+                                            </div>
+                                        </RadioGroup>
+                                    </div>
+                                    <div className="space-y-2">
+                                        <Label htmlFor="insumo">Insumo</Label>
+                                        <Select name="insumo">
+                                            <SelectTrigger>
+                                                <SelectValue placeholder="Selecione um insumo" />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                {inventory.map(item => (
+                                                    <SelectItem key={item.supply.id} value={item.supply.id}>
+                                                        {item.supply.nome} ({item.supply.codigo})
+                                                    </SelectItem>
+                                                ))}
+                                            </SelectContent>
+                                        </Select>
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div className="space-y-2">
+                                            <Label htmlFor="quantidade">Quantidade</Label>
+                                            <Input id="quantidade" name="quantidade" type="number" required placeholder="0"/>
+                                        </div>
+                                        <div className="space-y-2">
+                                            <Label htmlFor="data">Data da Movimentação</Label>
+                                            <Popover>
+                                                <PopoverTrigger asChild>
+                                                    <Button
+                                                    variant={"outline"}
+                                                    className={cn(
+                                                        "w-full justify-start text-left font-normal",
+                                                        !movementDate && "text-muted-foreground"
+                                                    )}
+                                                    >
+                                                    <CalendarIcon className="mr-2 h-4 w-4" />
+                                                    {movementDate ? format(movementDate, "dd/MM/yyyy") : <span>Escolha uma data</span>}
+                                                    </Button>
+                                                </PopoverTrigger>
+                                                <PopoverContent className="w-auto p-0">
+                                                    <Calendar
+                                                    mode="single"
+                                                    selected={movementDate}
+                                                    onSelect={setMovementDate}
+                                                    initialFocus
+                                                    locale={ptBR}
+                                                    />
+                                                </PopoverContent>
+                                            </Popover>
+                                        </div>
+                                    </div>
+                                    <div className="space-y-2">
+                                        <Label htmlFor="responsavel">Responsável</Label>
+                                        <Input id="responsavel" name="responsavel" required placeholder="Nome do responsável"/>
+                                    </div>
+                                     <div className="space-y-2">
+                                        <Label htmlFor="observacao">Observação</Label>
+                                        <Textarea id="observacao" name="observacao" placeholder="Ex: Compra do fornecedor X, NF 123..."/>
+                                    </div>
+                                </div>
+                                <DialogFooter>
+                                    <Button type="button" variant="ghost" onClick={() => setIsMovementDialogOpen(false)}>Cancelar</Button>
+                                    <Button type="submit">Salvar Movimentação</Button>
+                                </DialogFooter>
+                            </form>
+                        </DialogContent>
+                    </Dialog>
                 </div>
             </div>
 
@@ -539,3 +657,5 @@ export default function InsumosPage() {
     </DashboardLayout>
   );
 }
+
+    
