@@ -2,7 +2,7 @@
 'use client';
 
 import * as React from 'react';
-import { PlusCircle, Loader2, RefreshCw } from 'lucide-react';
+import { PlusCircle, Loader2 } from 'lucide-react';
 import DashboardLayout from '@/components/dashboard-layout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import {
@@ -25,9 +25,7 @@ import {
 } from "@/components/ui/dialog";
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useToast } from '@/hooks/use-toast';
-import { getBlingProducts } from '@/app/actions';
 import { useSearchParams } from 'next/navigation';
 import { collection, query, orderBy, onSnapshot } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
@@ -35,46 +33,16 @@ import type { Supply } from '@/types/supply';
 import { addSupply } from '@/services/supply-service';
 
 
-type BlingProduct = {
-    id: number;
-    nome: string;
-    codigo: string;
-}
-
 const CadastroInsumo = () => {
   const [isFormOpen, setIsFormOpen] = React.useState(false);
-  const [products, setProducts] = React.useState<BlingProduct[]>([]);
   const [supplies, setSupplies] = React.useState<Supply[]>([]);
-  const [isLoadingProducts, setIsLoadingProducts] = React.useState(false);
   const [isSaving, setIsSaving] = React.useState(false);
   const [isLoadingSupplies, setIsLoadingSupplies] = React.useState(true);
   
   const { toast } = useToast();
 
-  const fetchProducts = React.useCallback(async () => {
-    setIsLoadingProducts(true);
-    try {
-        const productData = await getBlingProducts(1000);
-        if (productData && productData.data) {
-            setProducts(productData.data);
-        }
-    } catch (error: any) {
-        toast({
-            variant: 'destructive',
-            title: 'Erro ao Buscar Produtos',
-            description: error.message
-        });
-    } finally {
-        setIsLoadingProducts(false);
-    }
-  }, [toast]);
-
   React.useEffect(() => {
-    fetchProducts();
-  }, [fetchProducts]);
-  
-  React.useEffect(() => {
-      const q = query(collection(db, "supplies"), orderBy('produto.nome', 'asc'));
+      const q = query(collection(db, "supplies"), orderBy('nome', 'asc'));
       const unsubscribe = onSnapshot(q, (querySnapshot) => {
           const suppliesData: Supply[] = [];
           querySnapshot.forEach((doc) => {
@@ -101,19 +69,14 @@ const CadastroInsumo = () => {
     setIsSaving(true);
     
     const formData = new FormData(event.currentTarget);
-    const productId = formData.get('produto-id') as string;
-    const productName = products.find(p => String(p.id) === productId)?.nome || 'Nome não encontrado';
 
     const supplyData: Omit<Supply, 'id'> = {
-        produto: {
-            id: productId,
-            nome: productName
-        },
+        nome: formData.get('nome') as string,
+        codigo: formData.get('codigo') as string,
+        gtin: formData.get('gtin') as string,
         estoqueMinimo: Number(formData.get('min-stock')),
         estoqueMaximo: Number(formData.get('max-stock')),
         tempoEntrega: Number(formData.get('delivery-time')),
-        custoUnitario: 0, // Campo removido do form
-        fornecedor: '', // Campo removido do form
     };
     
     try {
@@ -155,31 +118,21 @@ const CadastroInsumo = () => {
                         <DialogHeader>
                             <DialogTitle>Cadastrar Novo Insumo</DialogTitle>
                             <DialogDescription>
-                                Vincule um insumo a um produto e defina suas regras de estoque.
+                                Preencha os detalhes do insumo para adicioná-lo ao sistema.
                             </DialogDescription>
                         </DialogHeader>
                         <div className="grid gap-4 py-4">
-                            <div className="grid grid-cols-4 items-center gap-4">
-                                <Label htmlFor="produto-id" className="text-right">
-                                    Produto
+                             <div className="grid grid-cols-4 items-center gap-4">
+                                <Label htmlFor="nome" className="text-right">
+                                    Nome
                                 </Label>
-                                <div className="col-span-3 flex items-center gap-2">
-                                     <Select name="produto-id" required>
-                                        <SelectTrigger disabled={isLoadingProducts}>
-                                            <SelectValue placeholder={isLoadingProducts ? "Carregando..." : "Selecione um produto"} />
-                                        </SelectTrigger>
-                                        <SelectContent>
-                                            {products.map(p => (
-                                                <SelectItem key={p.id} value={String(p.id)}>
-                                                    <span title={p.nome}>{p.nome}</span>
-                                                </SelectItem>
-                                            ))}
-                                        </SelectContent>
-                                    </Select>
-                                    <Button type="button" variant="ghost" size="icon" onClick={fetchProducts} disabled={isLoadingProducts}>
-                                        <RefreshCw className={`h-4 w-4 ${isLoadingProducts ? 'animate-spin' : ''}`} />
-                                    </Button>
-                                </div>
+                                <Input id="nome" name="nome" required className="col-span-3" />
+                            </div>
+                             <div className="grid grid-cols-4 items-center gap-4">
+                                <Label htmlFor="codigo" className="text-right">
+                                    Código (SKU)
+                                </Label>
+                                <Input id="codigo" name="codigo" required className="col-span-3" />
                             </div>
                              <div className="grid grid-cols-4 items-center gap-4">
                                 <Label htmlFor="min-stock" className="text-right">
@@ -198,6 +151,12 @@ const CadastroInsumo = () => {
                                     Entrega (dias)
                                 </Label>
                                 <Input id="delivery-time" name="delivery-time" type="number" required className="col-span-3" placeholder="Tempo médio"/>
+                            </div>
+                            <div className="grid grid-cols-4 items-center gap-4">
+                                <Label htmlFor="gtin" className="text-right">
+                                    GTIN/EAN
+                                </Label>
+                                <Input id="gtin" name="gtin" className="col-span-3" />
                             </div>
                         </div>
                         <DialogFooter>
@@ -221,7 +180,8 @@ const CadastroInsumo = () => {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Nome do Insumo (Produto)</TableHead>
+                  <TableHead>Nome do Insumo</TableHead>
+                  <TableHead>Código (SKU)</TableHead>
                   <TableHead className="text-right">Estoque Mínimo</TableHead>
                 </TableRow>
               </TableHeader>
@@ -235,7 +195,8 @@ const CadastroInsumo = () => {
                 ) : supplies.length > 0 ? (
                     supplies.map(supply => (
                         <TableRow key={supply.id}>
-                            <TableCell className="font-medium">{supply.produto.nome}</TableCell>
+                            <TableCell className="font-medium">{supply.nome}</TableCell>
+                            <TableCell>{supply.codigo}</TableCell>
                             <TableCell className="text-right">{supply.estoqueMinimo}</TableCell>
                         </TableRow>
                     ))

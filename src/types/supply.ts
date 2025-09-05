@@ -1,15 +1,10 @@
 
 export interface Supply {
     id: string;
-    produto: {
-        id: string;
-        nome: string;
-    };
+    nome: string;
+    codigo: string;
+    gtin: string;
     estoqueMinimo: number;
     estoqueMaximo: number;
     tempoEntrega: number;
-    custoUnitario: number;
-    fornecedor: string;
 }
-
-    
