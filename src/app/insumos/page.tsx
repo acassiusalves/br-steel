@@ -1,4 +1,5 @@
 
+
 'use client';
 
 import * as React from 'react';
@@ -45,12 +46,12 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
 import { useSearchParams } from 'next/navigation';
-import { collection, query, orderBy, onSnapshot } from 'firebase/firestore';
+import { collection, query, orderBy, onSnapshot, getDocs } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import type { Supply } from '@/types/supply';
 import type { InventoryItem } from '@/types/inventory';
 import { addSupply, updateSupply, deleteSupply } from '@/services/supply-service';
-import { getInventory, addInventoryMovement } from '@/services/inventory-service';
+import { addInventoryMovement } from '@/services/inventory-service';
 import {
   Select,
   SelectContent,
@@ -60,11 +61,6 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from '@/components/ui/textarea';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { Calendar } from '@/components/ui/calendar';
-import { format } from "date-fns";
-import { ptBR } from 'date-fns/locale';
-import { cn } from '@/lib/utils';
 
 
 const CadastroInsumo = () => {
@@ -383,25 +379,10 @@ const EstoqueInsumo = () => {
     const fetchInventory = React.useCallback(async () => {
         setIsLoading(true);
         try {
-            const unsubscribe = await getInventory((data) => {
-                setInventory(data);
-                setIsLoading(false);
-            });
-            return unsubscribe; // Retorna a função para desinscrever
-        } catch (error: any) {
-            toast({
-                variant: 'destructive',
-                title: 'Erro ao buscar estoque',
-                description: error.message
-            });
-            setIsLoading(false);
-        }
-    }, [toast]);
+            const q = query(collection(db, "supplies"), orderBy('nome', 'asc'));
+            const querySnapshot = await getDocs(q);
 
-    React.useEffect(() => {
-        const q = query(collection(db, "supplies"), orderBy('nome', 'asc'));
-        const unsubscribe = onSnapshot(q, (snapshot) => {
-            const inventoryItems: InventoryItem[] = snapshot.docs.map(doc => {
+            const inventoryItems: InventoryItem[] = querySnapshot.docs.map(doc => {
                  const supply = { id: doc.id, ...doc.data() } as Supply;
                  const estoqueAtual = supply.estoqueAtual || 0;
                  const valorEmEstoque = estoqueAtual > 0 ? estoqueAtual * supply.precoCusto : 0;
@@ -415,19 +396,21 @@ const EstoqueInsumo = () => {
                  };
             });
             setInventory(inventoryItems);
+        } catch (error) {
+            console.error("Error fetching inventory:", error);
+            toast({
+                variant: 'destructive',
+                title: 'Erro ao Listar Estoque',
+                description: 'Não foi possível buscar o estoque dos insumos.'
+            });
+        } finally {
             setIsLoading(false);
-        }, (error) => {
-             console.error("Error fetching inventory:", error);
-             toast({
-                 variant: 'destructive',
-                 title: 'Erro ao Listar Estoque',
-                 description: 'Não foi possível buscar o estoque dos insumos.'
-             });
-             setIsLoading(false);
-        });
-
-        return () => unsubscribe();
+        }
     }, [toast]);
+
+    React.useEffect(() => {
+        fetchInventory();
+    }, [fetchInventory]);
 
     React.useEffect(() => {
         const filtered = inventory.filter(item => {
@@ -473,6 +456,7 @@ const EstoqueInsumo = () => {
 
             toast({ title: "Sucesso!", description: `Movimentação de ${movementType} registrada.` });
             setIsMovementDialogOpen(false);
+            fetchInventory(); // Re-fetch data after successful movement
 
         } catch (error: any) {
              toast({
