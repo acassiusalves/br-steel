@@ -2,21 +2,21 @@ rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Permite leitura e escrita para a coleção supplies
-    match /supplies/{document} {
-      allow read, write: if true; // Para desenvolvimento
-      // Para produção, você pode adicionar autenticação:
-      // allow read, write: if request.auth != null;
-    }
-    
-    // Permite leitura e escrita para a coleção salesOrders
-    match /salesOrders/{document} {
-      allow read, write: if true; // Para desenvolvimento
+
+    // Regra para a coleção de insumos
+    match /supplies/{supplyId} {
+      allow read, write: if true; // Permite leitura e escrita (para desenvolvimento)
     }
 
-    // Permite leitura e escrita para a coleção inventoryMovements
-    match /inventoryMovements/{document} {
-      allow read, write: if true; // Para desenvolvimento
+    // Regra para a coleção de pedidos de venda
+    match /salesOrders/{orderId} {
+      allow read, write: if true; // Permite leitura e escrita (para desenvolvimento)
     }
+
+    // Regra para a nova coleção de movimentações de estoque
+    match /inventoryMovements/{movementId} {
+      allow read, write: if true; // Permite leitura e escrita (para desenvolvimento)
+    }
+    
   }
 }
