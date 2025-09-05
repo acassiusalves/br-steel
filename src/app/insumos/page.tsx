@@ -184,17 +184,19 @@ const CadastroInsumo = () => {
                 <TableRow>
                   <TableHead>Nome do Insumo</TableHead>
                   <TableHead>Código (SKU)</TableHead>
+                  <TableHead>GTIN/EAN</TableHead>
                   <TableHead>Unidade</TableHead>
                   <TableHead className="text-right">Custo Unitário</TableHead>
                   <TableHead className="text-right">Estoque Mínimo</TableHead>
                   <TableHead className="text-right">Estoque Máximo</TableHead>
+                  <TableHead className="text-right">Prazo (dias)</TableHead>
                   <TableHead className="text-right">Ações</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {isLoadingSupplies ? (
                     <TableRow>
-                        <TableCell colSpan={7} className="h-24 text-center">
+                        <TableCell colSpan={9} className="h-24 text-center">
                             <Loader2 className="mx-auto h-6 w-6 animate-spin" />
                         </TableCell>
                     </TableRow>
@@ -203,10 +205,12 @@ const CadastroInsumo = () => {
                         <TableRow key={supply.id}>
                             <TableCell className="font-medium">{supply.nome}</TableCell>
                             <TableCell>{supply.codigo}</TableCell>
+                            <TableCell>{supply.gtin}</TableCell>
                             <TableCell>{supply.unidade}</TableCell>
-                            <TableCell className="text-right">{new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(supply.precoCusto)}</TableCell>
+                            <TableCell className="text-right">{new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(supply.precoCusto || 0)}</TableCell>
                             <TableCell className="text-right">{supply.estoqueMinimo}</TableCell>
                             <TableCell className="text-right">{supply.estoqueMaximo}</TableCell>
+                            <TableCell className="text-right">{supply.tempoEntrega}</TableCell>
                             <TableCell className="text-right">
                                 <DropdownMenu>
                                     <DropdownMenuTrigger asChild>
@@ -220,7 +224,7 @@ const CadastroInsumo = () => {
                                             <Pencil className="mr-2 h-4 w-4" />
                                             Editar
                                         </DropdownMenuItem>
-                                        <DropdownMenuItem onClick={() => setDeletingSupply(supply)} className="text-red-600">
+                                        <DropdownMenuItem onClick={() => setDeletingSupply(supply)} className="text-red-600 focus:text-red-600">
                                             <Trash2 className="mr-2 h-4 w-4" />
                                             Apagar
                                         </DropdownMenuItem>
@@ -231,7 +235,7 @@ const CadastroInsumo = () => {
                     ))
                 ) : (
                     <TableRow>
-                        <TableCell colSpan={7} className="h-24 text-center">
+                        <TableCell colSpan={9} className="h-24 text-center">
                         Nenhum insumo cadastrado. Comece clicando em "Cadastrar Novo Insumo".
                         </TableCell>
                     </TableRow>
@@ -381,10 +385,12 @@ const EstoqueInsumo = () => {
     }, [fetchInventory]);
 
     React.useEffect(() => {
-        const filtered = inventory.filter(item => 
-            item.supply.nome.toLowerCase().includes(searchTerm.toLowerCase()) ||
-            item.supply.codigo.toLowerCase().includes(searchTerm.toLowerCase())
-        );
+        const filtered = inventory.filter(item => {
+            const term = searchTerm.toLowerCase();
+            const nameMatch = item.supply?.nome?.toLowerCase().includes(term) || false;
+            const codeMatch = item.supply?.codigo?.toLowerCase().includes(term) || false;
+            return nameMatch || codeMatch;
+        });
         setFilteredInventory(filtered);
     }, [searchTerm, inventory]);
 
