@@ -112,14 +112,17 @@ export default function ApiPage() {
   const handleSaveCredentials = async () => {
     setIsSaving(true);
     try {
+        // Save only the credentials the user can input.
+        // Access token and refresh token are handled by the OAuth flow.
         await saveBlingCredentials({
             clientId: credentials.clientId,
             clientSecret: credentials.clientSecret,
         });
         toast({
             title: "Credenciais Salvas!",
-            description: "Suas credenciais do Bling foram salvas com sucesso no servidor.",
+            description: "Suas credenciais do Bling foram salvas com sucesso.",
         });
+        // Re-fetch to show masked secret
         const savedCreds = await getBlingCredentials();
         setCredentials(prev => ({...prev, ...savedCreds}));
 
@@ -686,6 +689,7 @@ const handleFullSync = async () => {
                 value={credentials.clientId}
                 onChange={handleInputChange}
             />
+            <p className="text-sm text-muted-foreground">Seu Client ID é público e pode ser salvo aqui. Ele também pode ser configurado via variável de ambiente `BLING_CLIENT_ID`.</p>
             </div>
             <div className="w-full space-y-2">
             <Label htmlFor="clientSecret">Client Secret</Label>
@@ -695,9 +699,10 @@ const handleFullSync = async () => {
                 placeholder={credentials.clientSecret === '********' ? '********' : 'Cole seu Client Secret aqui'}
                 onChange={handleInputChange}
             />
+             <p className="text-sm text-muted-foreground">Seu Client Secret é confidencial. Para produção, configure-o via variável de ambiente `BLING_CLIENT_SECRET`.</p>
             </div>
             <div className="flex flex-wrap gap-2">
-            <Button onClick={handleSaveCredentials} disabled={isSaving || !credentials.clientId || !credentials.clientSecret}>
+            <Button onClick={handleSaveCredentials} disabled={isSaving}>
                 {isSaving ? (
                     <>
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -830,3 +835,5 @@ const handleFullSync = async () => {
     </DashboardLayout>
   );
 }
+
+    

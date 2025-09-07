@@ -4,7 +4,7 @@
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import { format, parseISO, startOfMonth, endOfMonth, eachMonthOfInterval, getMonth, getYear, differenceInDays } from 'date-fns';
-import { collection, getDocs, doc, writeBatch, query, where } from 'firebase/firestore';
+import { collection, getDocs, doc, writeBatch, query, where, setDoc, getDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 
 import { saveSalesOrders, filterNewOrders, getLastImportedOrderDate, orderExists, saveSalesOrdersOptimized } from '@/services/order-service';
@@ -13,103 +13,95 @@ import type { SaleOrder } from '@/types/sale-order';
 
 // Bling API actions
 type BlingCredentials = {
-    clientId: string;
-    clientSecret: string;
+    clientId?: string;
+    clientSecret?: string;
     accessToken?: string;
     refreshToken?: string;
+    expiresAt?: number;
 };
 
-const envPath = path.resolve(process.cwd(), '.env');
 
-export async function readEnvFile(): Promise<Map<string, string>> {
-    try {
-        const content = await fs.readFile(envPath, 'utf-8');
-        const map = new Map<string, string>();
-        content.split('\n').forEach(line => {
-            if (line.trim() && !line.startsWith('#')) {
-                const [key, ...valueParts] = line.split('=');
-                if (key) {
-                    map.set(key.trim(), valueParts.join('=').trim());
-                }
-            }
-        });
-        return map;
-    } catch (error: any) {
-        if (error.code === 'ENOENT') {
-            return new Map(); // File doesn't exist yet
-        }
-        throw error;
-    }
-}
+// --- Firestore-based Credential Storage ---
 
-async function writeEnvFile(envMap: Map<string, string>): Promise<void> {
-    let content = '';
-    for (const [key, value] of envMap.entries()) {
-        content += `${key}=${value}\n`;
-    }
-    await fs.writeFile(envPath, content, 'utf-8');
-}
+const credentialsDocRef = doc(db, "appConfig", "blingCredentials");
 
-async function writeEnvVar(key: string, value: string) {
-  const env = await readEnvFile();
-  env.set(key, value);
-  let content = "";
-  for (const [k, v] of env.entries()) content += `${k}=${v}\n`;
-  await fs.writeFile(envPath, content, "utf-8");
-}
-
-
+/**
+ * Saves Bling API credentials securely in Firestore.
+ * @param credentials - The credentials to save.
+ */
 export async function saveBlingCredentials(credentials: Partial<BlingCredentials>): Promise<void> {
-    const envMap = await readEnvFile();
-
-    const credentialKeys: (keyof BlingCredentials)[] = ['clientId', 'clientSecret', 'accessToken', 'refreshToken'];
-    const envKeys: { [key in keyof BlingCredentials]: string } = {
-        clientId: 'BLING_CLIENT_ID',
-        clientSecret: 'BLING_CLIENT_SECRET',
-        accessToken: 'BLING_ACCESS_TOKEN',
-        refreshToken: 'BLING_REFRESH_TOKEN',
+    try {
+        await setDoc(credentialsDocRef, credentials, { merge: true });
+    } catch (error) {
+        console.error("Error saving Bling credentials to Firestore:", error);
+        throw new Error("Failed to save credentials to the database.");
     }
-
-    for (const key of credentialKeys) {
-        const envVar = envKeys[key];
-        const value = credentials[key];
-
-        if (value !== undefined) {
-             if (value) {
-                envMap.set(envVar, value);
-            } else {
-                envMap.delete(envVar);
-            }
-        }
-    }
-    
-    await writeEnvFile(envMap);
 }
 
+/**
+ * Retrieves Bling API credentials from Firestore.
+ * Client Secret is masked for security.
+ * @returns The saved credentials.
+ */
 export async function getBlingCredentials(): Promise<Partial<BlingCredentials>> {
-    const envMap = await readEnvFile();
-    return {
-        clientId: envMap.get('BLING_CLIENT_ID') || '',
-        clientSecret: envMap.get('BLING_CLIENT_SECRET') ? '********' : '', // Don't expose secret to client
-        accessToken: envMap.get('BLING_ACCESS_TOKEN') || '', // Return the actual token for server actions
-    };
+    try {
+        const docSnap = await getDoc(credentialsDocRef);
+        if (docSnap.exists()) {
+            const data = docSnap.data() as BlingCredentials;
+            // Mask client secret when sending to the client
+            if (data.clientSecret) {
+                data.clientSecret = '********';
+            }
+            return data;
+        }
+        // Also check environment variables as a fallback for initial setup
+        const envClientId = process.env.BLING_CLIENT_ID;
+        if (envClientId) {
+            return { clientId: envClientId };
+        }
+        return {};
+    } catch (error) {
+        console.error("Error getting Bling credentials from Firestore:", error);
+        return {};
+    }
+}
+
+
+/**
+ * Fetches all Bling credentials, including secrets, for server-side use.
+ * @returns The complete credentials object.
+ */
+async function getFullBlingCredentials(): Promise<BlingCredentials> {
+    try {
+        const docSnap = await getDoc(credentialsDocRef);
+        const savedCreds = docSnap.exists() ? docSnap.data() as BlingCredentials : {};
+        
+        // Combine with environment variables (env vars take precedence for initial setup)
+        return {
+            clientId: process.env.BLING_CLIENT_ID || savedCreds.clientId,
+            clientSecret: process.env.BLING_CLIENT_SECRET || savedCreds.clientSecret,
+            accessToken: savedCreds.accessToken,
+            refreshToken: savedCreds.refreshToken,
+            expiresAt: savedCreds.expiresAt,
+        };
+    } catch (error) {
+        console.error("Error getting full Bling credentials:", error);
+        throw new Error("Could not retrieve server-side credentials.");
+    }
 }
 
 
 async function refreshAccessToken() {
-  const env = await readEnvFile();
-  const clientId = env.get("BLING_CLIENT_ID");
-  const clientSecret = env.get("BLING_CLIENT_SECRET");
-  const refreshToken = env.get("BLING_REFRESH_TOKEN");
-
-  if (!clientId || !clientSecret || !refreshToken) {
+  const creds = await getFullBlingCredentials();
+  
+  if (!creds.clientId || !creds.clientSecret || !creds.refreshToken) {
       throw new Error("Credenciais do Bling incompletas para renovar o token.");
   }
 
-  const basic = Buffer.from(`${clientId}:${clientSecret}`).toString("base64");
+  const basic = Buffer.from(`${creds.clientId}:${creds.clientSecret}`).toString("base64");
   const body = new URLSearchParams({
     grant_type: "refresh_token",
-    refresh_token: refreshToken,
+    refresh_token: creds.refreshToken,
   });
 
   const res = await fetch("https://www.bling.com.br/Api/v3/oauth/token", {
@@ -128,22 +120,34 @@ async function refreshAccessToken() {
     throw new Error(`Refresh falhou (${res.status}): ${json?.error?.description || res.statusText}`);
   }
 
-  if (json.access_token) await writeEnvVar("BLING_ACCESS_TOKEN", json.access_token);
-  if (json.refresh_token) await writeEnvVar("BLING_REFRESH_TOKEN", json.refresh_token);
-
+  const newCredentials: Partial<BlingCredentials> = {};
+  if (json.access_token) newCredentials.accessToken = json.access_token;
+  if (json.refresh_token) newCredentials.refreshToken = json.refresh_token;
   if (json.expires_in) {
-    const expiresAt = Date.now() + (Number(json.expires_in) * 1000);
-    await writeEnvVar("BLING_ACCESS_EXPIRES_AT", String(expiresAt));
+    newCredentials.expiresAt = Date.now() + (Number(json.expires_in) * 1000);
   }
-  return json;
+  
+  await saveBlingCredentials(newCredentials);
+
+  return {
+      ...creds,
+      ...newCredentials
+  };
 }
 
 async function blingFetchWithRefresh(url: string, init?: RequestInit): Promise<any> {
-    const env = await readEnvFile();
-    let accessToken = env.get("BLING_ACCESS_TOKEN");
+    let creds = await getFullBlingCredentials();
+    let accessToken = creds.accessToken;
 
     if (!accessToken) {
         throw new Error('Access Token do Bling não encontrado. Por favor, conecte sua conta primeiro.');
+    }
+    
+    const isTokenExpired = creds.expiresAt ? Date.now() > creds.expiresAt : false;
+    if(isTokenExpired) {
+        console.log("Token de acesso possivelmente expirado pela data. Tentando renovar...");
+        creds = await refreshAccessToken();
+        accessToken = creds.accessToken;
     }
 
     const doCall = async (token: string) => {
@@ -159,13 +163,13 @@ async function blingFetchWithRefresh(url: string, init?: RequestInit): Promise<a
         return { res, text: await res.text() };
     };
 
-    let { res, text } = await doCall(accessToken);
+    let { res, text } = await doCall(accessToken!);
 
     if (res.status === 401) {
-        console.log("Token de acesso expirado. Tentando renovar...");
-        const newTokens = await refreshAccessToken();
-        accessToken = newTokens.access_token;
-        ({ res, text } = await doCall(accessToken));
+        console.log("Token de acesso expirado (401). Tentando renovar...");
+        creds = await refreshAccessToken();
+        accessToken = creds.accessToken;
+        ({ res, text } = await doCall(accessToken!));
     }
 
     if (!res.ok) {
@@ -218,7 +222,7 @@ async function getBlingSalesOrdersOptimized({
     forceFullSync?: boolean;
     useIntelligentDates?: boolean;
 }) {
-    const credentials = await getBlingCredentials();
+    const credentials = await getFullBlingCredentials();
     
     if (!credentials.accessToken) {
         throw new Error('Token de acesso não encontrado. Faça a conexão com o Bling primeiro.');
@@ -712,3 +716,5 @@ export async function getProductionDemand(
 
     return result;
 }
+
+    

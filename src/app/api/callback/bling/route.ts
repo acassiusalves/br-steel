@@ -1,3 +1,4 @@
+
 // app/api/callback/bling/route.ts
 import { NextResponse } from 'next/server';
 import { saveBlingCredentials } from '@/app/actions';
@@ -11,12 +12,17 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: 'Nenhum código de autorização recebido.' }, { status: 400 });
   }
 
-  // TODO: Validar o 'state' comparando com o que foi salvo antes do redirecionamento
-
+  // Em um app de produção, você validaria o 'state' aqui
+  // const savedState = cookies().get('bling_oauth_state')?.value;
+  // if (state !== savedState) {
+  //   return NextResponse.json({ error: 'Estado de OAuth inválido.' }, { status: 403 });
+  // }
+  
   const clientId = process.env.BLING_CLIENT_ID;
   const clientSecret = process.env.BLING_CLIENT_SECRET;
 
   if (!clientId || !clientSecret) {
+    console.error("Credenciais do Bling (Client ID/Secret) não configuradas nas variáveis de ambiente do servidor.");
     return NextResponse.json({ error: 'Credenciais do Bling não configuradas no servidor.' }, { status: 500 });
   }
 
@@ -39,12 +45,11 @@ export async function GET(request: Request) {
     const tokenData = await tokenResponse.json();
 
     if (tokenResponse.ok) {
-      // Salvar os tokens de forma segura
+      // Salva os tokens de forma segura no Firestore
       await saveBlingCredentials({
-        clientId, // já está salvo, mas podemos passar para garantir consistência
-        clientSecret, // já está salvo
         accessToken: tokenData.access_token,
-        refreshToken: tokenData.refresh_token
+        refreshToken: tokenData.refresh_token,
+        expiresAt: Date.now() + (Number(tokenData.expires_in) * 1000)
       });
 
       return new NextResponse(`
@@ -76,7 +81,7 @@ export async function GET(request: Request) {
             <div class="container">
               <h1>Sucesso!</h1>
               <p>Sua conta Bling foi conectada e os tokens de acesso foram salvos com segurança.</p>
-              <p><a href="/">Voltar para o painel</a></p>
+              <p><a href="/api">Voltar para o painel</a></p>
             </div>
           </body>
         </html>
@@ -118,3 +123,5 @@ export async function GET(request: Request) {
       });
   }
 }
+
+    
