@@ -2,6 +2,27 @@
 // app/api/callback/bling/route.ts
 import { NextResponse } from 'next/server';
 import { saveBlingCredentials } from '@/app/actions';
+import { doc, getDoc } from 'firebase/firestore';
+import { db } from '@/lib/firebase';
+
+// ADICIONE ESTA FUNÇÃO ANTES DO export async function GET
+async function getStoredBlingCredentials() {
+  try {
+    const credentialsDocRef = doc(db, "appConfig", "blingCredentials");
+    const docSnap = await getDoc(credentialsDocRef);
+    if (docSnap.exists()) {
+      const data = docSnap.data();
+      return {
+        clientId: data.clientId,
+        clientSecret: data.clientSecret
+      };
+    }
+    return null;
+  } catch (error) {
+    console.error("Error getting stored credentials:", error);
+    return null;
+  }
+}
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
@@ -12,17 +33,13 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: 'Nenhum código de autorização recebido.' }, { status: 400 });
   }
 
-  // Em um app de produção, você validaria o 'state' aqui
-  // const savedState = cookies().get('bling_oauth_state')?.value;
-  // if (state !== savedState) {
-  //   return NextResponse.json({ error: 'Estado de OAuth inválido.' }, { status: 403 });
-  // }
-  
-  const clientId = process.env.BLING_CLIENT_ID;
-  const clientSecret = process.env.BLING_CLIENT_SECRET;
+  // MUDANÇA: Buscar credenciais do Firestore primeiro, depois tentar ENV como fallback
+  const storedCreds = await getStoredBlingCredentials();
+  const clientId = storedCreds?.clientId || process.env.BLING_CLIENT_ID;
+  const clientSecret = storedCreds?.clientSecret || process.env.BLING_CLIENT_SECRET;
 
   if (!clientId || !clientSecret) {
-    console.error("Credenciais do Bling (Client ID/Secret) não configuradas nas variáveis de ambiente do servidor.");
+    console.error("Credenciais do Bling não encontradas nem no Firestore nem nas variáveis de ambiente");
     return NextResponse.json({ error: 'Credenciais do Bling não configuradas no servidor.' }, { status: 500 });
   }
 
@@ -123,5 +140,4 @@ export async function GET(request: Request) {
       });
   }
 }
-
     

@@ -76,10 +76,10 @@ async function getFullBlingCredentials(): Promise<BlingCredentials> {
         const docSnap = await getDoc(credentialsDocRef);
         const savedCreds = docSnap.exists() ? docSnap.data() as BlingCredentials : {};
         
-        // Combine with environment variables (env vars take precedence for initial setup)
+        // MUDANÇA: Priorizar credenciais do Firestore, usar ENV como fallback
         return {
-            clientId: process.env.BLING_CLIENT_ID || savedCreds.clientId,
-            clientSecret: process.env.BLING_CLIENT_SECRET || savedCreds.clientSecret,
+            clientId: savedCreds.clientId || process.env.BLING_CLIENT_ID,
+            clientSecret: savedCreds.clientSecret || process.env.BLING_CLIENT_SECRET,
             accessToken: savedCreds.accessToken,
             refreshToken: savedCreds.refreshToken,
             expiresAt: savedCreds.expiresAt,
