@@ -3,6 +3,7 @@
 'use client';
 
 import * as React from 'react';
+import { Suspense } from 'react';
 import { PlusCircle, Loader2, MoreHorizontal, Pencil, Trash2, Search, Package, AlertTriangle, CheckCircle, BellRing, Boxes, ShoppingCart, ArrowRightLeft, Calendar as CalendarIcon, ArrowUp, ArrowDown } from 'lucide-react';
 import DashboardLayout from '@/components/dashboard-layout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card';
@@ -621,10 +622,38 @@ const EstoqueInsumo = ({ inventory, isLoading, fetchSupplies, onAction }: {
     )
 }
 
-export default function InsumosPage() {
+function InsumosTabView({
+  supplies,
+  inventory,
+  isLoading,
+  fetchSupplies,
+}: {
+  supplies: Supply[];
+  inventory: InventoryItem[];
+  isLoading: boolean;
+  fetchSupplies: () => void;
+}) {
   const searchParams = useSearchParams();
-  const tab = searchParams.get('tab') || 'cadastro'; 
+  const tab = searchParams.get('tab') || 'cadastro';
 
+  return tab === 'cadastro' ? (
+    <CadastroInsumo
+      supplies={supplies}
+      isLoading={isLoading}
+      fetchSupplies={fetchSupplies}
+      onAction={fetchSupplies}
+    />
+  ) : (
+    <EstoqueInsumo
+      inventory={inventory}
+      isLoading={isLoading}
+      fetchSupplies={fetchSupplies}
+      onAction={fetchSupplies}
+    />
+  );
+}
+
+export default function InsumosPage() {
   const [supplies, setSupplies] = React.useState<Supply[]>([]);
   const [inventory, setInventory] = React.useState<InventoryItem[]>([]);
   const [isLoading, setIsLoading] = React.useState(true);
@@ -677,21 +706,14 @@ export default function InsumosPage() {
   return (
     <DashboardLayout>
       <div className="flex-1 p-4 pt-6 md:p-8">
-        {tab === 'cadastro' ? (
-          <CadastroInsumo 
-            supplies={supplies} 
-            isLoading={isLoading} 
-            fetchSupplies={fetchSupplies} 
-            onAction={fetchSupplies}
+        <Suspense fallback={<div className="p-4">Carregando…</div>}>
+          <InsumosTabView
+            supplies={supplies}
+            inventory={inventory}
+            isLoading={isLoading}
+            fetchSupplies={fetchSupplies}
           />
-        ) : (
-          <EstoqueInsumo 
-            inventory={inventory} 
-            isLoading={isLoading} 
-            fetchSupplies={fetchSupplies} 
-            onAction={fetchSupplies}
-          />
-        )}
+        </Suspense>
       </div>
     </DashboardLayout>
   );
