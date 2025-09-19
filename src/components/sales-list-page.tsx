@@ -159,9 +159,10 @@ const SalesListPage = () => {
   const handleFilter = React.useCallback((currentSearchTerm: string) => {
     setIsFiltering(true);
     let newFilteredSales = allSales;
+    const isSearching = currentSearchTerm.trim() !== '';
 
-    // Date filter
-    if (date?.from && date?.to) {
+    // Date filter is ignored if a search term is present
+    if (date?.from && date?.to && !isSearching) {
         newFilteredSales = newFilteredSales.filter(sale => {
             try {
                 const saleDate = parseISO(sale.data);
@@ -173,7 +174,7 @@ const SalesListPage = () => {
     }
     
     // Search term filter
-    if (currentSearchTerm) {
+    if (isSearching) {
         const lowerCaseSearchTerm = currentSearchTerm.toLowerCase();
         newFilteredSales = newFilteredSales.filter(sale => {
             const hasMatchingSku = sale.itens?.some(item => 
