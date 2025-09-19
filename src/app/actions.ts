@@ -8,6 +8,7 @@ import { collection, getDocs, doc, writeBatch, query, where, setDoc, getDoc } fr
 import { db } from '@/lib/firebase';
 
 import { saveSalesOrders, filterNewOrders, getLastImportedOrderDate, orderExists, saveSalesOrdersOptimized, getImportedOrderIdsWithDetails } from '@/services/order-service';
+import { updateSupplyBySku } from '@/services/supply-service';
 import type { SaleOrder } from '@/types/sale-order';
 import type { Supply } from '@/types/supply';
 
@@ -721,11 +722,14 @@ export async function getProductionDemand(
         stockMap.set(stockItem.produto.codigo, stockItem.saldoVirtualTotal);
     });
 
-    const supplyInfoMap = new Map<string, { stockMin: number }>();
+    const supplyInfoMap = new Map<string, { stockMin?: number, stockMax?: number }>();
     suppliesSnapshot.forEach(doc => {
       const supply = doc.data() as Supply;
       if(supply.codigo) {
-        supplyInfoMap.set(supply.codigo, { stockMin: supply.estoqueMinimo });
+        supplyInfoMap.set(supply.codigo, { 
+            stockMin: supply.estoqueMinimo,
+            stockMax: supply.estoqueMaximo 
+        });
       }
     });
 
@@ -767,6 +771,7 @@ export async function getProductionDemand(
             const orderCount = data.orderIds.size;
             const corte = (orderCount / 12) * 2;
             const dobra = orderCount / 12 + (orderCount / 12 * 0.5);
+            const supplyInfo = supplyInfoMap.get(sku);
 
             return {
                 sku,
@@ -777,7 +782,8 @@ export async function getProductionDemand(
                 corte: corte,
                 dobra: dobra,
                 stockLevel: stockMap.get(sku),
-                stockMin: supplyInfoMap.get(sku)?.stockMin,
+                stockMin: supplyInfo?.stockMin,
+                stockMax: supplyInfo?.stockMax,
             };
         })
         .sort((a, b) => b.orderCount - a.orderCount);
@@ -791,41 +797,28 @@ export type StockData = {
     stockMin?: number;
     stockMax?: number;
 }
-export async function updateStockDataForSkus(skus: string[]): Promise<Map<string, StockData>> {
-    const stockDataMap = new Map<string, StockData>();
-    
-    for (const sku of skus) {
-        try {
-            const productData = await getBlingProductBySku(sku);
-            if (productData && productData.data) {
-                const { estoque } = productData.data;
-                stockDataMap.set(sku, {
-                    stockLevel: estoque?.saldoVirtualTotal,
-                    stockMin: estoque?.minimo,
-                    stockMax: estoque?.maximo,
-                });
-            }
-        } catch (error) {
-            console.warn(`Falha ao buscar dados de estoque para o SKU ${sku}:`, error);
-        }
-    }
-
-    return stockDataMap;
-}
 
 export async function updateSingleSkuStock(sku: string): Promise<StockData | null> {
     try {
         const productData = await getBlingProductBySku(sku);
         if (productData && productData.data) {
             const { estoque } = productData.data;
-            return {
+            const stockInfo: StockData = {
                 stockLevel: estoque?.saldoVirtualTotal,
                 stockMin: estoque?.minimo,
                 stockMax: estoque?.maximo,
             };
+            
+            // Persiste a informação no banco de dados
+            await updateSupplyBySku(sku, {
+                estoqueMinimo: stockInfo.stockMin,
+                estoqueMaximo: stockInfo.stockMax
+            });
+
+            return stockInfo;
         }
         return null;
-    } catch (error) {
+    } catch (error: any) {
         console.error(`Falha ao buscar dados de estoque para o SKU ${sku}:`, error);
         throw new Error(`Não foi possível atualizar o estoque para o SKU ${sku}.`);
     }
@@ -894,4 +887,3 @@ export async function backfillOrdersMissingItems() {
 
 
     
-

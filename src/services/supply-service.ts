@@ -2,7 +2,7 @@
 "use server";
 
 import { db } from '@/lib/firebase';
-import { collection, addDoc, doc, updateDoc, deleteDoc } from 'firebase/firestore';
+import { collection, addDoc, doc, updateDoc, deleteDoc, query, where, getDocs, writeBatch } from 'firebase/firestore';
 import type { Supply } from '@/types/supply';
 
 /**
@@ -42,6 +42,41 @@ export async function updateSupply(id: string, supplyData: Partial<Omit<Supply, 
         throw new Error("Falha ao atualizar o insumo no banco de dados.");
     }
 }
+
+/**
+ * Atualiza um insumo existente no banco de dados usando o SKU.
+ * @param sku - O SKU (código) do insumo a ser atualizado.
+ * @param supplyData - Os novos dados para o insumo.
+ */
+export async function updateSupplyBySku(sku: string, supplyData: Partial<Omit<Supply, 'id' | 'createdAt' | 'estoqueAtual' | 'codigo'>>) {
+    const suppliesCollection = collection(db, 'supplies');
+    const q = query(suppliesCollection, where("codigo", "==", sku));
+    
+    try {
+        const querySnapshot = await getDocs(q);
+        
+        if (querySnapshot.empty) {
+            console.warn(`Nenhum insumo encontrado com o SKU: ${sku}. Nenhuma atualização foi feita.`);
+            return;
+        }
+
+        // Em um cenário ideal, o SKU é único. Se houver múltiplos, atualiza todos.
+        const batch = writeBatch(db);
+        querySnapshot.forEach(documentSnapshot => {
+            const docRef = doc(db, 'supplies', documentSnapshot.id);
+            batch.update(docRef, {
+                ...supplyData,
+                updatedAt: new Date().toISOString(),
+            });
+        });
+        await batch.commit();
+
+    } catch (error) {
+        console.error(`Erro ao atualizar insumo com SKU ${sku}: `, error);
+        throw new Error(`Falha ao atualizar o insumo com SKU ${sku} no banco de dados.`);
+    }
+}
+
 
 /**
  * Apaga um insumo do banco de dados.

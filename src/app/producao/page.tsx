@@ -294,9 +294,9 @@ export default function ProducaoPage() {
                     <TableRow key={item.sku}>
                       <TableCell className="font-medium">{item.sku}</TableCell>
                       <TableCell>{item.description}</TableCell>
-                      <TableCell className="text-right font-bold">{item.stockMin ?? 'N/A'}</TableCell>
-                      <TableCell className="text-right font-bold">{item.stockMax ?? 'N/A'}</TableCell>
-                      <TableCell className="text-right font-bold">{item.stockLevel ?? 'N/A'}</TableCell>
+                      <TableCell className="text-right font-bold">{item.stockMin ?? ''}</TableCell>
+                      <TableCell className="text-right font-bold">{item.stockMax ?? ''}</TableCell>
+                      <TableCell className="text-right font-bold">{item.stockLevel ?? ''}</TableCell>
                       <TableCell className="text-right font-bold">{item.orderCount}</TableCell>
                       <TableCell className="text-right font-bold">{item.totalQuantitySold}</TableCell>
                       <TableCell className="text-right">{item.weeklyAverage.toFixed(1)}</TableCell>
