@@ -186,8 +186,9 @@ const SalesListPage = () => {
                 String(sale.id).includes(lowerCaseSearchTerm) ||
                 String(sale.numero).includes(lowerCaseSearchTerm) ||
                 String(sale.numeroLoja).toLowerCase().includes(lowerCaseSearchTerm);
+            const hasMatchingClientName = sale.contato?.nome?.toLowerCase().includes(lowerCaseSearchTerm);
 
-            return hasMatchingSku || hasMatchingOrderNumber;
+            return hasMatchingSku || hasMatchingOrderNumber || hasMatchingClientName;
         });
     }
 
@@ -418,7 +419,7 @@ const SalesListPage = () => {
             <div className="relative w-full sm:w-auto">
                 <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
                 <Input 
-                    placeholder="Buscar por SKU ou pedido..." 
+                    placeholder="Buscar por cliente, SKU ou pedido..." 
                     className="pl-8 w-full sm:w-64"
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
