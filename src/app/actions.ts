@@ -86,6 +86,10 @@ async function getFullBlingCredentials(): Promise<BlingCredentials> {
         const clientId = process.env.BLING_CLIENT_ID;
         const clientSecret = process.env.BLING_CLIENT_SECRET;
 
+        if (!clientId || !clientSecret) {
+            console.warn("Client ID ou Client Secret do Bling não estão configurados nas variáveis de ambiente.");
+        }
+
         return {
             clientId: clientId,
             clientSecret: clientSecret,
@@ -777,7 +781,7 @@ export async function getProductionDemand(
     const result = Array.from(productDemand.entries())
         .map(([sku, data]) => {
             const orderCount = data.orderIds.size;
-            const weeklyAverage = orderCount / weeks;
+            const weeklyAverage = data.totalQuantity / weeks;
             const corte = (weeklyAverage / 12) * 2;
             const dobra = (weeklyAverage / 12) + (orderCount / 12 * 0.5);
             const supplyInfo = supplyInfoMap.get(sku);
