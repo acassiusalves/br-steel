@@ -30,6 +30,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Separator } from '@/components/ui/separator';
 import { Input } from '@/components/ui/input';
 import { useToast } from '@/hooks/use-toast';
+import * as XLSX from 'xlsx';
 
 // Função para formatar a data
 const formatDate = (dateString: string) => {
@@ -219,41 +220,40 @@ const SalesListPage = () => {
       "Status", "Vendedor", "Total Pedido (R$)"
     ];
 
-    const csvRows = [headers.join(',')];
+    const dataToExport = filteredSales.map(sale => ({
+      "ID Pedido": sale.id,
+      "Numero Pedido": sale.numero || 'N/A',
+      "Numero Loja": sale.numeroLoja || 'N/A',
+      "Data": formatDate(sale.data),
+      "Cliente": sale.contato?.nome || 'N/A',
+      "Marketplace": getMarketplaceName(sale),
+      "Qtd Itens": getTotalQuantity(sale.itens),
+      "Itens (SKUs)": sale.itens?.map(i => i.codigo).join(' | ') || '',
+      "Itens (Descricoes)": sale.itens?.map(i => i.descricao).join(' | ') || '',
+      "Status": sale.situacao?.nome || 'Desconhecido',
+      "Vendedor": sale.vendedor?.nome || 'N/A',
+      "Total Pedido (R$)": sale.total || 0,
+    }));
 
-    filteredSales.forEach(sale => {
-      const row = [
-        `"${sale.id}"`,
-        `"${sale.numero || 'N/A'}"`,
-        `"${sale.numeroLoja || 'N/A'}"`,
-        `"${formatDate(sale.data)}"`,
-        `"${sale.contato?.nome || 'N/A'}"`,
-        `"${getMarketplaceName(sale)}"`,
-        getTotalQuantity(sale.itens),
-        `"${sale.itens?.map(i => i.codigo).join(' | ') || ''}"`,
-        `"${sale.itens?.map(i => i.descricao).join(' | ') || ''}"`,
-        `"${sale.situacao?.nome || 'Desconhecido'}"`,
-        `"${sale.vendedor?.nome || 'N/A'}"`,
-        (sale.total || 0).toString().replace('.', ','),
-      ];
-      csvRows.push(row.join(','));
-    });
+    const worksheet = XLSX.utils.json_to_sheet(dataToExport, { header: headers });
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Pedidos");
 
-    const csvString = csvRows.join('\n');
-    const blob = new Blob([`\uFEFF${csvString}`], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
+    // Adjust column widths
+    const cols = headers.map(header => ({
+        wch: Math.max(...dataToExport.map(d => String(d[header as keyof typeof d]).length), header.length) + 2
+    }));
+    worksheet["!cols"] = cols;
+
     const fromDate = date?.from ? format(date.from, 'yyyy-MM-dd') : 'inicio';
     const toDate = date?.to ? format(date.to, 'yyyy-MM-dd') : 'fim';
-    link.download = `pedidos-brsteel-${fromDate}-a-${toDate}.csv`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    const filename = `pedidos-brsteel-${fromDate}-a-${toDate}.xlsx`;
+
+    XLSX.writeFile(workbook, filename);
     
     toast({
-        title: "Exportação Iniciada",
-        description: `${filteredSales.length} pedidos estão sendo baixados.`,
+        title: "Exportação Concluída",
+        description: `${filteredSales.length} pedidos foram exportados para ${filename}.`,
     });
   };
 
@@ -573,4 +573,3 @@ const SalesListPage = () => {
 };
 
 export default SalesListPage;
-
