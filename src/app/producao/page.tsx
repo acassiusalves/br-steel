@@ -225,12 +225,14 @@ export default function ProducaoPage() {
                   <TableHead className="text-right">Qtd. de Pedidos (com NF)</TableHead>
                   <TableHead className="text-right">Qtd. Total Vendida</TableHead>
                   <TableHead className="text-right">Média Semanal (Pedidos)</TableHead>
+                  <TableHead className="text-right">Corte</TableHead>
+                  <TableHead className="text-right">Dobra</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {isLoading ? (
                   <TableRow>
-                    <TableCell colSpan={5} className="h-24 text-center">
+                    <TableCell colSpan={7} className="h-24 text-center">
                       <Loader2 className="mx-auto h-6 w-6 animate-spin" />
                     </TableCell>
                   </TableRow>
@@ -242,11 +244,13 @@ export default function ProducaoPage() {
                       <TableCell className="text-right font-bold">{item.orderCount}</TableCell>
                       <TableCell className="text-right font-bold">{item.totalQuantitySold}</TableCell>
                       <TableCell className="text-right">{item.weeklyAverage.toFixed(1)}</TableCell>
+                      <TableCell className="text-right">{item.corte.toFixed(1)}</TableCell>
+                      <TableCell className="text-right">{item.dobra.toFixed(1)}</TableCell>
                     </TableRow>
                   ))
                 ) : (
                   <TableRow>
-                    <TableCell colSpan={5} className="h-24 text-center">
+                    <TableCell colSpan={7} className="h-24 text-center">
                       Nenhum item vendido com nota fiscal encontrada para o período.
                     </TableCell>
                   </TableRow>

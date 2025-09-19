@@ -672,6 +672,8 @@ export type ProductionDemand = {
   orderCount: number;
   totalQuantitySold: number;
   weeklyAverage: number;
+  corte: number;
+  dobra: number;
 };
 
 export async function getProductionDemand(
@@ -722,12 +724,17 @@ export async function getProductionDemand(
     const result = Array.from(productDemand.entries())
         .map(([sku, data]) => {
             const orderCount = data.orderIds.size;
+            const corte = orderCount / (12 * 2);
+            const dobra = orderCount / 12 + (orderCount / 12 * 0.5);
+
             return {
                 sku,
                 description: data.description,
                 orderCount: orderCount,
                 totalQuantitySold: data.totalQuantity,
                 weeklyAverage: orderCount / weeks,
+                corte: corte,
+                dobra: dobra,
             };
         })
         .sort((a, b) => b.orderCount - a.orderCount);
