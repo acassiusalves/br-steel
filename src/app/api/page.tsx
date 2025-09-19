@@ -2,7 +2,7 @@
 "use client";
 
 import * as React from 'react';
-import { KeyRound, Loader2, Copy, Save, CheckCircle, XCircle, FileJson, Send, Calendar as CalendarIcon, Plug, Sheet, Database, FileDown, Search, Truck, Package, Store } from 'lucide-react';
+import { KeyRound, Loader2, Copy, Save, CheckCircle, XCircle, FileJson, Send, Calendar as CalendarIcon, Plug, Sheet, Database, FileDown, Search, Truck, Package, Store, Trash2 } from 'lucide-react';
 import { format, subDays, startOfMonth, endOfMonth, startOfYesterday, endOfYesterday, startOfWeek, endOfWeek, lastDayOfWeek, subWeeks, startOfISOWeek, endOfISOWeek, subMonths, lastDayOfMonth } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import type { DateRange } from "react-day-picker";
@@ -13,7 +13,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
-import { getBlingCredentials, saveBlingCredentials, countImportedOrders, getBlingOrderDetails, getImportedOrderIds, getBlingProducts, getBlingChannelByOrderId, smartSyncOrders, fullSyncOrders } from '@/app/actions';
+import { getBlingCredentials, saveBlingCredentials, countImportedOrders, getBlingOrderDetails, getImportedOrderIds, getBlingProducts, getBlingChannelByOrderId, smartSyncOrders, fullSyncOrders, deleteAllSalesOrders } from '@/app/actions';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Calendar } from '@/components/ui/calendar';
 import { cn } from '@/lib/utils';
@@ -22,6 +22,7 @@ import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Separator } from '@/components/ui/separator';
 import { Progress } from '@/components/ui/progress';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
 
 
 type ApiStatus = 'valid' | 'invalid' | 'unchecked';
@@ -46,6 +47,7 @@ export default function ApiPage() {
   const [callbackUrl, setCallbackUrl] = React.useState('');
   const [authUrl, setAuthUrl] = React.useState('');
   const [isImporting, setIsImporting] = React.useState(false);
+  const [isDeleting, setIsDeleting] = React.useState(false);
   const [apiResponse, setApiResponse] = React.useState<any>(null);
   const [date, setDate] = React.useState<DateRange | undefined>(undefined);
   const [apiStatus, setApiStatus] = React.useState<ApiStatus>('unchecked');
@@ -353,6 +355,30 @@ const handleFullSync = async () => {
         setIsFetchingChannel(false);
     }
   }
+
+    const handleDeleteAllOrders = async () => {
+        setIsDeleting(true);
+        toast({
+            title: "Apagando Dados...",
+            description: "Esta ação pode demorar alguns instantes. Por favor, aguarde.",
+        });
+        try {
+            const result = await deleteAllSalesOrders();
+            toast({
+                title: "Sucesso!",
+                description: `${result.deletedCount} pedidos foram apagados do banco de dados.`,
+            });
+            await loadInitialData(); // Re-fetch the count
+        } catch (error: any) {
+             toast({
+                variant: "destructive",
+                title: "Erro ao Apagar Dados",
+                description: `Não foi possível apagar os pedidos: ${error.message}`,
+            });
+        } finally {
+            setIsDeleting(false);
+        }
+    }
   
     const setDatePreset = (preset: 'today' | 'yesterday' | 'last7' | 'last30' | 'last3Months' | 'thisMonth' | 'lastMonth') => {
       const today = new Date();
@@ -673,6 +699,49 @@ const handleFullSync = async () => {
                   </CardContent>
                 </Card>
             </div>
+            
+            <Separator />
+
+             <Card className="border-destructive">
+                <CardHeader>
+                    <CardTitle className="text-destructive">Ações de Risco</CardTitle>
+                    <CardDescription>
+                        Cuidado: as ações nesta seção são permanentes e não podem ser desfeitas.
+                    </CardDescription>
+                </CardHeader>
+                <CardContent>
+                    <AlertDialog>
+                        <AlertDialogTrigger asChild>
+                            <Button variant="destructive" disabled={isDeleting || isImporting}>
+                                {isDeleting ? (
+                                    <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Apagando...</>
+                                ) : (
+                                    <><Trash2 className="mr-2 h-4 w-4" /> Apagar Todos os Pedidos</>
+                                )}
+                            </Button>
+                        </AlertDialogTrigger>
+                        <AlertDialogContent>
+                            <AlertDialogHeader>
+                                <AlertDialogTitle>Você tem certeza absoluta?</AlertDialogTitle>
+                                <AlertDialogDescription>
+                                    Esta ação é irreversível. Todos os <strong>{importedCount}</strong> pedidos de venda importados serão
+                                    permanentemente apagados do banco de dados. Os dados no Bling não serão afetados. 
+                                    Use esta função se precisar forçar uma re-sincronização completa do zero.
+                                </AlertDialogDescription>
+                            </AlertDialogHeader>
+                            <AlertDialogFooter>
+                                <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                                <AlertDialogAction onClick={handleDeleteAllOrders} className="bg-destructive hover:bg-destructive/90">
+                                    Sim, apagar tudo
+                                </AlertDialogAction>
+                            </AlertDialogFooter>
+                        </AlertDialogContent>
+                    </AlertDialog>
+                     <p className="text-sm text-muted-foreground mt-2">
+                        Use esta função para limpar a base de dados e começar uma nova sincronização do zero.
+                    </p>
+                </CardContent>
+             </Card>
 
          </div>
         );

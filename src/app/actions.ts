@@ -732,6 +732,32 @@ export async function getProductionDemand(
     return result;
 }
 
+export async function deleteAllSalesOrders(): Promise<{ deletedCount: number }> {
+    const ordersCollection = collection(db, 'salesOrders');
+    const snapshot = await getDocs(ordersCollection);
+    
+    if (snapshot.empty) {
+        return { deletedCount: 0 };
+    }
+
+    // Firestore allows a maximum of 500 operations in a single batch.
+    const batchSize = 500;
+    let deletedCount = 0;
+
+    for (let i = 0; i < snapshot.docs.length; i += batchSize) {
+        const batch = writeBatch(db);
+        const chunk = snapshot.docs.slice(i, i + batchSize);
+        chunk.forEach(doc => {
+            batch.delete(doc.ref);
+        });
+        await batch.commit();
+        deletedCount += chunk.length;
+        console.log(`Deleted ${chunk.length} orders in batch.`);
+    }
+
+    console.log(`Successfully deleted ${deletedCount} total orders.`);
+    return { deletedCount };
+}
     
 
     
