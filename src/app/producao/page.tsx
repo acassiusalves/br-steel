@@ -222,6 +222,7 @@ export default function ProducaoPage() {
                 <TableRow>
                   <TableHead>SKU</TableHead>
                   <TableHead>Descrição do Produto</TableHead>
+                  <TableHead className="text-right">Estoque Mínimo</TableHead>
                   <TableHead className="text-right">Estoque Atual (Bling)</TableHead>
                   <TableHead className="text-right">Qtd. de Pedidos (com NF)</TableHead>
                   <TableHead className="text-right">Qtd. Total Vendida</TableHead>
@@ -233,7 +234,7 @@ export default function ProducaoPage() {
               <TableBody>
                 {isLoading ? (
                   <TableRow>
-                    <TableCell colSpan={8} className="h-24 text-center">
+                    <TableCell colSpan={9} className="h-24 text-center">
                       <Loader2 className="mx-auto h-6 w-6 animate-spin" />
                     </TableCell>
                   </TableRow>
@@ -242,6 +243,7 @@ export default function ProducaoPage() {
                     <TableRow key={item.sku}>
                       <TableCell className="font-medium">{item.sku}</TableCell>
                       <TableCell>{item.description}</TableCell>
+                      <TableCell className="text-right font-bold">{item.stockMin ?? 'N/A'}</TableCell>
                       <TableCell className="text-right font-bold">{item.stockLevel ?? 'N/A'}</TableCell>
                       <TableCell className="text-right font-bold">{item.orderCount}</TableCell>
                       <TableCell className="text-right font-bold">{item.totalQuantitySold}</TableCell>
@@ -252,7 +254,7 @@ export default function ProducaoPage() {
                   ))
                 ) : (
                   <TableRow>
-                    <TableCell colSpan={8} className="h-24 text-center">
+                    <TableCell colSpan={9} className="h-24 text-center">
                       Nenhum item vendido com nota fiscal encontrada para o período.
                     </TableCell>
                   </TableRow>

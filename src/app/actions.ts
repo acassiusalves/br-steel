@@ -9,6 +9,7 @@ import { db } from '@/lib/firebase';
 
 import { saveSalesOrders, filterNewOrders, getLastImportedOrderDate, orderExists, saveSalesOrdersOptimized, getImportedOrderIdsWithDetails } from '@/services/order-service';
 import type { SaleOrder } from '@/types/sale-order';
+import type { Supply } from '@/types/supply';
 
 
 // Bling API actions
@@ -675,6 +676,7 @@ export type ProductionDemand = {
   corte: number;
   dobra: number;
   stockLevel?: number;
+  stockMin?: number;
 };
 
 export async function getProductionDemand(
@@ -684,14 +686,23 @@ export async function getProductionDemand(
         return [];
     }
 
-    const [salesSnapshot, stockDataResult] = await Promise.all([
+    const [salesSnapshot, stockDataResult, suppliesSnapshot] = await Promise.all([
         getDocs(query(collection(db, 'salesOrders'), where('notaFiscal.id', '!=', null))),
-        getProductsStock()
+        getProductsStock(),
+        getDocs(query(collection(db, "supplies")))
     ]);
     
     const stockMap = new Map<string, number>();
     stockDataResult.data.forEach(stockItem => {
         stockMap.set(stockItem.produto.codigo, stockItem.saldoVirtualTotal);
+    });
+
+    const supplyInfoMap = new Map<string, { stockMin: number }>();
+    suppliesSnapshot.forEach(doc => {
+      const supply = doc.data() as Supply;
+      if(supply.codigo) {
+        supplyInfoMap.set(supply.codigo, { stockMin: supply.estoqueMinimo });
+      }
     });
 
     const fromDateStr = format(from, 'yyyy-MM-dd');
@@ -742,6 +753,7 @@ export async function getProductionDemand(
                 corte: corte,
                 dobra: dobra,
                 stockLevel: stockMap.get(sku),
+                stockMin: supplyInfoMap.get(sku)?.stockMin,
             };
         })
         .sort((a, b) => b.orderCount - a.orderCount);
