@@ -724,7 +724,7 @@ export async function getProductionDemand(
     const result = Array.from(productDemand.entries())
         .map(([sku, data]) => {
             const orderCount = data.orderIds.size;
-            const corte = orderCount / (12 * 2);
+            const corte = (orderCount / 12) * 2;
             const dobra = orderCount / 12 + (orderCount / 12 * 0.5);
 
             return {
@@ -800,3 +800,4 @@ export async function backfillOrdersMissingItems() {
     
 
     
+
