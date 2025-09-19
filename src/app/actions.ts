@@ -441,16 +441,25 @@ export async function getBlingProductBySku(sku: string): Promise<any> {
     if (!sku) {
         throw new Error('O SKU do produto é obrigatório.');
     }
-    const url = `https://api.bling.com.br/Api/v3/produtos?codigo=${encodeURIComponent(sku)}`;
+    const listUrl = `https://api.bling.com.br/Api/v3/produtos?codigo=${encodeURIComponent(sku)}`;
     try {
-        const data = await blingFetchWithRefresh(url);
-        return data;
+        const listData = await blingFetchWithRefresh(listUrl);
+        const productFromList = listData?.data?.[0];
+
+        if (!productFromList || !productFromList.id) {
+            throw new Error(`Produto com SKU ${sku} não encontrado na listagem.`);
+        }
+
+        const detailUrl = `https://api.bling.com.br/Api/v3/produtos/${productFromList.id}`;
+        const detailData = await blingFetchWithRefresh(detailUrl);
+        
+        return detailData;
+
     } catch (error: any) {
         console.error(`Falha ao buscar produto com SKU ${sku}:`, error);
         throw new Error(`Falha na comunicação com a API do Bling: ${error.message}`);
     }
 }
-
 
 export async function getLogisticsBySalesOrder(orderId: string): Promise<any> {
     if (!orderId) {
@@ -691,6 +700,7 @@ export type ProductionDemand = {
   dobra: number;
   stockLevel?: number;
   stockMin?: number;
+  stockMax?: number;
 };
 
 export async function getProductionDemand(
@@ -773,6 +783,34 @@ export async function getProductionDemand(
         .sort((a, b) => b.orderCount - a.orderCount);
 
     return result;
+}
+
+
+export type StockData = {
+    stockLevel?: number;
+    stockMin?: number;
+    stockMax?: number;
+}
+export async function updateStockDataForSkus(skus: string[]): Promise<Map<string, StockData>> {
+    const stockDataMap = new Map<string, StockData>();
+    
+    for (const sku of skus) {
+        try {
+            const productData = await getBlingProductBySku(sku);
+            if (productData && productData.data) {
+                const { estoque } = productData.data;
+                stockDataMap.set(sku, {
+                    stockLevel: estoque?.saldoVirtualTotal,
+                    stockMin: estoque?.minimo,
+                    stockMax: estoque?.maximo,
+                });
+            }
+        } catch (error) {
+            console.warn(`Falha ao buscar dados de estoque para o SKU ${sku}:`, error);
+        }
+    }
+
+    return stockDataMap;
 }
 
 export async function deleteAllSalesOrders(): Promise<{ deletedCount: number }> {

@@ -22,7 +22,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { getProductionDemand, smartSyncOrders } from '@/app/actions';
+import { getProductionDemand, smartSyncOrders, updateStockDataForSkus } from '@/app/actions';
 import type { ProductionDemand } from '@/app/actions';
 import { Button } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -36,6 +36,7 @@ export default function ProducaoPage() {
   const [demand, setDemand] = React.useState<ProductionDemand[]>([]);
   const [isLoading, setIsLoading] = React.useState(true);
   const [isSyncing, setIsSyncing] = React.useState(false);
+  const [isUpdatingStock, setIsUpdatingStock] = React.useState(false);
   const [date, setDate] = React.useState<DateRange | undefined>(undefined);
   const { toast } = useToast();
   
@@ -140,6 +141,57 @@ export default function ProducaoPage() {
       }
   }
 
+  const handleUpdateStock = async () => {
+    if (demand.length === 0) {
+        toast({
+            variant: "destructive",
+            title: "Nenhum Produto na Lista",
+            description: "Não há produtos para atualizar o estoque.",
+        });
+        return;
+    }
+    setIsUpdatingStock(true);
+    toast({
+        title: "Atualizando Estoque...",
+        description: "Buscando dados de estoque mínimo e máximo do Bling. Isso pode levar um momento.",
+    });
+
+    try {
+        const skus = demand.map(item => item.sku);
+        const stockDataMap = await updateStockDataForSkus(skus);
+        
+        setDemand(prevDemand => 
+            prevDemand.map(item => {
+                if (stockDataMap.has(item.sku)) {
+                    const stockData = stockDataMap.get(item.sku)!;
+                    return {
+                        ...item,
+                        stockLevel: stockData.stockLevel !== undefined ? stockData.stockLevel : item.stockLevel,
+                        stockMin: stockData.stockMin !== undefined ? stockData.stockMin : item.stockMin,
+                        stockMax: stockData.stockMax !== undefined ? stockData.stockMax : item.stockMax,
+                    };
+                }
+                return item;
+            })
+        );
+
+        toast({
+            title: "Estoque Atualizado!",
+            description: "Os dados de estoque mínimo e máximo foram atualizados.",
+        });
+
+    } catch (error) {
+        console.error("Failed to update stock data:", error);
+        toast({
+            variant: "destructive",
+            title: "Erro ao Atualizar Estoque",
+            description: "Não foi possível buscar os dados de estoque do Bling.",
+        });
+    } finally {
+        setIsUpdatingStock(false);
+    }
+  };
+
 
   return (
     <DashboardLayout>
@@ -211,10 +263,22 @@ export default function ProducaoPage() {
         </div>
         <Card>
           <CardHeader>
-            <CardTitle>Demanda por SKU</CardTitle>
-            <CardDescription>
-              A lista abaixo mostra a quantidade de pedidos únicos (com nota fiscal emitida) para cada produto no período selecionado.
-            </CardDescription>
+            <div className="flex justify-between items-center">
+                <div>
+                    <CardTitle>Demanda por SKU</CardTitle>
+                    <CardDescription>
+                      A lista abaixo mostra a quantidade de pedidos únicos (com nota fiscal emitida) para cada produto no período selecionado.
+                    </CardDescription>
+                </div>
+                <Button onClick={handleUpdateStock} variant="outline" disabled={isUpdatingStock || isLoading}>
+                    {isUpdatingStock ? (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    ) : (
+                        <RefreshCw className="mr-2 h-4 w-4" />
+                    )}
+                    Atualizar Mínimo e Máximo
+                </Button>
+            </div>
           </CardHeader>
           <CardContent>
             <Table>
@@ -223,6 +287,7 @@ export default function ProducaoPage() {
                   <TableHead>SKU</TableHead>
                   <TableHead>Descrição do Produto</TableHead>
                   <TableHead className="text-right">Estoque Mínimo</TableHead>
+                  <TableHead className="text-right">Estoque Máximo</TableHead>
                   <TableHead className="text-right">Estoque Atual (Bling)</TableHead>
                   <TableHead className="text-right">Qtd. de Pedidos (com NF)</TableHead>
                   <TableHead className="text-right">Qtd. Total Vendida</TableHead>
@@ -234,7 +299,7 @@ export default function ProducaoPage() {
               <TableBody>
                 {isLoading ? (
                   <TableRow>
-                    <TableCell colSpan={9} className="h-24 text-center">
+                    <TableCell colSpan={10} className="h-24 text-center">
                       <Loader2 className="mx-auto h-6 w-6 animate-spin" />
                     </TableCell>
                   </TableRow>
@@ -244,6 +309,7 @@ export default function ProducaoPage() {
                       <TableCell className="font-medium">{item.sku}</TableCell>
                       <TableCell>{item.description}</TableCell>
                       <TableCell className="text-right font-bold">{item.stockMin ?? 'N/A'}</TableCell>
+                      <TableCell className="text-right font-bold">{item.stockMax ?? 'N/A'}</TableCell>
                       <TableCell className="text-right font-bold">{item.stockLevel ?? 'N/A'}</TableCell>
                       <TableCell className="text-right font-bold">{item.orderCount}</TableCell>
                       <TableCell className="text-right font-bold">{item.totalQuantitySold}</TableCell>
@@ -254,7 +320,7 @@ export default function ProducaoPage() {
                   ))
                 ) : (
                   <TableRow>
-                    <TableCell colSpan={9} className="h-24 text-center">
+                    <TableCell colSpan={10} className="h-24 text-center">
                       Nenhum item vendido com nota fiscal encontrada para o período.
                     </TableCell>
                   </TableRow>
@@ -267,7 +333,3 @@ export default function ProducaoPage() {
     </DashboardLayout>
   );
 }
-
-    
-
-    
