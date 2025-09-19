@@ -19,7 +19,7 @@ import SaleOrderDetailModal from '@/components/sale-order-detail-modal';
 import type { SaleOrder } from '@/types/sale-order';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { ChevronsLeft, ChevronLeft, ChevronRight, ChevronsRight, Loader2, Calendar as CalendarIcon, Filter, DollarSign, ShoppingCart, Users, Search } from 'lucide-react';
+import { ChevronsLeft, ChevronLeft, ChevronRight, ChevronsRight, Loader2, Calendar as CalendarIcon, Filter, DollarSign, ShoppingCart, Users, Search, FileDown } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Calendar } from '@/components/ui/calendar';
 import { cn } from '@/lib/utils';
@@ -29,6 +29,7 @@ import type { DateRange } from "react-day-picker";
 import { Skeleton } from '@/components/ui/skeleton';
 import { Separator } from '@/components/ui/separator';
 import { Input } from '@/components/ui/input';
+import { useToast } from '@/hooks/use-toast';
 
 // Função para formatar a data
 const formatDate = (dateString: string) => {
@@ -98,6 +99,7 @@ const SalesListPage = () => {
   const [isFiltering, setIsFiltering] = React.useState(false);
   const [selectedOrder, setSelectedOrder] = React.useState<SaleOrder | null>(null);
   const [searchTerm, setSearchTerm] = React.useState('');
+  const { toast } = useToast();
 
   // Pagination State
   const [currentPage, setCurrentPage] = React.useState(1);
@@ -200,6 +202,60 @@ const SalesListPage = () => {
     // Give a small delay to show the loader, improving UX
     setTimeout(() => setIsFiltering(false), 300);
   }, [allSales, date, searchTerm]);
+
+  const handleExport = () => {
+    if (filteredSales.length === 0) {
+      toast({
+        variant: "destructive",
+        title: "Nenhum dado para exportar",
+        description: "A lista de pedidos filtrada está vazia.",
+      });
+      return;
+    }
+
+    const headers = [
+      "ID Pedido", "Numero Pedido", "Numero Loja", "Data", "Cliente",
+      "Marketplace", "Qtd Itens", "Itens (SKUs)", "Itens (Descricoes)",
+      "Status", "Vendedor", "Total Pedido (R$)"
+    ];
+
+    const csvRows = [headers.join(',')];
+
+    filteredSales.forEach(sale => {
+      const row = [
+        `"${sale.id}"`,
+        `"${sale.numero || 'N/A'}"`,
+        `"${sale.numeroLoja || 'N/A'}"`,
+        `"${formatDate(sale.data)}"`,
+        `"${sale.contato?.nome || 'N/A'}"`,
+        `"${getMarketplaceName(sale)}"`,
+        getTotalQuantity(sale.itens),
+        `"${sale.itens?.map(i => i.codigo).join(' | ') || ''}"`,
+        `"${sale.itens?.map(i => i.descricao).join(' | ') || ''}"`,
+        `"${sale.situacao?.nome || 'Desconhecido'}"`,
+        `"${sale.vendedor?.nome || 'N/A'}"`,
+        (sale.total || 0).toString().replace('.', ','),
+      ];
+      csvRows.push(row.join(','));
+    });
+
+    const csvString = csvRows.join('\n');
+    const blob = new Blob([`\uFEFF${csvString}`], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    const fromDate = date?.from ? format(date.from, 'yyyy-MM-dd') : 'inicio';
+    const toDate = date?.to ? format(date.to, 'yyyy-MM-dd') : 'fim';
+    link.download = `pedidos-brsteel-${fromDate}-a-${toDate}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    
+    toast({
+        title: "Exportação Iniciada",
+        description: `${filteredSales.length} pedidos estão sendo baixados.`,
+    });
+  };
 
 
   // Pagination Logic
@@ -320,6 +376,10 @@ const SalesListPage = () => {
                 />
               </PopoverContent>
             </Popover>
+             <Button onClick={handleExport} variant="outline">
+              <FileDown className="mr-2 h-4 w-4" />
+              Exportar
+            </Button>
           </div>
       </div>
 
