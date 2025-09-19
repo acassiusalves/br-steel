@@ -159,9 +159,8 @@ const SalesListPage = () => {
   const handleFilter = React.useCallback(() => {
     setIsFiltering(true);
     let newFilteredSales = allSales;
-    const isSearching = searchTerm.trim() !== '';
-
-    // 1. Filtro de data (sempre aplicado)
+    
+    // 1. Filtro de data
     if (date?.from && date?.to) {
         newFilteredSales = newFilteredSales.filter(sale => {
             try {
@@ -174,7 +173,7 @@ const SalesListPage = () => {
     }
     
     // 2. Filtro de busca (aplicado sobre o resultado do filtro de data)
-    if (isSearching) {
+    if (searchTerm.trim() !== '') {
         const lowerCaseSearchTerm = searchTerm.toLowerCase();
         newFilteredSales = newFilteredSales.filter(sale => {
             const hasMatchingSku = sale.itens?.some(item => 
@@ -273,6 +272,55 @@ const SalesListPage = () => {
                   Liste e gerencie todos os pedidos de venda dos seus marketplaces.
               </p>
           </div>
+          <div className="flex items-center gap-2">
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button
+                  id="date"
+                  variant={"outline"}
+                  className={cn(
+                    "w-full sm:w-[260px] justify-start text-left font-normal",
+                    !date && "text-muted-foreground"
+                  )}
+                >
+                  <CalendarIcon className="mr-2 h-4 w-4" />
+                  {date?.from ? (
+                    date.to ? (
+                      <>
+                        {format(date.from, "dd/MM/yy")} -{" "}
+                        {format(date.to, "dd/MM/yy")}
+                      </>
+                    ) : (
+                      format(date.from, "dd/MM/yy")
+                    )
+                  ) : (
+                    <span>Escolha um período</span>
+                  )}
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-auto p-0 flex" align="end">
+                <div className="flex flex-col space-y-1 p-2 border-r">
+                    <Button variant="ghost" className="justify-start text-left font-normal h-8 px-2" onClick={() => setDatePreset('today')}>Hoje</Button>
+                    <Button variant="ghost" className="justify-start text-left font-normal h-8 px-2" onClick={() => setDatePreset('yesterday')}>Ontem</Button>
+                    <Button variant="ghost" className="justify-start text-left font-normal h-8 px-2" onClick={() => setDatePreset('last7')}>Últimos 7 dias</Button>
+                    <Button variant="ghost" className="justify-start text-left font-normal h-8 px-2" onClick={() => setDatePreset('last30')}>Últimos 30 dias</Button>
+                    <Button variant="ghost" className="justify-start text-left font-normal h-8 px-2" onClick={() => setDatePreset('last3Months')}>Últimos 3 meses</Button>
+                    <Separator />
+                    <Button variant="ghost" className="justify-start text-left font-normal h-8 px-2" onClick={() => setDatePreset('thisMonth')}>Este mês</Button>
+                    <Button variant="ghost" className="justify-start text-left font-normal h-8 px-2" onClick={() => setDatePreset('lastMonth')}>Mês passado</Button>
+                </div>
+                <Calendar
+                  initialFocus
+                  mode="range"
+                  defaultMonth={date?.from}
+                  selected={date}
+                  onSelect={setDate}
+                  numberOfMonths={2}
+                  locale={ptBR}
+                />
+              </PopoverContent>
+            </Popover>
+          </div>
       </div>
 
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 mt-8">
@@ -307,64 +355,15 @@ const SalesListPage = () => {
                 Uma lista detalhada dos seus pedidos de venda. Clique em um pedido para ver todos os detalhes.
               </CardDescription>
             </div>
-            <div className="flex flex-col sm:flex-row items-center gap-2">
-                <div className="relative w-full sm:w-auto">
-                    <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-                    <Input 
-                        placeholder="Buscar por SKU ou pedido..." 
-                        className="pl-8 w-full sm:w-64"
-                        value={searchTerm}
-                        onChange={(e) => setSearchTerm(e.target.value)}
-                    />
-                </div>
-                <Popover>
-                  <PopoverTrigger asChild>
-                    <Button
-                      id="date"
-                      variant={"outline"}
-                      className={cn(
-                        "w-full sm:w-[260px] justify-start text-left font-normal",
-                        !date && "text-muted-foreground"
-                      )}
-                    >
-                      <CalendarIcon className="mr-2 h-4 w-4" />
-                      {date?.from ? (
-                        date.to ? (
-                          <>
-                            {format(date.from, "dd/MM/yy")} -{" "}
-                            {format(date.to, "dd/MM/yy")}
-                          </>
-                        ) : (
-                          format(date.from, "dd/MM/yy")
-                        )
-                      ) : (
-                        <span>Escolha um período</span>
-                      )}
-                    </Button>
-                  </PopoverTrigger>
-                  <PopoverContent className="w-auto p-0 flex" align="end">
-                    <div className="flex flex-col space-y-1 p-2 border-r">
-                        <Button variant="ghost" className="justify-start text-left font-normal h-8 px-2" onClick={() => setDatePreset('today')}>Hoje</Button>
-                        <Button variant="ghost" className="justify-start text-left font-normal h-8 px-2" onClick={() => setDatePreset('yesterday')}>Ontem</Button>
-                        <Button variant="ghost" className="justify-start text-left font-normal h-8 px-2" onClick={() => setDatePreset('last7')}>Últimos 7 dias</Button>
-                        <Button variant="ghost" className="justify-start text-left font-normal h-8 px-2" onClick={() => setDatePreset('last30')}>Últimos 30 dias</Button>
-                        <Button variant="ghost" className="justify-start text-left font-normal h-8 px-2" onClick={() => setDatePreset('last3Months')}>Últimos 3 meses</Button>
-                        <Separator />
-                        <Button variant="ghost" className="justify-start text-left font-normal h-8 px-2" onClick={() => setDatePreset('thisMonth')}>Este mês</Button>
-                        <Button variant="ghost" className="justify-start text-left font-normal h-8 px-2" onClick={() => setDatePreset('lastMonth')}>Mês passado</Button>
-                    </div>
-                    <Calendar
-                      initialFocus
-                      mode="range"
-                      defaultMonth={date?.from}
-                      selected={date}
-                      onSelect={setDate}
-                      numberOfMonths={2}
-                      locale={ptBR}
-                    />
-                  </PopoverContent>
-                </Popover>
-              </div>
+            <div className="relative w-full sm:w-auto">
+                <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                <Input 
+                    placeholder="Buscar por SKU ou pedido..." 
+                    className="pl-8 w-full sm:w-64"
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                />
+            </div>
           </div>
         </CardHeader>
         <CardContent>
@@ -515,6 +514,3 @@ const SalesListPage = () => {
 
 export default SalesListPage;
 
-
-    
-    
