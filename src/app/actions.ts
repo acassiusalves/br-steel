@@ -267,32 +267,38 @@ async function getBlingSalesOrdersOptimized({
             };
         }
 
-        const newOrders = await filterNewOrders(allOrders);
+        // Se for sincronização completa (fullSync), todos os pedidos são "novos" para processamento
+        const ordersToProcess = forceFullSync ? allOrders : await filterNewOrders(allOrders);
 
-        if (newOrders.length === 0) {
+        if (ordersToProcess.length === 0) {
             console.log('✅ Todos os pedidos já estão atualizados no banco');
             return { 
                 data: allOrders, 
                 summary: { total: allOrders.length, new: 0, existing: allOrders.length, processed: 0 } 
             };
         }
-
-        console.log(`🔍 Buscando detalhes completos para ${newOrders.length} pedidos novos...`);
+        
+        const logMessage = forceFullSync 
+            ? `🔄 Sincronização completa: re-processando detalhes para ${ordersToProcess.length} pedidos...`
+            : `🔍 Buscando detalhes completos para ${ordersToProcess.length} pedidos novos...`;
+        console.log(logMessage);
         
         const ordersWithDetails = [];
         let processedCount = 0;
 
-        for (const order of newOrders) {
+        for (const order of ordersToProcess) {
             try {
                 const detailsData = await blingFetchWithRefresh(`https://api.bling.com.br/Api/v3/pedidos/vendas/${order.id}`);
                 if (detailsData && detailsData.data) {
                     ordersWithDetails.push(detailsData.data);
                     processedCount++;
                 } else {
+                    // Se não conseguir os detalhes, mantém o pedido original (sem itens)
                     ordersWithDetails.push(order);
                 }
             } catch (error) {
                 console.warn(`⚠️ Erro ao processar pedido ${order.id}:`, error);
+                // Mesmo com erro, adiciona o pedido base para não perdê-lo
                 ordersWithDetails.push(order);
             }
         }
@@ -305,9 +311,9 @@ async function getBlingSalesOrdersOptimized({
             data: ordersWithDetails,
             summary: {
                 total: allOrders.length,
-                new: newOrders.length,
-                existing: allOrders.length - newOrders.length,
-                processed: processedCount,
+                new: ordersToProcess.length, // Total de pedidos que tentamos processar
+                existing: allOrders.length - ordersToProcess.length,
+                processed: processedCount, // Total de pedidos com detalhes obtidos com sucesso
                 saved: saveResult.count,
                 created: saveResult.created,
                 updated: saveResult.updated

@@ -138,7 +138,11 @@ const SalesListPage = () => {
 
         const sales: SaleOrder[] = [];
         snapshot.forEach(doc => {
-            sales.push(doc.data() as SaleOrder);
+            const orderData = doc.data() as SaleOrder;
+            // Filtra pedidos que não tem itens antes de adicionar ao estado
+            if(orderData.itens && orderData.itens.length > 0) {
+              sales.push(orderData);
+            }
         });
 
         setAllSales(sales);
