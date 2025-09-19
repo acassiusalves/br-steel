@@ -161,8 +161,8 @@ const SalesListPage = () => {
     let newFilteredSales = allSales;
     const isSearching = currentSearchTerm.trim() !== '';
 
-    // Date filter is ignored if a search term is present
-    if (date?.from && date?.to && !isSearching) {
+    // 1. Filtro de data (sempre aplicado)
+    if (date?.from && date?.to) {
         newFilteredSales = newFilteredSales.filter(sale => {
             try {
                 const saleDate = parseISO(sale.data);
@@ -173,7 +173,7 @@ const SalesListPage = () => {
         });
     }
     
-    // Search term filter
+    // 2. Filtro de busca (aplicado sobre o resultado do filtro de data)
     if (isSearching) {
         const lowerCaseSearchTerm = currentSearchTerm.toLowerCase();
         newFilteredSales = newFilteredSales.filter(sale => {
@@ -512,4 +512,5 @@ const SalesListPage = () => {
 export default SalesListPage;
 
 
+    
     
