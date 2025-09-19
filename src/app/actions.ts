@@ -33,7 +33,15 @@ const credentialsDocRef = doc(db, "appConfig", "blingCredentials");
  */
 export async function saveBlingCredentials(credentials: Partial<BlingCredentials>): Promise<void> {
     try {
-        await setDoc(credentialsDocRef, credentials, { merge: true });
+        const dataToSave: Partial<BlingCredentials> = {
+            accessToken: credentials.accessToken,
+            refreshToken: credentials.refreshToken,
+            expiresAt: credentials.expiresAt,
+        };
+
+        // We don't save client id/secret to Firestore, they come from env vars
+        await setDoc(credentialsDocRef, dataToSave, { merge: true });
+
     } catch (error) {
         console.error("Error saving Bling credentials to Firestore:", error);
         throw new Error("Failed to save credentials to the database.");
@@ -48,20 +56,16 @@ export async function saveBlingCredentials(credentials: Partial<BlingCredentials
 export async function getBlingCredentials(): Promise<Partial<BlingCredentials>> {
     try {
         const docSnap = await getDoc(credentialsDocRef);
-        if (docSnap.exists()) {
-            const data = docSnap.data() as BlingCredentials;
-            // Mask client secret when sending to the client
-            if (data.clientSecret) {
-                data.clientSecret = '********';
-            }
-            return data;
-        }
-        // Also check environment variables as a fallback for initial setup
-        const envClientId = process.env.BLING_CLIENT_ID;
-        if (envClientId) {
-            return { clientId: envClientId };
-        }
-        return {};
+        const savedCreds = docSnap.exists() ? docSnap.data() as BlingCredentials : {};
+        
+        // Always prioritize environment variables for client ID, it's safer.
+        const clientId = process.env.BLING_CLIENT_ID || savedCreds.clientId;
+
+        return { 
+            ...savedCreds,
+            clientId: clientId,
+            clientSecret: '********' // Always mask client secret
+        };
     } catch (error) {
         console.error("Error getting Bling credentials from Firestore:", error);
         return {};
@@ -78,10 +82,13 @@ async function getFullBlingCredentials(): Promise<BlingCredentials> {
         const docSnap = await getDoc(credentialsDocRef);
         const savedCreds = docSnap.exists() ? docSnap.data() as BlingCredentials : {};
         
-        // MUDANÇA: Priorizar credenciais do Firestore, usar ENV como fallback
+        // Environment variables are the primary source of truth for client id/secret.
+        const clientId = process.env.BLING_CLIENT_ID;
+        const clientSecret = process.env.BLING_CLIENT_SECRET;
+
         return {
-            clientId: savedCreds.clientId || process.env.BLING_CLIENT_ID,
-            clientSecret: savedCreds.clientSecret || process.env.BLING_CLIENT_SECRET,
+            clientId: clientId,
+            clientSecret: clientSecret,
             accessToken: savedCreds.accessToken,
             refreshToken: savedCreds.refreshToken,
             expiresAt: savedCreds.expiresAt,
@@ -885,5 +892,7 @@ export async function backfillOrdersMissingItems() {
     
 
 
+
+    
 
     
