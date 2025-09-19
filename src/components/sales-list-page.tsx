@@ -176,7 +176,9 @@ const SalesListPage = () => {
     if (currentSearchTerm) {
         const lowerCaseSearchTerm = currentSearchTerm.toLowerCase();
         newFilteredSales = newFilteredSales.filter(sale => {
-            const hasMatchingSku = sale.itens?.some(item => item.codigo.toLowerCase().includes(lowerCaseSearchTerm));
+            const hasMatchingSku = sale.itens?.some(item => 
+                String(item.codigo).toLowerCase().includes(lowerCaseSearchTerm)
+            );
             const hasMatchingOrderNumber = 
                 String(sale.id).includes(lowerCaseSearchTerm) ||
                 String(sale.numero).includes(lowerCaseSearchTerm) ||
@@ -507,5 +509,6 @@ const SalesListPage = () => {
 };
 
 export default SalesListPage;
+
 
     
