@@ -6,6 +6,7 @@ import {
   Calendar as CalendarIcon,
   Filter,
   Loader2,
+  RefreshCw,
 } from "lucide-react";
 import { format, subDays, startOfMonth, endOfMonth, startOfYesterday, endOfYesterday, startOfWeek, endOfWeek, startOfYear, endOfYear, subMonths } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -21,7 +22,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { getProductionDemand } from '@/app/actions';
+import { getProductionDemand, smartSyncOrders } from '@/app/actions';
 import type { ProductionDemand } from '@/app/actions';
 import { Button } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -34,11 +35,15 @@ import { Separator } from '@/components/ui/separator';
 export default function ProducaoPage() {
   const [demand, setDemand] = React.useState<ProductionDemand[]>([]);
   const [isLoading, setIsLoading] = React.useState(true);
+  const [isSyncing, setIsSyncing] = React.useState(false);
   const [date, setDate] = React.useState<DateRange | undefined>(undefined);
   const { toast } = useToast();
   
-  const fetchData = React.useCallback(async (currentDate: DateRange | undefined) => {
+  const fetchData = React.useCallback(async (currentDate: DateRange | undefined, forceSync: boolean = false) => {
     setIsLoading(true);
+    if (forceSync) {
+        setIsSyncing(true);
+    }
     try {
       if (!currentDate?.from || !currentDate?.to) {
         toast({
@@ -49,8 +54,25 @@ export default function ProducaoPage() {
         setDemand([]);
         return;
       }
+      
+      // Sincroniza os pedidos antes de buscar a demanda
+      if (forceSync) {
+        toast({
+            title: "Sincronizando...",
+            description: "Atualizando pedidos com o Bling para garantir dados precisos.",
+        });
+        await smartSyncOrders();
+      }
+
       const data = await getProductionDemand({ from: currentDate.from, to: currentDate.to });
       setDemand(data);
+      if(forceSync) {
+        toast({
+            title: "Dados Atualizados!",
+            description: "A análise de produção foi recalculada com sucesso.",
+        });
+      }
+
     } catch (error) {
       console.error("Failed to fetch production demand:", error);
       toast({
@@ -60,6 +82,9 @@ export default function ProducaoPage() {
       });
     } finally {
       setIsLoading(false);
+      if (forceSync) {
+        setIsSyncing(false);
+      }
     }
   }, [toast]);
 
@@ -70,7 +95,7 @@ export default function ProducaoPage() {
         to: today,
     };
     setDate(initialDate);
-    fetchData(initialDate);
+    fetchData(initialDate, true); // Faz a sincronização na primeira carga
   }, [fetchData]);
 
   const handleFilter = () => {
@@ -82,7 +107,7 @@ export default function ProducaoPage() {
         });
         return;
     }
-    fetchData(date);
+    fetchData(date, true); // Sempre sincroniza ao filtrar
   };
   
     const setDatePreset = (preset: 'today' | 'yesterday' | 'last7' | 'last30' | 'last3Months' | 'thisMonth' | 'lastMonth') => {
@@ -174,13 +199,13 @@ export default function ProducaoPage() {
                     />
                   </PopoverContent>
                 </Popover>
-                <Button onClick={handleFilter} disabled={isLoading} className="w-full sm:w-auto">
-                    {isLoading ? (
+                <Button onClick={handleFilter} disabled={isLoading || isSyncing} className="w-full sm:w-auto">
+                    {isLoading || isSyncing ? (
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                     ) : (
-                    <Filter className="mr-2 h-4 w-4" />
+                    <RefreshCw className="mr-2 h-4 w-4" />
                     )}
-                    Filtrar
+                    {isSyncing ? 'Sincronizando...' : (isLoading ? 'Carregando...' : 'Atualizar e Filtrar')}
                 </Button>
             </div>
         </div>
@@ -188,7 +213,7 @@ export default function ProducaoPage() {
           <CardHeader>
             <CardTitle>Demanda por SKU</CardTitle>
             <CardDescription>
-              A lista abaixo mostra a quantidade total e a média semanal de cada produto vendido (com nota fiscal) no período selecionado.
+              A lista abaixo mostra a quantidade de pedidos únicos (com nota fiscal emitida) para cada produto no período selecionado.
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -197,7 +222,7 @@ export default function ProducaoPage() {
                 <TableRow>
                   <TableHead>SKU</TableHead>
                   <TableHead>Descrição do Produto</TableHead>
-                  <TableHead className="text-right">Qtd. Vendida (com NF)</TableHead>
+                  <TableHead className="text-right">Qtd. de Pedidos (com NF)</TableHead>
                    <TableHead className="text-right">Média Semanal</TableHead>
                 </TableRow>
               </TableHeader>
