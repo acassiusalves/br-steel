@@ -371,8 +371,8 @@ export default function ProducaoPage() {
                       {columnVisibility.orderCount && <TableCell className="text-right font-bold">{item.orderCount}</TableCell>}
                       {columnVisibility.totalQuantitySold && <TableCell className="text-right font-bold">{item.totalQuantitySold}</TableCell>}
                       {columnVisibility.weeklyAverage && <TableCell className="text-right">{item.weeklyAverage.toFixed(1)}</TableCell>}
-                      {columnVisibility.corte && <TableCell className="text-right">{item.corte.toFixed(1)}</TableCell>}
-                      {columnVisibility.dobra && <TableCell className="text-right">{item.dobra.toFixed(1)}</TableCell>}
+                      {columnVisibility.corte && <TableCell className="text-right">{item.corte}</TableCell>}
+                      {columnVisibility.dobra && <TableCell className="text-right">{item.dobra}</TableCell>}
                       {columnVisibility.actions && (
                           <TableCell className="text-center">
                               <Button 
@@ -475,5 +475,3 @@ export default function ProducaoPage() {
     </DashboardLayout>
   );
 }
-
-    
