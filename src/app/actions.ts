@@ -674,6 +674,7 @@ export type ProductionDemand = {
   weeklyAverage: number;
   corte: number;
   dobra: number;
+  stockLevel?: number;
 };
 
 export async function getProductionDemand(
@@ -683,10 +684,15 @@ export async function getProductionDemand(
         return [];
     }
 
-    const salesCollection = collection(db, 'salesOrders');
+    const [salesSnapshot, stockDataResult] = await Promise.all([
+        getDocs(query(collection(db, 'salesOrders'), where('notaFiscal.id', '!=', null))),
+        getProductsStock()
+    ]);
     
-    const q = query(salesCollection, where('notaFiscal.id', '!=', null));
-    const snapshot = await getDocs(q);
+    const stockMap = new Map<string, number>();
+    stockDataResult.data.forEach(stockItem => {
+        stockMap.set(stockItem.produto.codigo, stockItem.saldoVirtualTotal);
+    });
 
     const fromDateStr = format(from, 'yyyy-MM-dd');
     const toDateStr = format(to, 'yyyy-MM-dd');
@@ -700,7 +706,7 @@ export async function getProductionDemand(
         totalQuantity: number 
     }>();
 
-    snapshot.forEach(doc => {
+    salesSnapshot.forEach(doc => {
         const order = doc.data() as SaleOrder;
         
         const isDateInRange = order.data >= fromDateStr && order.data <= toDateStr;
@@ -735,6 +741,7 @@ export async function getProductionDemand(
                 weeklyAverage: orderCount / weeks,
                 corte: corte,
                 dobra: dobra,
+                stockLevel: stockMap.get(sku),
             };
         })
         .sort((a, b) => b.orderCount - a.orderCount);
@@ -801,3 +808,6 @@ export async function backfillOrdersMissingItems() {
 
     
 
+
+
+    
