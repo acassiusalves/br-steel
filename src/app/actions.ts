@@ -33,13 +33,13 @@ const credentialsDocRef = doc(db, "appConfig", "blingCredentials");
  */
 export async function saveBlingCredentials(credentials: Partial<BlingCredentials>): Promise<void> {
     try {
-        const dataToSave: Partial<BlingCredentials> = {
-            accessToken: credentials.accessToken,
-            refreshToken: credentials.refreshToken,
-            expiresAt: credentials.expiresAt,
-        };
+        // We only want to save tokens and expiration to Firestore.
+        // Client ID and Secret should come from environment variables on the server.
+        const dataToSave: Partial<BlingCredentials> = {};
+        if (credentials.accessToken) dataToSave.accessToken = credentials.accessToken;
+        if (credentials.refreshToken) dataToSave.refreshToken = credentials.refreshToken;
+        if (credentials.expiresAt) dataToSave.expiresAt = credentials.expiresAt;
 
-        // We don't save client id/secret to Firestore, they come from env vars
         await setDoc(credentialsDocRef, dataToSave, { merge: true });
 
     } catch (error) {
@@ -49,22 +49,23 @@ export async function saveBlingCredentials(credentials: Partial<BlingCredentials
 }
 
 /**
- * Retrieves Bling API credentials from Firestore.
- * Client Secret is masked for security.
- * @returns The saved credentials.
+ * Retrieves Bling API credentials from Firestore for client-side display.
+ * Client Secret is NEVER exposed. Client ID is read from environment for display purposes.
+ * @returns The saved credentials, with secrets masked.
  */
 export async function getBlingCredentials(): Promise<Partial<BlingCredentials>> {
     try {
         const docSnap = await getDoc(credentialsDocRef);
         const savedCreds = docSnap.exists() ? docSnap.data() as BlingCredentials : {};
         
-        // Always prioritize environment variables for client ID, it's safer.
-        const clientId = process.env.BLING_CLIENT_ID || savedCreds.clientId;
+        // The client ID is not sensitive and can be shown on the client.
+        // We prioritize the environment variable.
+        const clientId = process.env.BLING_CLIENT_ID;
 
         return { 
-            ...savedCreds,
             clientId: clientId,
-            clientSecret: '********' // Always mask client secret
+            accessToken: savedCreds.accessToken, // Used to check if connected
+            clientSecret: savedCreds.accessToken ? '********' : '' // Mask if connected
         };
     } catch (error) {
         console.error("Error getting Bling credentials from Firestore:", error);
@@ -74,7 +75,7 @@ export async function getBlingCredentials(): Promise<Partial<BlingCredentials>> 
 
 
 /**
- * Fetches all Bling credentials, including secrets, for server-side use.
+ * Fetches all Bling credentials, including secrets, for server-side use ONLY.
  * @returns The complete credentials object.
  */
 async function getFullBlingCredentials(): Promise<BlingCredentials> {
@@ -82,12 +83,13 @@ async function getFullBlingCredentials(): Promise<BlingCredentials> {
         const docSnap = await getDoc(credentialsDocRef);
         const savedCreds = docSnap.exists() ? docSnap.data() as BlingCredentials : {};
         
-        // Environment variables are the primary source of truth for client id/secret.
+        // Environment variables are the single source of truth for client id/secret on the server.
         const clientId = process.env.BLING_CLIENT_ID;
         const clientSecret = process.env.BLING_CLIENT_SECRET;
 
         if (!clientId || !clientSecret) {
-            console.warn("Client ID ou Client Secret do Bling não estão configurados nas variáveis de ambiente.");
+            // This is a server-side configuration error.
+            throw new Error("Client ID ou Client Secret do Bling não estão configurados nas variáveis de ambiente do servidor.");
         }
 
         return {
@@ -99,6 +101,9 @@ async function getFullBlingCredentials(): Promise<BlingCredentials> {
         };
     } catch (error) {
         console.error("Error getting full Bling credentials:", error);
+        if (error instanceof Error) {
+            throw error; // Re-throw the original error if it's already an Error instance
+        }
         throw new Error("Could not retrieve server-side credentials.");
     }
 }
@@ -107,9 +112,11 @@ async function getFullBlingCredentials(): Promise<BlingCredentials> {
 async function refreshAccessToken() {
   const creds = await getFullBlingCredentials();
   
-  if (!creds.clientId || !creds.clientSecret || !creds.refreshToken) {
-      throw new Error("Credenciais do Bling incompletas para renovar o token.");
+  // No need to check for refreshToken here, getFullBlingCredentials would have thrown if incomplete
+  if (!creds.refreshToken) {
+      throw new Error("Refresh token do Bling não encontrado. Por favor, conecte a conta novamente.");
   }
+
 
   const basic = Buffer.from(`${creds.clientId}:${creds.clientSecret}`).toString("base64");
   const body = new URLSearchParams({
@@ -130,14 +137,15 @@ async function refreshAccessToken() {
 
   const json = await res.json();
   if (!res.ok) {
-    throw new Error(`Refresh falhou (${res.status}): ${json?.error?.description || res.statusText}`);
+    throw new Error(`Refresh falhou (${res.status}): ${json?.error_description || json?.error?.description || res.statusText}`);
   }
 
   const newCredentials: Partial<BlingCredentials> = {};
   if (json.access_token) newCredentials.accessToken = json.access_token;
   if (json.refresh_token) newCredentials.refreshToken = json.refresh_token;
   if (json.expires_in) {
-    newCredentials.expiresAt = Date.now() + (Number(json.expires_in) * 1000);
+    // Add a 5-minute buffer to be safe
+    newCredentials.expiresAt = Date.now() + ((Number(json.expires_in) - 300) * 1000);
   }
   
   await saveBlingCredentials(newCredentials);
@@ -153,12 +161,15 @@ async function blingFetchWithRefresh(url: string, init?: RequestInit): Promise<a
     let accessToken = creds.accessToken;
 
     if (!accessToken) {
-        throw new Error('Access Token do Bling não encontrado. Por favor, conecte sua conta primeiro.');
+        creds = await refreshAccessToken();
+        accessToken = creds.accessToken;
     }
     
-    const isTokenExpired = creds.expiresAt ? Date.now() > creds.expiresAt : false;
+    // Check if token is expired or close to expiring
+    const isTokenExpired = creds.expiresAt ? Date.now() > creds.expiresAt : true;
+
     if(isTokenExpired) {
-        console.log("Token de acesso possivelmente expirado pela data. Tentando renovar...");
+        console.log("Token de acesso expirado ou próximo da expiração. Renovando...");
         creds = await refreshAccessToken();
         accessToken = creds.accessToken;
     }
@@ -173,13 +184,14 @@ async function blingFetchWithRefresh(url: string, init?: RequestInit): Promise<a
             },
             cache: "no-store",
         });
-        return { res, text: await res.text() };
+        const text = await res.text(); // Read text immediately to avoid stream issues
+        return { res, text };
     };
 
     let { res, text } = await doCall(accessToken!);
 
     if (res.status === 401) {
-        console.log("Token de acesso expirado (401). Tentando renovar...");
+        console.log("Token de acesso inválido (401). Tentando renovar...");
         creds = await refreshAccessToken();
         accessToken = creds.accessToken;
         ({ res, text } = await doCall(accessToken!));
@@ -188,7 +200,7 @@ async function blingFetchWithRefresh(url: string, init?: RequestInit): Promise<a
     if (!res.ok) {
         let payload: any;
         try { payload = JSON.parse(text); } catch {}
-        const msg = payload?.error?.description || res.statusText || text;
+        const msg = payload?.error?.description || payload?.error_description || res.statusText || text;
         throw new Error(`Erro do Bling (${res.status}): ${msg}`);
     }
 
@@ -291,22 +303,25 @@ async function getBlingSalesOrdersOptimized({
             };
         }
         
+        const ordersToFetchDetails = forceFullSync ? allOrders : ordersToProcess;
+        
         const logMessage = forceFullSync 
-            ? `🔄 Sincronização completa: re-processando detalhes para ${allOrders.length} pedidos...`
-            : `🔍 Buscando detalhes completos para ${ordersToProcess.length} pedidos novos ou incompletos...`;
+            ? `🔄 Sincronização completa: re-processando detalhes para ${ordersToFetchDetails.length} pedidos...`
+            : `🔍 Buscando detalhes completos para ${ordersToFetchDetails.length} pedidos novos ou incompletos...`;
         console.log(logMessage);
         
         const ordersWithDetails = [];
         let processedCount = 0;
 
-        for (const order of ordersToProcess) {
+        // The loop for fetching details will be handled on the client side for progress indication
+        for (const order of ordersToFetchDetails) {
             try {
                 const detailsData = await blingFetchWithRefresh(`https://api.bling.com.br/Api/v3/pedidos/vendas/${order.id}`);
                 if (detailsData && detailsData.data) {
                     ordersWithDetails.push(detailsData.data);
                     processedCount++;
                 } else {
-                    ordersWithDetails.push(order);
+                    ordersWithDetails.push(order); // Push original if detail fetch fails
                 }
             } catch (error) {
                 console.warn(`⚠️ Erro ao processar pedido ${order.id}:`, error);
@@ -322,8 +337,8 @@ async function getBlingSalesOrdersOptimized({
             data: ordersWithDetails,
             summary: {
                 total: allOrders.length,
-                new: ordersToProcess.length,
-                existing: allOrders.length - ordersToProcess.length,
+                new: ordersToFetchDetails.length, // Total items to process for progress bar
+                existing: allOrders.length - ordersToFetchDetails.length,
                 processed: processedCount,
                 saved: saveResult.count,
                 created: saveResult.created,
@@ -902,5 +917,8 @@ export async function backfillOrdersMissingItems() {
     
 
     
+
+    
+
 
     

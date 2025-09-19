@@ -2,44 +2,24 @@
 // app/api/callback/bling/route.ts
 import { NextResponse } from 'next/server';
 import { saveBlingCredentials } from '@/app/actions';
-import { doc, getDoc } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
 
-// ADICIONE ESTA FUNÇÃO ANTES DO export async function GET
-async function getStoredBlingCredentials() {
-  try {
-    const credentialsDocRef = doc(db, "appConfig", "blingCredentials");
-    const docSnap = await getDoc(credentialsDocRef);
-    if (docSnap.exists()) {
-      const data = docSnap.data();
-      return {
-        clientId: data.clientId,
-        clientSecret: data.clientSecret
-      };
-    }
-    return null;
-  } catch (error) {
-    console.error("Error getting stored credentials:", error);
-    return null;
-  }
-}
-
+// This function should not need to read from Firestore.
+// It receives client ID and secret from the environment.
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const code = searchParams.get('code');
-  const state = searchParams.get('state');
+  const state = searchParams.get('state'); // You should validate this state against a stored value
 
   if (!code) {
     return NextResponse.json({ error: 'Nenhum código de autorização recebido.' }, { status: 400 });
   }
 
-  // MUDANÇA: Buscar credenciais do Firestore primeiro, depois tentar ENV como fallback
-  const storedCreds = await getStoredBlingCredentials();
-  const clientId = storedCreds?.clientId || process.env.BLING_CLIENT_ID;
-  const clientSecret = storedCreds?.clientSecret || process.env.BLING_CLIENT_SECRET;
+  // Client ID and Secret MUST come from environment variables on the server.
+  const clientId = process.env.BLING_CLIENT_ID;
+  const clientSecret = process.env.BLING_CLIENT_SECRET;
 
   if (!clientId || !clientSecret) {
-    console.error("Credenciais do Bling não encontradas nem no Firestore nem nas variáveis de ambiente");
+    console.error("Credenciais do Bling (Client ID/Secret) não configuradas nas variáveis de ambiente do servidor.");
     return NextResponse.json({ error: 'Credenciais do Bling não configuradas no servidor.' }, { status: 500 });
   }
 
@@ -57,16 +37,18 @@ export async function GET(request: Request) {
         grant_type: 'authorization_code',
         code: code,
       }),
+      cache: "no-store",
     });
 
     const tokenData = await tokenResponse.json();
 
     if (tokenResponse.ok) {
-      // Salva os tokens de forma segura no Firestore
+      // Save only the tokens and expiration securely in Firestore
       await saveBlingCredentials({
         accessToken: tokenData.access_token,
         refreshToken: tokenData.refresh_token,
-        expiresAt: Date.now() + (Number(tokenData.expires_in) * 1000)
+        // Add a 5-minute buffer to be safe with expiration
+        expiresAt: Date.now() + ((Number(tokenData.expires_in) - 300) * 1000)
       });
 
       return new NextResponse(`
@@ -92,13 +74,27 @@ export async function GET(request: Request) {
               }
               h1 { color: #1877f2; }
               p { color: #333; }
+              a {
+                display: inline-block;
+                margin-top: 20px;
+                padding: 10px 20px;
+                background-color: #1877f2;
+                color: white;
+                text-decoration: none;
+                border-radius: 5px;
+              }
             </style>
+             <script>
+              setTimeout(() => {
+                window.location.href = "/api";
+              }, 2000);
+            </script>
           </head>
           <body>
             <div class="container">
               <h1>Sucesso!</h1>
-              <p>Sua conta Bling foi conectada e os tokens de acesso foram salvos com segurança.</p>
-              <p><a href="/api">Voltar para o painel</a></p>
+              <p>Sua conta Bling foi conectada. Você será redirecionado em instantes.</p>
+              <a href="/api">Voltar para o painel</a>
             </div>
           </body>
         </html>
@@ -108,7 +104,8 @@ export async function GET(request: Request) {
         },
       });
     } else {
-        throw new Error(tokenData.error_description || 'Falha ao obter tokens do Bling');
+        const errorDescription = tokenData.error_description || tokenData.error?.description || 'Falha ao obter tokens do Bling';
+        throw new Error(errorDescription);
     }
 
   } catch (error: any) {
@@ -140,4 +137,7 @@ export async function GET(request: Request) {
       });
   }
 }
+    
+
+
     

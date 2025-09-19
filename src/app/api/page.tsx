@@ -116,17 +116,11 @@ export default function ApiPage() {
   const handleSaveCredentials = async () => {
     setIsSaving(true);
     try {
-        // Save only the credentials the user can input.
-        // Access token and refresh token are handled by the OAuth flow.
-        await saveBlingCredentials({
-            clientId: credentials.clientId,
-            clientSecret: credentials.clientSecret,
-        });
+        await saveBlingCredentials({});
         toast({
-            title: "Credenciais Salvas!",
-            description: "Suas credenciais do Bling foram salvas com sucesso.",
+            title: "Configuração Salva!",
+            description: "Suas credenciais do Bling devem ser configuradas via variáveis de ambiente no servidor.",
         });
-        // Re-fetch to show masked secret
         const savedCreds = await getBlingCredentials();
         setCredentials(prev => ({...prev, ...savedCreds}));
 
@@ -134,7 +128,7 @@ export default function ApiPage() {
         toast({
             variant: "destructive",
             title: "Erro ao Salvar",
-            description: "Não foi possível salvar as credenciais.",
+            description: "Não foi possível salvar a configuração.",
         });
     } finally {
         setIsSaving(false);
@@ -146,7 +140,7 @@ export default function ApiPage() {
         toast({
             variant: "destructive",
             title: "Client ID Faltando",
-            description: "Por favor, insira e salve seu Client ID do Bling.",
+            description: "O Client ID do Bling não foi encontrado nas variáveis de ambiente do servidor.",
         });
         return;
     }
@@ -163,7 +157,7 @@ export default function ApiPage() {
   const handleDisconnect = async () => {
     setIsSaving(true);
     try {
-        await saveBlingCredentials({ clientId: '', clientSecret: '', accessToken: '', refreshToken: '' });
+        await saveBlingCredentials({ accessToken: '', refreshToken: '' });
         setCredentials({ clientId: '', clientSecret: '', accessToken: '' });
         setApiStatus('unchecked');
         setAuthUrl("");
@@ -191,107 +185,81 @@ export default function ApiPage() {
     });
   }
 
+  const runSync = async (syncFunction: typeof smartSyncOrders | typeof fullSyncOrders) => {
+      setIsImporting(true);
+      setApiResponse(null);
+      setImportProgress(0);
+      setImportStatus({ current: 0, total: 0 });
+      setImportSummary(null);
+
+      try {
+          const result = await syncFunction(date?.from, date?.to);
+          setApiResponse(result);
+          setImportSummary(result.summary);
+
+          const totalToProcess = result.summary.new || 0;
+          setImportStatus({ current: 0, total: totalToProcess });
+          
+          if (totalToProcess > 0) {
+              // Simulate progress
+              const interval = setInterval(() => {
+                  setImportStatus(prev => {
+                      const newCurrent = prev.current + 1;
+                      if (newCurrent >= totalToProcess) {
+                          clearInterval(interval);
+                          setImportProgress(100);
+                          return { current: totalToProcess, total: totalToProcess };
+                      }
+                      setImportProgress((newCurrent / totalToProcess) * 100);
+                      return { current: newCurrent, total: totalToProcess };
+                  });
+              }, 100); // Adjust timing for smoother animation
+          } else {
+             setImportProgress(100);
+          }
+          
+          const totalCount = await countImportedOrders();
+          setImportedCount(totalCount);
+
+          if (result.summary.created === 0 && result.summary.updated === 0) {
+              toast({
+                  title: "Tudo Atualizado! ✅",
+                  description: `Nenhum pedido novo para importar. Total de ${totalCount} na base.`,
+              });
+          } else {
+              toast({
+                  title: "Sincronização Concluída! 🎉",
+                  description: `${result.summary.created} novos, ${result.summary.updated} atualizados. Total: ${totalCount}`,
+              });
+          }
+
+      } catch (error: any) {
+          setApiResponse({ error: "Falha na sincronização", message: error.message });
+          toast({
+              variant: "destructive",
+              title: "Erro na Sincronização",
+              description: error.message,
+          });
+      } finally {
+          setIsImporting(false);
+      }
+  };
+
   const handleSmartSync = async () => {
-    setIsImporting(true);
-    setApiResponse(null);
-    setImportProgress(0);
-    setImportStatus({ current: 0, total: 0 });
-    setImportSummary(null);
+    toast({
+        title: "Sincronização Inteligente",
+        description: "Buscando apenas pedidos novos ou atualizados...",
+    });
+    await runSync(smartSyncOrders);
+  };
 
-    try {
-        const hasCustomDates = date?.from && date?.to;
-        
-        toast({
-            title: "Sincronização Inteligente",
-            description: hasCustomDates 
-                ? `Buscando pedidos novos entre ${format(date.from, "dd/MM/yy")} e ${format(date.to, "dd/MM/yy")}...`
-                : "Buscando apenas pedidos novos ou atualizados...",
-        });
-
-        const result = await smartSyncOrders(date?.from, date?.to);
-        
-        setApiResponse(result);
-        setImportSummary(result.summary);
-
-        const totalCount = await countImportedOrders();
-        setImportedCount(totalCount);
-
-        if (result.summary.new === 0) {
-            toast({
-                title: "Tudo Atualizado! ✅",
-                description: `Todos os ${result.summary.total} pedidos já estão no banco de dados.`,
-            });
-        } else {
-            toast({
-                title: "Sincronização Concluída! 🎉",
-                description: `${result.summary.created} novos pedidos importados. Total: ${totalCount}`,
-            });
-        }
-
-    } catch (error: any) {
-        setApiResponse({ error: "Falha na sincronização", message: error.message });
-        toast({
-            variant: "destructive",
-            title: "Erro na Sincronização",
-            description: error.message,
-        });
-    } finally {
-        setIsImporting(false);
-        setImportProgress(0);
-        setImportStatus({ current: 0, total: 0 });
-    }
-};
-
-const handleFullSync = async () => {
-    setIsImporting(true);
-    setApiResponse(null);
-    setImportProgress(0);
-    setImportStatus({ current: 0, total: 0 });
-    setImportSummary(null);
-
-    try {
-        toast({
-            title: "Sincronização Completa",
-            description: "Verificando todos os pedidos no período selecionado...",
-        });
-
-        const result = await fullSyncOrders(date?.from, date?.to);
-        
-        setApiResponse(result);
-        setImportSummary(result.summary);
-
-        const totalToProcess = result.summary.new;
-        for (let i = 0; i <= totalToProcess; i++) {
-            const progress = totalToProcess > 0 ? (i / totalToProcess) * 100 : 100;
-            setImportProgress(progress);
-            setImportStatus({ current: i, total: totalToProcess });
-            
-            if (i < totalToProcess) {
-                await new Promise(resolve => setTimeout(resolve, 50));
-            }
-        }
-
-        const totalCount = await countImportedOrders();
-        setImportedCount(totalCount);
-
-        toast({
-            title: "Sincronização Completa! 🎉",
-            description: `${result.summary.created} novos pedidos, ${result.summary.updated} atualizados. Total: ${totalCount}`,
-        });
-
-    } catch (error: any) {
-        setApiResponse({ error: "Falha na sincronização", message: error.message });
-        toast({
-            variant: "destructive",
-            title: "Erro na Sincronização",
-            description: error.message,
-        });
-    } finally {
-        setIsImporting(false);
-        setImportProgress(0);
-        setImportStatus({ current: 0, total: 0 });
-    }
-};
+  const handleFullSync = async () => {
+      toast({
+          title: "Sincronização Completa",
+          description: "Verificando todos os pedidos no período selecionado...",
+      });
+      await runSync(fullSyncOrders);
+  };
 
   const handleFetchProducts = async () => {
       setIsFetchingProducts(true);
@@ -617,7 +585,7 @@ const handleFullSync = async () => {
                 <Progress value={importProgress} />
                 <p className="text-sm text-muted-foreground text-center">
                     {importStatus.total > 0
-                        ? `Processando ${importStatus.current} de ${importStatus.total} pedidos novos...`
+                        ? `Processando ${importStatus.current} de ${importStatus.total} pedidos...`
                         : 'Verificando pedidos existentes...'}
                 </p>
             </div>
@@ -802,40 +770,30 @@ const handleFullSync = async () => {
     return (
         <div className="flex flex-col items-start gap-6 max-w-lg">
             <div className="w-full space-y-2">
-            <Label htmlFor="clientId">Client ID</Label>
+            <Label htmlFor="clientId">Client ID (de `process.env`)</Label>
             <Input 
                 id="clientId" 
                 type="text"
-                placeholder="Cole seu Client ID aqui" 
+                readOnly
+                disabled
+                placeholder="Não configurado no servidor" 
                 value={credentials.clientId}
-                onChange={handleInputChange}
+                className="bg-muted"
             />
-            <p className="text-sm text-muted-foreground">Seu Client ID é público e pode ser salvo aqui. Ele também pode ser configurado via variável de ambiente `BLING_CLIENT_ID`.</p>
+            <p className="text-sm text-muted-foreground">Seu Client ID é configurado via variável de ambiente `BLING_CLIENT_ID` no servidor.</p>
             </div>
             <div className="w-full space-y-2">
-            <Label htmlFor="clientSecret">Client Secret</Label>
+            <Label htmlFor="clientSecret">Client Secret (de `process.env`)</Label>
             <Input 
                 id="clientSecret" 
                 type="password"
-                placeholder={credentials.clientSecret === '********' ? '********' : 'Cole seu Client Secret aqui'}
-                onChange={handleInputChange}
+                disabled
+                readOnly
+                placeholder="********"
             />
-             <p className="text-sm text-muted-foreground">Seu Client Secret é confidencial. Para produção, configure-o via variável de ambiente `BLING_CLIENT_SECRET`.</p>
+             <p className="text-sm text-muted-foreground">Seu Client Secret é confidencial e configurado via variável de ambiente `BLING_CLIENT_SECRET` no servidor.</p>
             </div>
             <div className="flex flex-wrap gap-2">
-            <Button onClick={handleSaveCredentials} disabled={isSaving}>
-                {isSaving ? (
-                    <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Salvando...
-                    </>
-                ) : (
-                    <>
-                    <Save className="mr-2 h-4 w-4" />
-                    Salvar Credenciais
-                    </>
-                )}
-            </Button>
             <Button onClick={handleConnect} disabled={isGenerating || !credentials.clientId}>
                 {isGenerating ? (
                 <>
@@ -845,7 +803,7 @@ const handleFullSync = async () => {
                 ) : (
                 <>
                     <Plug className="mr-2 h-4 w-4" />
-                    Gerar Link de Conexão
+                    Conectar com Bling
                 </>
                 )}
             </Button>
@@ -956,5 +914,8 @@ const handleFullSync = async () => {
     </DashboardLayout>
   );
 }
+
+    
+
 
     
