@@ -100,14 +100,11 @@ export async function filterNewOrders(orders: any[]): Promise<any[]> {
         return [];
     }
 
-    const orderIds = orders.map(order => String(order.id));
     const existingCompleteIdsSet = await getImportedOrderIdsWithDetails();
     
     console.log(`📊 Total de pedidos encontrados na API: ${orders.length}`);
     console.log(`📋 Pedidos já completos no banco: ${existingCompleteIdsSet.size}`);
     
-    // Um pedido precisa ser processado se ele NÃO ESTÁ na lista de pedidos completos.
-    // Isso cobre tanto pedidos que não existem de todo, quanto pedidos que existem mas estão sem itens.
     const ordersToProcess = orders.filter(order => 
         !existingCompleteIdsSet.has(String(order.id))
     );

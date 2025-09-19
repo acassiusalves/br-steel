@@ -31,6 +31,7 @@ import { Separator } from '@/components/ui/separator';
 import { Input } from '@/components/ui/input';
 import { useToast } from '@/hooks/use-toast';
 import * as XLSX from 'xlsx';
+import { backfillOrdersMissingItems, smartSyncOrders } from '@/app/actions';
 
 // Função para formatar a data
 const formatDate = (dateString: string) => {
@@ -100,6 +101,7 @@ const SalesListPage = () => {
   const [isFiltering, setIsFiltering] = React.useState(false);
   const [selectedOrder, setSelectedOrder] = React.useState<SaleOrder | null>(null);
   const [searchTerm, setSearchTerm] = React.useState('');
+  const [repairLoading, setRepairLoading] = React.useState(false);
   const { toast } = useToast();
 
   // Pagination State
@@ -121,6 +123,31 @@ const SalesListPage = () => {
     totalSales: 0,
     averageTicket: 0,
   });
+  
+  async function handleRepair() {
+    setRepairLoading(true);
+    toast({
+      title: "Reparando Pedidos...",
+      description: "Isso pode levar alguns minutos. Estamos buscando os dados que faltam no Bling.",
+    });
+    try {
+      await smartSyncOrders();
+      const res = await backfillOrdersMissingItems();
+      toast({
+        title: "Reparo Concluído!",
+        description: `Pedidos verificados: ${res.examined}. Faltando itens: ${res.missing}. Corrigidos agora: ${res.fixed}.`,
+        duration: 10000,
+      });
+    } catch (error: any) {
+        toast({
+            variant: "destructive",
+            title: "Erro ao Reparar",
+            description: `Ocorreu um erro: ${error.message}`,
+        });
+    } finally {
+      setRepairLoading(false);
+    }
+  }
 
   React.useEffect(() => {
     setIsLoading(true);
@@ -149,6 +176,9 @@ const SalesListPage = () => {
         setIsLoading(false);
     });
     
+    // Garante que novos pedidos já venham com itens
+    smartSyncOrders().catch(console.error);
+
     // Limpa o listener quando o componente é desmontado
     return () => unsubscribe();
   }, []); 
@@ -417,14 +447,20 @@ const SalesListPage = () => {
                 Uma lista detalhada dos seus pedidos de venda. Clique em um pedido para ver todos os detalhes.
               </CardDescription>
             </div>
-            <div className="relative w-full sm:w-auto">
-                <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-                <Input 
-                    placeholder="Buscar por cliente, SKU ou pedido..." 
-                    className="pl-8 w-full sm:w-64"
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                />
+            <div className="flex items-center gap-2">
+                <Button onClick={handleRepair} disabled={repairLoading} variant="outline">
+                    {repairLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                    Reparar Pedidos
+                </Button>
+                <div className="relative w-full sm:w-auto">
+                    <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                    <Input 
+                        placeholder="Buscar por cliente, SKU ou pedido..." 
+                        className="pl-8 w-full sm:w-64"
+                        value={searchTerm}
+                        onChange={(e) => setSearchTerm(e.target.value)}
+                    />
+                </div>
             </div>
           </div>
         </CardHeader>

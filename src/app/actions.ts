@@ -267,9 +267,8 @@ async function getBlingSalesOrdersOptimized({
             };
         }
 
-        const ordersToProcess = forceFullSync 
-            ? allOrders
-            : await filterNewOrders(allOrders);
+        const ordersToProcess = await filterNewOrders(allOrders);
+
 
         if (ordersToProcess.length === 0 && !forceFullSync) {
             console.log('✅ Todos os pedidos já estão atualizados no banco');
@@ -762,8 +761,31 @@ export async function deleteAllSalesOrders(): Promise<{ deletedCount: number }> 
     console.log(`Successfully deleted ${deletedCount} total orders.`);
     return { deletedCount };
 }
-    
 
+export async function backfillOrdersMissingItems() {
+  const col = collection(db, 'salesOrders');
+  const snap = await getDocs(query(col));
+
+  const missing: string[] = [];
+  snap.forEach(doc => {
+    const d = doc.data() as any;
+    if (!d.itens || !Array.isArray(d.itens) || d.itens.length === 0) {
+      missing.push(String(d.id ?? doc.id));
+    }
+  });
+
+  let fixed = 0;
+  for (const id of missing) {
+    try {
+      // Usa o mesmo fetch com refresh já existente
+      const data = await getBlingOrderDetails(id);
+      if (data?.data?.itens?.length) fixed++;
+    } catch (e) {
+      console.warn('Falha ao backfill do pedido', id, e);
+    }
+  }
+  return { examined: snap.size, missing: missing.length, fixed };
+}
     
 
     
