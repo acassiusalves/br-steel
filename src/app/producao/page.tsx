@@ -7,13 +7,17 @@ import {
   Filter,
   Loader2,
   RefreshCw,
+  ChevronsLeft,
+  ChevronLeft,
+  ChevronRight,
+  ChevronsRight,
 } from "lucide-react";
 import { format, subDays, startOfMonth, endOfMonth, startOfYesterday, endOfYesterday, startOfWeek, endOfWeek, startOfYear, endOfYear, subMonths } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import type { DateRange } from "react-day-picker";
 
 import DashboardLayout from '@/components/dashboard-layout';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card';
 import {
   Table,
   TableBody,
@@ -30,6 +34,7 @@ import { Calendar } from '@/components/ui/calendar';
 import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
 import { Separator } from '@/components/ui/separator';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 
 export default function ProducaoPage() {
@@ -39,6 +44,10 @@ export default function ProducaoPage() {
   const [isUpdatingStock, setIsUpdatingStock] = React.useState(false);
   const [date, setDate] = React.useState<DateRange | undefined>(undefined);
   const { toast } = useToast();
+
+  // Pagination State
+  const [currentPage, setCurrentPage] = React.useState(1);
+  const [rowsPerPage, setRowsPerPage] = React.useState(10);
   
   const fetchData = React.useCallback(async (currentDate: DateRange | undefined, forceSync: boolean = false) => {
     setIsLoading(true);
@@ -96,7 +105,7 @@ export default function ProducaoPage() {
         to: today,
     };
     setDate(initialDate);
-    fetchData(initialDate, true); // Faz a sincronização na primeira carga
+    fetchData(initialDate, false);
   }, [fetchData]);
 
   const handleFilter = () => {
@@ -108,7 +117,7 @@ export default function ProducaoPage() {
         });
         return;
     }
-    fetchData(date, true); // Sempre sincroniza ao filtrar
+    fetchData(date, false);
   };
   
     const setDatePreset = (preset: 'today' | 'yesterday' | 'last7' | 'last30' | 'last3Months' | 'thisMonth' | 'lastMonth') => {
@@ -191,6 +200,13 @@ export default function ProducaoPage() {
         setIsUpdatingStock(false);
     }
   };
+
+  // Pagination Logic
+  const totalPages = Math.ceil(demand.length / rowsPerPage);
+  const paginatedDemand = demand.slice(
+    (currentPage - 1) * rowsPerPage,
+    currentPage * rowsPerPage
+  );
 
 
   return (
@@ -303,8 +319,8 @@ export default function ProducaoPage() {
                       <Loader2 className="mx-auto h-6 w-6 animate-spin" />
                     </TableCell>
                   </TableRow>
-                ) : demand.length > 0 ? (
-                  demand.map((item) => (
+                ) : paginatedDemand.length > 0 ? (
+                  paginatedDemand.map((item) => (
                     <TableRow key={item.sku}>
                       <TableCell className="font-medium">{item.sku}</TableCell>
                       <TableCell>{item.description}</TableCell>
@@ -328,6 +344,75 @@ export default function ProducaoPage() {
               </TableBody>
             </Table>
           </CardContent>
+           <CardFooter className="flex items-center justify-between">
+            <div className="text-sm text-muted-foreground">
+              Total de {demand.length} produtos.
+            </div>
+            <div className="flex items-center space-x-6 lg:space-x-8">
+              <div className="flex items-center space-x-2">
+                <p className="text-sm font-medium">Itens por página</p>
+                <Select
+                  value={`${rowsPerPage}`}
+                  onValueChange={(value) => {
+                    setRowsPerPage(Number(value))
+                    setCurrentPage(1)
+                  }}
+                >
+                  <SelectTrigger className="h-8 w-[70px]">
+                    <SelectValue placeholder={rowsPerPage} />
+                  </SelectTrigger>
+                  <SelectContent side="top">
+                    {[10, 20, 30, 40, 50].map((pageSize) => (
+                      <SelectItem key={pageSize} value={`${pageSize}`}>
+                        {pageSize}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="flex w-[100px] items-center justify-center text-sm font-medium">
+                Página {currentPage} de {totalPages}
+              </div>
+              <div className="flex items-center space-x-2">
+                <Button
+                  variant="outline"
+                  className="hidden h-8 w-8 p-0 lg:flex"
+                  onClick={() => setCurrentPage(1)}
+                  disabled={currentPage === 1}
+                >
+                  <span className="sr-only">Go to first page</span>
+                  <ChevronsLeft className="h-4 w-4" />
+                </Button>
+                <Button
+                  variant="outline"
+                  className="h-8 w-8 p-0"
+                  onClick={() => setCurrentPage(currentPage - 1)}
+                  disabled={currentPage === 1}
+                >
+                  <span className="sr-only">Go to previous page</span>
+                  <ChevronLeft className="h-4 w-4" />
+                </Button>
+                <Button
+                  variant="outline"
+                  className="h-8 w-8 p-0"
+                  onClick={() => setCurrentPage(currentPage + 1)}
+                  disabled={currentPage === totalPages}
+                >
+                  <span className="sr-only">Go to next page</span>
+                  <ChevronRight className="h-4 w-4" />
+                </Button>
+                <Button
+                  variant="outline"
+                  className="hidden h-8 w-8 p-0 lg:flex"
+                  onClick={() => setCurrentPage(totalPages)}
+                  disabled={currentPage === totalPages}
+                >
+                  <span className="sr-only">Go to last page</span>
+                  <ChevronsRight className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+          </CardFooter>
         </Card>
       </div>
     </DashboardLayout>
