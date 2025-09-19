@@ -2,7 +2,7 @@
 "use server";
 
 import { db } from '@/lib/firebase';
-import { collection, addDoc, doc, updateDoc, deleteDoc, query, where, getDocs, writeBatch } from 'firebase/firestore';
+import { collection, addDoc, doc, updateDoc, deleteDoc, query, where, getDocs, writeBatch, setDoc, getDoc } from 'firebase/firestore';
 import type { Supply } from '@/types/supply';
 
 /**
@@ -45,36 +45,35 @@ export async function updateSupply(id: string, supplyData: Partial<Omit<Supply, 
 
 /**
  * Atualiza um insumo existente no banco de dados usando o SKU.
+ * O ID do documento será o próprio SKU.
  * @param sku - O SKU (código) do insumo a ser atualizado.
  * @param supplyData - Os novos dados para o insumo.
  */
-export async function updateSupplyBySku(sku: string, supplyData: Partial<Omit<Supply, 'id' | 'createdAt' | 'estoqueAtual' | 'codigo'>>) {
-    const suppliesCollection = collection(db, 'supplies');
-    const q = query(suppliesCollection, where("codigo", "==", sku));
-    
-    try {
-        const querySnapshot = await getDocs(q);
-        
-        if (querySnapshot.empty) {
-            console.warn(`Nenhum insumo encontrado com o SKU: ${sku}. Nenhuma atualização foi feita.`);
-            return;
-        }
+export async function updateSupplyBySku(
+  sku: string,
+  data: { estoqueMinimo?: number; estoqueMaximo?: number }
+) {
+  if (!sku) throw new Error("SKU (código do produto) é obrigatório para atualização.");
 
-        // Em um cenário ideal, o SKU é único. Se houver múltiplos, atualiza todos.
-        const batch = writeBatch(db);
-        querySnapshot.forEach(documentSnapshot => {
-            const docRef = doc(db, 'supplies', documentSnapshot.id);
-            batch.update(docRef, {
-                ...supplyData,
-                updatedAt: new Date().toISOString(),
-            });
-        });
-        await batch.commit();
+  const ref = doc(db, "supplies", sku);
+  
+  const payload: any = {
+    codigo: sku, // Garante que o código esteja sempre salvo
+    updatedAt: new Date().toISOString(),
+  };
 
-    } catch (error) {
-        console.error(`Erro ao atualizar insumo com SKU ${sku}: `, error);
-        throw new Error(`Falha ao atualizar o insumo com SKU ${sku} no banco de dados.`);
-    }
+  // Adiciona os campos de estoque apenas se eles forem números válidos,
+  // para evitar apagar dados existentes com `undefined`.
+  if (typeof data.estoqueMinimo === "number") {
+    payload.estoqueMinimo = data.estoqueMinimo;
+  }
+  if (typeof data.estoqueMaximo === "number") {
+    payload.estoqueMaximo = data.estoqueMaximo;
+  }
+
+  // Usa set com merge:true. Isso cria o documento se não existir
+  // ou atualiza os campos sem apagar os outros.
+  await setDoc(ref, payload, { merge: true });
 }
 
 
@@ -91,3 +90,4 @@ export async function deleteSupply(id: string) {
         throw new Error("Falha ao apagar o insumo no banco de dados.");
     }
 }
+

@@ -729,15 +729,16 @@ export async function getProductionDemand(
         stockMap.set(stockItem.produto.codigo, stockItem.saldoVirtualTotal);
     });
 
-    const supplyInfoMap = new Map<string, { stockMin?: number, stockMax?: number }>();
-    suppliesSnapshot.forEach(doc => {
-      const supply = doc.data() as Supply;
-      if(supply.codigo) {
-        supplyInfoMap.set(supply.codigo, { 
-            stockMin: supply.estoqueMinimo,
-            stockMax: supply.estoqueMaximo 
-        });
-      }
+    const supplyInfoMap = new Map<string, { stockMin?: number; stockMax?: number }>();
+    suppliesSnapshot.forEach(d => {
+        const s = d.data() as Supply;
+        const key = (s?.codigo as string) || d.id; // fallback para doc.id
+        if (key) {
+            supplyInfoMap.set(key, {
+            stockMin: s?.estoqueMinimo,
+            stockMax: s?.estoqueMaximo,
+            });
+        }
     });
 
     const fromDateStr = format(from, 'yyyy-MM-dd');
@@ -808,18 +809,18 @@ export type StockData = {
 export async function updateSingleSkuStock(sku: string): Promise<StockData | null> {
     try {
         const productData = await getBlingProductBySku(sku);
-        if (productData && productData.data) {
+        if (productData?.data) {
             const { estoque } = productData.data;
+
             const stockInfo: StockData = {
                 stockLevel: estoque?.saldoVirtualTotal,
-                stockMin: estoque?.minimo,
-                stockMax: estoque?.maximo,
+                stockMin: typeof estoque?.minimo === "number" ? estoque.minimo : undefined,
+                stockMax: typeof estoque?.maximo === "number" ? estoque.maximo : undefined,
             };
-            
-            // Persiste a informação no banco de dados
+
             await updateSupplyBySku(sku, {
                 estoqueMinimo: stockInfo.stockMin,
-                estoqueMaximo: stockInfo.stockMax
+                estoqueMaximo: stockInfo.stockMax,
             });
 
             return stockInfo;
