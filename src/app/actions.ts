@@ -797,8 +797,8 @@ export async function getProductionDemand(
         .map(([sku, data]) => {
             const orderCount = data.orderIds.size;
             const weeklyAverage = data.totalQuantity / weeks;
-            const corte = (weeklyAverage / 12) * 2;
-            const dobra = (weeklyAverage / 12) + (orderCount / 12 * 0.5);
+            const corte = weeklyAverage * 2;
+            const dobra = weeklyAverage * 1.5;
             const supplyInfo = supplyInfoMap.get(sku);
 
             return {
@@ -920,5 +920,9 @@ export async function backfillOrdersMissingItems() {
 
     
 
+
+    
+
+    
 
     
