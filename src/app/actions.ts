@@ -437,6 +437,20 @@ export async function getBlingProducts(limit: number = 100): Promise<any> {
     }
 }
 
+export async function getBlingProductBySku(sku: string): Promise<any> {
+    if (!sku) {
+        throw new Error('O SKU do produto é obrigatório.');
+    }
+    const url = `https://api.bling.com.br/Api/v3/produtos?codigo=${encodeURIComponent(sku)}`;
+    try {
+        const data = await blingFetchWithRefresh(url);
+        return data;
+    } catch (error: any) {
+        console.error(`Falha ao buscar produto com SKU ${sku}:`, error);
+        throw new Error(`Falha na comunicação com a API do Bling: ${error.message}`);
+    }
+}
+
 
 export async function getLogisticsBySalesOrder(orderId: string): Promise<any> {
     if (!orderId) {

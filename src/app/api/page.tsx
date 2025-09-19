@@ -13,7 +13,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
-import { getBlingCredentials, saveBlingCredentials, countImportedOrders, getBlingOrderDetails, getImportedOrderIds, getBlingProducts, getBlingChannelByOrderId, smartSyncOrders, fullSyncOrders, deleteAllSalesOrders } from '@/app/actions';
+import { getBlingCredentials, saveBlingCredentials, countImportedOrders, getBlingOrderDetails, getImportedOrderIds, getBlingProducts, getBlingChannelByOrderId, smartSyncOrders, fullSyncOrders, deleteAllSalesOrders, getBlingProductBySku } from '@/app/actions';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Calendar } from '@/components/ui/calendar';
 import { cn } from '@/lib/utils';
@@ -60,6 +60,8 @@ export default function ApiPage() {
   const [orderIdToTest, setOrderIdToTest] = React.useState('');
   const [isFetchingChannel, setIsFetchingChannel] = React.useState(false);
   const [orderIdForChannel, setOrderIdForChannel] = React.useState('');
+  const [skuToTest, setSkuToTest] = React.useState('');
+  const [isFetchingProductBySku, setIsFetchingProductBySku] = React.useState(false);
 
   const [syncMode, setSyncMode] = React.useState<'smart' | 'period'>('smart');
   const [importSummary, setImportSummary] = React.useState<any>(null);
@@ -354,6 +356,29 @@ const handleFullSync = async () => {
     } finally {
         setIsFetchingChannel(false);
     }
+  }
+  
+  const handleFetchProductBySku = async () => {
+      if (!skuToTest) {
+          toast({ variant: "destructive", title: "SKU Faltando", description: "Por favor, insira um SKU para testar."});
+          return;
+      }
+      setIsFetchingProductBySku(true);
+      setApiResponse(null);
+      try {
+          const responseData = await getBlingProductBySku(skuToTest);
+          setApiResponse(responseData);
+          toast({ title: "Busca por SKU Concluída", description: "A resposta da API foi recebida."});
+      } catch (error: any) {
+          setApiResponse({ error: "Falha na requisição", message: error.message });
+          toast({
+              variant: "destructive",
+              title: "Erro na Busca por SKU",
+              description: `Não foi possível buscar os dados: ${error.message}`,
+          });
+      } finally {
+          setIsFetchingProductBySku(false);
+      }
   }
 
     const handleDeleteAllOrders = async () => {
@@ -677,6 +702,33 @@ const handleFullSync = async () => {
                           <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Buscando...</>
                         ) : (
                           <><Store className="mr-2 h-4 w-4" /> Buscar Canal de Venda</>
+                        )}
+                      </Button>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card className="bg-muted/40">
+                  <CardHeader>
+                    <CardTitle className="text-base">Busca de Produto por SKU</CardTitle>
+                    <CardDescription>Busque os dados de um produto pelo seu SKU (código).</CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="flex items-end gap-2">
+                      <div className="flex-1 space-y-1.5">
+                        <Label htmlFor="skuToTest">SKU do Produto</Label>
+                        <Input 
+                            id="skuToTest"
+                            value={skuToTest}
+                            onChange={(e) => setSkuToTest(e.target.value)}
+                            placeholder="Ex: PROD-001"
+                        />
+                      </div>
+                      <Button onClick={handleFetchProductBySku} disabled={isFetchingProductBySku}>
+                        {isFetchingProductBySku ? (
+                          <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Buscando...</>
+                        ) : (
+                          <><Package className="mr-2 h-4 w-4" /> Buscar por SKU</>
                         )}
                       </Button>
                     </div>
