@@ -223,13 +223,14 @@ export default function ProducaoPage() {
                   <TableHead>SKU</TableHead>
                   <TableHead>Descrição do Produto</TableHead>
                   <TableHead className="text-right">Qtd. de Pedidos (com NF)</TableHead>
-                   <TableHead className="text-right">Média Semanal</TableHead>
+                  <TableHead className="text-right">Qtd. Total Vendida</TableHead>
+                  <TableHead className="text-right">Média Semanal (Pedidos)</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {isLoading ? (
                   <TableRow>
-                    <TableCell colSpan={4} className="h-24 text-center">
+                    <TableCell colSpan={5} className="h-24 text-center">
                       <Loader2 className="mx-auto h-6 w-6 animate-spin" />
                     </TableCell>
                   </TableRow>
@@ -238,13 +239,14 @@ export default function ProducaoPage() {
                     <TableRow key={item.sku}>
                       <TableCell className="font-medium">{item.sku}</TableCell>
                       <TableCell>{item.description}</TableCell>
-                      <TableCell className="text-right font-bold">{item.quantity}</TableCell>
+                      <TableCell className="text-right font-bold">{item.orderCount}</TableCell>
+                      <TableCell className="text-right font-bold">{item.totalQuantitySold}</TableCell>
                       <TableCell className="text-right">{item.weeklyAverage.toFixed(1)}</TableCell>
                     </TableRow>
                   ))
                 ) : (
                   <TableRow>
-                    <TableCell colSpan={4} className="h-24 text-center">
+                    <TableCell colSpan={5} className="h-24 text-center">
                       Nenhum item vendido com nota fiscal encontrada para o período.
                     </TableCell>
                   </TableRow>
@@ -257,3 +259,5 @@ export default function ProducaoPage() {
     </DashboardLayout>
   );
 }
+
+    

@@ -666,7 +666,8 @@ export async function getSalesDashboardData(
 export type ProductionDemand = {
   sku: string;
   description: string;
-  quantity: number;
+  orderCount: number;
+  totalQuantitySold: number;
   weeklyAverage: number;
 };
 
@@ -688,7 +689,11 @@ export async function getProductionDemand(
     const days = differenceInDays(to, from) + 1;
     const weeks = Math.max(1, days / 7);
 
-    const productDemand = new Map<string, { description: string, orderIds: Set<number> }>();
+    const productDemand = new Map<string, { 
+        description: string, 
+        orderIds: Set<number>,
+        totalQuantity: number 
+    }>();
 
     snapshot.forEach(doc => {
         const order = doc.data() as SaleOrder;
@@ -698,8 +703,14 @@ export async function getProductionDemand(
         if (isDateInRange && order.notaFiscal && order.notaFiscal.id) {
             order.itens?.forEach(item => {
                 const sku = item.codigo || 'SKU_INDEFINIDO';
-                const currentData = productDemand.get(sku) || { description: item.descricao, orderIds: new Set() };
+                const currentData = productDemand.get(sku) || { 
+                    description: item.descricao, 
+                    orderIds: new Set(),
+                    totalQuantity: 0
+                };
+                
                 currentData.orderIds.add(order.id);
+                currentData.totalQuantity += item.quantidade;
                 productDemand.set(sku, currentData);
             });
         }
@@ -707,18 +718,21 @@ export async function getProductionDemand(
 
     const result = Array.from(productDemand.entries())
         .map(([sku, data]) => {
-            const quantity = data.orderIds.size; // Agora, quantidade é o número de pedidos únicos
+            const orderCount = data.orderIds.size;
             return {
                 sku,
                 description: data.description,
-                quantity: quantity,
-                weeklyAverage: quantity / weeks,
+                orderCount: orderCount,
+                totalQuantitySold: data.totalQuantity,
+                weeklyAverage: orderCount / weeks,
             };
         })
-        .sort((a, b) => b.quantity - a.quantity);
+        .sort((a, b) => b.orderCount - a.orderCount);
 
     return result;
 }
+
+    
 
     
 
