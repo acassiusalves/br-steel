@@ -26,7 +26,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { getProductionDemand, smartSyncOrders, updateStockDataForSkus } from '@/app/actions';
+import { getProductionDemand, smartSyncOrders, updateSingleSkuStock } from '@/app/actions';
 import type { ProductionDemand } from '@/app/actions';
 import { Button } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -41,7 +41,7 @@ export default function ProducaoPage() {
   const [demand, setDemand] = React.useState<ProductionDemand[]>([]);
   const [isLoading, setIsLoading] = React.useState(true);
   const [isSyncing, setIsSyncing] = React.useState(false);
-  const [isUpdatingStock, setIsUpdatingStock] = React.useState(false);
+  const [updatingSku, setUpdatingSku] = React.useState<string | null>(null);
   const [date, setDate] = React.useState<DateRange | undefined>(undefined);
   const { toast } = useToast();
 
@@ -150,54 +150,31 @@ export default function ProducaoPage() {
       }
   }
 
-  const handleUpdateStock = async () => {
-    if (demand.length === 0) {
-        toast({
-            variant: "destructive",
-            title: "Nenhum Produto na Lista",
-            description: "Não há produtos para atualizar o estoque.",
-        });
-        return;
-    }
-    setIsUpdatingStock(true);
-    toast({
-        title: "Atualizando Estoque...",
-        description: "Buscando dados de estoque mínimo e máximo do Bling. Isso pode levar um momento.",
-    });
-
+  const handleUpdateStock = async (sku: string) => {
+    setUpdatingSku(sku);
     try {
-        const skus = demand.map(item => item.sku);
-        const stockDataMap = await updateStockDataForSkus(skus);
-        
-        setDemand(prevDemand => 
-            prevDemand.map(item => {
-                if (stockDataMap.has(item.sku)) {
-                    const stockData = stockDataMap.get(item.sku)!;
-                    return {
-                        ...item,
-                        stockLevel: stockData.stockLevel !== undefined ? stockData.stockLevel : item.stockLevel,
-                        stockMin: stockData.stockMin !== undefined ? stockData.stockMin : item.stockMin,
-                        stockMax: stockData.stockMax !== undefined ? stockData.stockMax : item.stockMax,
-                    };
-                }
-                return item;
-            })
-        );
-
-        toast({
-            title: "Estoque Atualizado!",
-            description: "Os dados de estoque mínimo e máximo foram atualizados.",
-        });
-
-    } catch (error) {
-        console.error("Failed to update stock data:", error);
+        const stockData = await updateSingleSkuStock(sku);
+        if (stockData) {
+            setDemand(prevDemand => 
+                prevDemand.map(item => 
+                    item.sku === sku 
+                        ? { ...item, ...stockData } 
+                        : item
+                )
+            );
+            toast({
+                title: "Estoque Atualizado!",
+                description: `Dados de estoque para ${sku} foram atualizados.`,
+            });
+        }
+    } catch (error: any) {
         toast({
             variant: "destructive",
-            title: "Erro ao Atualizar Estoque",
-            description: "Não foi possível buscar os dados de estoque do Bling.",
+            title: "Erro ao Atualizar",
+            description: error.message,
         });
     } finally {
-        setIsUpdatingStock(false);
+        setUpdatingSku(null);
     }
   };
 
@@ -286,14 +263,6 @@ export default function ProducaoPage() {
                       A lista abaixo mostra a quantidade de pedidos únicos (com nota fiscal emitida) para cada produto no período selecionado.
                     </CardDescription>
                 </div>
-                <Button onClick={handleUpdateStock} variant="outline" disabled={isUpdatingStock || isLoading}>
-                    {isUpdatingStock ? (
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    ) : (
-                        <RefreshCw className="mr-2 h-4 w-4" />
-                    )}
-                    Atualizar Mínimo e Máximo
-                </Button>
             </div>
           </CardHeader>
           <CardContent>
@@ -310,12 +279,13 @@ export default function ProducaoPage() {
                   <TableHead className="text-right">Média Semanal (Pedidos)</TableHead>
                   <TableHead className="text-right">Corte</TableHead>
                   <TableHead className="text-right">Dobra</TableHead>
+                  <TableHead className="text-center">Ações</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {isLoading ? (
                   <TableRow>
-                    <TableCell colSpan={10} className="h-24 text-center">
+                    <TableCell colSpan={11} className="h-24 text-center">
                       <Loader2 className="mx-auto h-6 w-6 animate-spin" />
                     </TableCell>
                   </TableRow>
@@ -332,11 +302,25 @@ export default function ProducaoPage() {
                       <TableCell className="text-right">{item.weeklyAverage.toFixed(1)}</TableCell>
                       <TableCell className="text-right">{item.corte.toFixed(1)}</TableCell>
                       <TableCell className="text-right">{item.dobra.toFixed(1)}</TableCell>
+                      <TableCell className="text-center">
+                          <Button 
+                              variant="outline" 
+                              size="sm"
+                              onClick={() => handleUpdateStock(item.sku)}
+                              disabled={updatingSku === item.sku}
+                          >
+                              {updatingSku === item.sku ? (
+                                  <Loader2 className="h-4 w-4 animate-spin" />
+                              ) : (
+                                  <RefreshCw className="h-4 w-4" />
+                              )}
+                          </Button>
+                      </TableCell>
                     </TableRow>
                   ))
                 ) : (
                   <TableRow>
-                    <TableCell colSpan={10} className="h-24 text-center">
+                    <TableCell colSpan={11} className="h-24 text-center">
                       Nenhum item vendido com nota fiscal encontrada para o período.
                     </TableCell>
                   </TableRow>

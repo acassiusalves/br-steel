@@ -813,6 +813,25 @@ export async function updateStockDataForSkus(skus: string[]): Promise<Map<string
     return stockDataMap;
 }
 
+export async function updateSingleSkuStock(sku: string): Promise<StockData | null> {
+    try {
+        const productData = await getBlingProductBySku(sku);
+        if (productData && productData.data) {
+            const { estoque } = productData.data;
+            return {
+                stockLevel: estoque?.saldoVirtualTotal,
+                stockMin: estoque?.minimo,
+                stockMax: estoque?.maximo,
+            };
+        }
+        return null;
+    } catch (error) {
+        console.error(`Falha ao buscar dados de estoque para o SKU ${sku}:`, error);
+        throw new Error(`Não foi possível atualizar o estoque para o SKU ${sku}.`);
+    }
+}
+
+
 export async function deleteAllSalesOrders(): Promise<{ deletedCount: number }> {
     const ordersCollection = collection(db, 'salesOrders');
     const snapshot = await getDocs(ordersCollection);
@@ -875,3 +894,4 @@ export async function backfillOrdersMissingItems() {
 
 
     
+
