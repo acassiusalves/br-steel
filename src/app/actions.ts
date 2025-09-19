@@ -688,7 +688,7 @@ export async function getProductionDemand(
     const days = differenceInDays(to, from) + 1;
     const weeks = Math.max(1, days / 7);
 
-    const productDemand = new Map<string, { description: string, quantity: number }>();
+    const productDemand = new Map<string, { description: string, orderIds: Set<number> }>();
 
     snapshot.forEach(doc => {
         const order = doc.data() as SaleOrder;
@@ -698,23 +698,28 @@ export async function getProductionDemand(
         if (isDateInRange && order.notaFiscal && order.notaFiscal.id) {
             order.itens?.forEach(item => {
                 const sku = item.codigo || 'SKU_INDEFINIDO';
-                const currentData = productDemand.get(sku) || { description: item.descricao, quantity: 0 };
-                currentData.quantity += item.quantidade;
+                const currentData = productDemand.get(sku) || { description: item.descricao, orderIds: new Set() };
+                currentData.orderIds.add(order.id);
                 productDemand.set(sku, currentData);
             });
         }
     });
 
     const result = Array.from(productDemand.entries())
-        .map(([sku, data]) => ({
-            sku,
-            description: data.description,
-            quantity: data.quantity,
-            weeklyAverage: data.quantity / weeks,
-        }))
+        .map(([sku, data]) => {
+            const quantity = data.orderIds.size; // Agora, quantidade é o número de pedidos únicos
+            return {
+                sku,
+                description: data.description,
+                quantity: quantity,
+                weeklyAverage: quantity / weeks,
+            };
+        })
         .sort((a, b) => b.quantity - a.quantity);
 
     return result;
 }
+
+    
 
     
