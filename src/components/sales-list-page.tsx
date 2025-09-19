@@ -139,10 +139,7 @@ const SalesListPage = () => {
         const sales: SaleOrder[] = [];
         snapshot.forEach(doc => {
             const orderData = doc.data() as SaleOrder;
-            // Filtra pedidos que não tem itens antes de adicionar ao estado
-            if(orderData.itens && orderData.itens.length > 0) {
-              sales.push(orderData);
-            }
+            sales.push(orderData);
         });
 
         setAllSales(sales);
@@ -476,7 +473,7 @@ const SalesListPage = () => {
                                   ))}
                                   {sale.itens.length > 2 && <li className="text-muted-foreground">e mais {sale.itens.length - 2}...</li>}
                                 </ul>
-                              ) : 'Sem itens'}
+                              ) : <span className="text-xs text-muted-foreground">Sem itens</span>}
                             </TableCell>
                             <TableCell>
                                 <StatusBadge statusName={sale.situacao?.nome || 'Desconhecido'} />
@@ -578,3 +575,5 @@ const SalesListPage = () => {
 };
 
 export default SalesListPage;
+
+    

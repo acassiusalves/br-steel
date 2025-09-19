@@ -7,7 +7,7 @@ import { format, parseISO, startOfMonth, endOfMonth, eachMonthOfInterval, getMon
 import { collection, getDocs, doc, writeBatch, query, where, setDoc, getDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 
-import { saveSalesOrders, filterNewOrders, getLastImportedOrderDate, orderExists, saveSalesOrdersOptimized } from '@/services/order-service';
+import { saveSalesOrders, filterNewOrders, getLastImportedOrderDate, orderExists, saveSalesOrdersOptimized, getImportedOrderIdsWithDetails } from '@/services/order-service';
 import type { SaleOrder } from '@/types/sale-order';
 
 
@@ -263,24 +263,25 @@ async function getBlingSalesOrdersOptimized({
             console.log('📭 Nenhum pedido encontrado no período');
             return { 
                 data: [], 
-                summary: { total: 0, new: 0, existing: 0, processed: 0 } 
+                summary: { total: 0, new: 0, existing: 0, processed: 0, created: 0, updated: 0 } 
             };
         }
 
-        // Se for sincronização completa (fullSync), todos os pedidos são "novos" para processamento
-        const ordersToProcess = forceFullSync ? allOrders : await filterNewOrders(allOrders);
+        const ordersToProcess = forceFullSync 
+            ? allOrders
+            : await filterNewOrders(allOrders);
 
-        if (ordersToProcess.length === 0) {
+        if (ordersToProcess.length === 0 && !forceFullSync) {
             console.log('✅ Todos os pedidos já estão atualizados no banco');
             return { 
                 data: allOrders, 
-                summary: { total: allOrders.length, new: 0, existing: allOrders.length, processed: 0 } 
+                summary: { total: allOrders.length, new: 0, existing: allOrders.length, processed: 0, created: 0, updated: 0 } 
             };
         }
         
         const logMessage = forceFullSync 
-            ? `🔄 Sincronização completa: re-processando detalhes para ${ordersToProcess.length} pedidos...`
-            : `🔍 Buscando detalhes completos para ${ordersToProcess.length} pedidos novos...`;
+            ? `🔄 Sincronização completa: re-processando detalhes para ${allOrders.length} pedidos...`
+            : `🔍 Buscando detalhes completos para ${ordersToProcess.length} pedidos novos ou incompletos...`;
         console.log(logMessage);
         
         const ordersWithDetails = [];
@@ -293,12 +294,10 @@ async function getBlingSalesOrdersOptimized({
                     ordersWithDetails.push(detailsData.data);
                     processedCount++;
                 } else {
-                    // Se não conseguir os detalhes, mantém o pedido original (sem itens)
                     ordersWithDetails.push(order);
                 }
             } catch (error) {
                 console.warn(`⚠️ Erro ao processar pedido ${order.id}:`, error);
-                // Mesmo com erro, adiciona o pedido base para não perdê-lo
                 ordersWithDetails.push(order);
             }
         }
@@ -311,9 +310,9 @@ async function getBlingSalesOrdersOptimized({
             data: ordersWithDetails,
             summary: {
                 total: allOrders.length,
-                new: ordersToProcess.length, // Total de pedidos que tentamos processar
+                new: ordersToProcess.length,
                 existing: allOrders.length - ordersToProcess.length,
-                processed: processedCount, // Total de pedidos com detalhes obtidos com sucesso
+                processed: processedCount,
                 saved: saveResult.count,
                 created: saveResult.created,
                 updated: saveResult.updated
@@ -568,13 +567,12 @@ export async function getImportedOrderIds(): Promise<Set<string>> {
     const snapshot = await getDocs(q);
     const ids = new Set<string>();
     snapshot.forEach(doc => {
-      if (doc.data().itens) {
-        ids.add(doc.id);
-      }
+      // Este método retorna todos os IDs, independentemente de terem detalhes ou não.
+      ids.add(doc.id);
     });
     return ids;
   } catch (error) {
-    console.error("Failed to get imported order IDs:", error);
+    console.error("Failed to get all imported order IDs:", error);
     return new Set();
   }
 }
@@ -764,6 +762,8 @@ export async function deleteAllSalesOrders(): Promise<{ deletedCount: number }> 
     console.log(`Successfully deleted ${deletedCount} total orders.`);
     return { deletedCount };
 }
+    
+
     
 
     

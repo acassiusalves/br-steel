@@ -9,30 +9,56 @@ import { collection, writeBatch, doc, query, where, getDocs, getDoc } from 'fire
  * @param orderIds - Array de IDs dos pedidos para verificar
  * @returns Array de IDs que já existem no banco
  */
-export async function getExistingOrderIds(orderIds: string[]): Promise<string[]> {
+export async function getExistingOrderIds(orderIds: (string|number)[]): Promise<Set<string>> {
     if (!orderIds || orderIds.length === 0) {
-        return [];
+        return new Set();
     }
 
-    const existingIds: string[] = [];
+    const existingIds = new Set<string>();
     const ordersCollection = collection(db, 'salesOrders');
+    const numericOrderIds = orderIds.map(id => parseInt(String(id), 10)).filter(id => !isNaN(id));
+
 
     // Firebase tem limite de 30 itens por consulta "in", então dividimos em lotes
     const batchSize = 30;
-    for (let i = 0; i < orderIds.length; i += batchSize) {
-        const batch = orderIds.slice(i, i + batchSize);
+    for (let i = 0; i < numericOrderIds.length; i += batchSize) {
+        const batch = numericOrderIds.slice(i, i + batchSize);
         if(batch.length > 0) {
-            const q = query(ordersCollection, where('id', 'in', batch.map(id => parseInt(id, 10))));
+            const q = query(ordersCollection, where('id', 'in', batch));
             const querySnapshot = await getDocs(q);
             
             querySnapshot.forEach((doc) => {
-                existingIds.push(String(doc.data().id));
+                existingIds.add(String(doc.data().id));
             });
         }
     }
 
     return existingIds;
 }
+
+/**
+ * Obtém os IDs de todos os pedidos no Firestore que já possuem a propriedade `itens`.
+ * @returns Um Set com os IDs dos pedidos que já têm detalhes.
+ */
+export async function getImportedOrderIdsWithDetails(): Promise<Set<string>> {
+    try {
+        const ordersCollection = collection(db, 'salesOrders');
+        const q = query(ordersCollection); // Query for all documents
+        const snapshot = await getDocs(q);
+        const ids = new Set<string>();
+        snapshot.forEach(doc => {
+            // Adiciona o ID se o campo 'itens' existir e não for um array vazio
+            if (doc.data().itens && Array.isArray(doc.data().itens) && doc.data().itens.length > 0) {
+                ids.add(doc.id);
+            }
+        });
+        return ids;
+    } catch (error) {
+        console.error("Failed to get imported order IDs with details:", error);
+        return new Set();
+    }
+}
+
 
 /**
  * Obtém a data do último pedido importado para otimizar as consultas
@@ -65,9 +91,9 @@ export async function getLastImportedOrderDate(): Promise<Date | null> {
 }
 
 /**
- * Filtra pedidos removendo aqueles que já existem no banco
+ * Filtra pedidos, retornando apenas aqueles que são novos ou que estão incompletos no banco.
  * @param orders - Array de pedidos básicos do Bling
- * @returns Array apenas com pedidos novos
+ * @returns Array apenas com pedidos que precisam de atualização de detalhes.
  */
 export async function filterNewOrders(orders: any[]): Promise<any[]> {
     if (!orders || orders.length === 0) {
@@ -75,18 +101,20 @@ export async function filterNewOrders(orders: any[]): Promise<any[]> {
     }
 
     const orderIds = orders.map(order => String(order.id));
-    const existingIdsSet = new Set(await getExistingOrderIds(orderIds));
+    const existingCompleteIdsSet = await getImportedOrderIdsWithDetails();
     
-    console.log(`📊 Total de pedidos encontrados: ${orders.length}`);
-    console.log(`📋 Pedidos já existentes: ${existingIdsSet.size}`);
+    console.log(`📊 Total de pedidos encontrados na API: ${orders.length}`);
+    console.log(`📋 Pedidos já completos no banco: ${existingCompleteIdsSet.size}`);
     
-    const newOrders = orders.filter(order => 
-        !existingIdsSet.has(String(order.id))
+    // Um pedido precisa ser processado se ele NÃO ESTÁ na lista de pedidos completos.
+    // Isso cobre tanto pedidos que não existem de todo, quanto pedidos que existem mas estão sem itens.
+    const ordersToProcess = orders.filter(order => 
+        !existingCompleteIdsSet.has(String(order.id))
     );
     
-    console.log(`✨ Pedidos novos para importar: ${newOrders.length}`);
+    console.log(`✨ Pedidos para processar (novos ou incompletos): ${ordersToProcess.length}`);
     
-    return newOrders;
+    return ordersToProcess;
 }
 
 /**
@@ -106,7 +134,7 @@ export async function saveSalesOrdersOptimized(orders: any[]): Promise<{ count: 
     let created = 0;
 
     const orderIds = orders.map(order => String(order.id));
-    const existingIds = new Set(await getExistingOrderIds(orderIds));
+    const existingIds = await getExistingOrderIds(orderIds);
 
     orders.forEach(order => {
         const docRef = doc(ordersCollection, String(order.id));
@@ -159,3 +187,5 @@ export async function saveSalesOrders(orders: any[]): Promise<{ count: number }>
     const result = await saveSalesOrdersOptimized(orders);
     return { count: result.count };
 }
+
+    
