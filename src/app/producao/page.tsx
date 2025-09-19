@@ -11,6 +11,7 @@ import {
   ChevronLeft,
   ChevronRight,
   ChevronsRight,
+  Columns,
 } from "lucide-react";
 import { format, subDays, startOfMonth, endOfMonth, startOfYesterday, endOfYesterday, startOfWeek, endOfWeek, startOfYear, endOfYear, subMonths } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -35,7 +36,19 @@ import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
 import { Separator } from '@/components/ui/separator';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuLabel,
+  DropdownMenuSeparator as DropdownMenuSeparatorColumn,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 
+
+type ColumnVisibility = {
+    [key: string]: boolean;
+}
 
 export default function ProducaoPage() {
   const [demand, setDemand] = React.useState<ProductionDemand[]>([]);
@@ -44,6 +57,20 @@ export default function ProducaoPage() {
   const [updatingSku, setUpdatingSku] = React.useState<string | null>(null);
   const [date, setDate] = React.useState<DateRange | undefined>(undefined);
   const { toast } = useToast();
+
+  const [columnVisibility, setColumnVisibility] = React.useState<ColumnVisibility>({
+    sku: true,
+    description: true,
+    stockMin: true,
+    stockMax: true,
+    stockLevel: true,
+    orderCount: true,
+    totalQuantitySold: true,
+    weeklyAverage: true,
+    corte: true,
+    dobra: true,
+    actions: true,
+  });
 
   // Pagination State
   const [currentPage, setCurrentPage] = React.useState(1);
@@ -65,7 +92,6 @@ export default function ProducaoPage() {
         return;
       }
       
-      // Sincroniza os pedidos antes de buscar a demanda
       if (forceSync) {
         toast({
             title: "Sincronizando...",
@@ -178,6 +204,13 @@ export default function ProducaoPage() {
     }
   };
 
+  const toggleColumn = (column: string) => {
+      setColumnVisibility(prev => ({
+          ...prev,
+          [column]: !prev[column]
+      }));
+  }
+
   // Pagination Logic
   const totalPages = Math.ceil(demand.length / rowsPerPage);
   const paginatedDemand = demand.slice(
@@ -263,64 +296,104 @@ export default function ProducaoPage() {
                       A lista abaixo mostra a quantidade de pedidos únicos (com nota fiscal emitida) para cada produto no período selecionado.
                     </CardDescription>
                 </div>
+                 <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button variant="outline" className="ml-auto">
+                        <Columns className="mr-2 h-4 w-4" />
+                        Exibir Colunas
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      <DropdownMenuLabel>Alternar Colunas</DropdownMenuLabel>
+                      <DropdownMenuSeparatorColumn />
+                      {Object.keys(columnVisibility).map((key) => {
+                          const name = {
+                              sku: "SKU",
+                              description: "Descrição",
+                              stockMin: "Estoque Mínimo",
+                              stockMax: "Estoque Máximo",
+                              stockLevel: "Estoque Atual",
+                              orderCount: "Qtd. Pedidos",
+                              totalQuantitySold: "Qtd. Vendida",
+                              weeklyAverage: "Média Semanal",
+                              corte: "Corte",
+                              dobra: "Dobra",
+                              actions: "Ações",
+                          }[key] || key;
+                          
+                          return (
+                            <DropdownMenuCheckboxItem
+                              key={key}
+                              className="capitalize"
+                              checked={columnVisibility[key]}
+                              onCheckedChange={() => toggleColumn(key)}
+                            >
+                              {name}
+                            </DropdownMenuCheckboxItem>
+                          )
+                      })}
+                    </DropdownMenuContent>
+                </DropdownMenu>
             </div>
           </CardHeader>
           <CardContent>
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>SKU</TableHead>
-                  <TableHead>Descrição do Produto</TableHead>
-                  <TableHead className="text-right">Estoque Mínimo</TableHead>
-                  <TableHead className="text-right">Estoque Máximo</TableHead>
-                  <TableHead className="text-right">Estoque Atual (Bling)</TableHead>
-                  <TableHead className="text-right">Qtd. de Pedidos (com NF)</TableHead>
-                  <TableHead className="text-right">Qtd. Total Vendida</TableHead>
-                  <TableHead className="text-right">Média Semanal (Pedidos)</TableHead>
-                  <TableHead className="text-right">Corte</TableHead>
-                  <TableHead className="text-right">Dobra</TableHead>
-                  <TableHead className="text-center">Ações</TableHead>
+                  {columnVisibility.sku && <TableHead>SKU</TableHead>}
+                  {columnVisibility.description && <TableHead>Descrição do Produto</TableHead>}
+                  {columnVisibility.stockMin && <TableHead className="text-right">Estoque Mínimo</TableHead>}
+                  {columnVisibility.stockMax && <TableHead className="text-right">Estoque Máximo</TableHead>}
+                  {columnVisibility.stockLevel && <TableHead className="text-right">Estoque Atual (Bling)</TableHead>}
+                  {columnVisibility.orderCount && <TableHead className="text-right">Qtd. de Pedidos (com NF)</TableHead>}
+                  {columnVisibility.totalQuantitySold && <TableHead className="text-right">Qtd. Total Vendida</TableHead>}
+                  {columnVisibility.weeklyAverage && <TableHead className="text-right">Média Semanal (Pedidos)</TableHead>}
+                  {columnVisibility.corte && <TableHead className="text-right">Corte</TableHead>}
+                  {columnVisibility.dobra && <TableHead className="text-right">Dobra</TableHead>}
+                  {columnVisibility.actions && <TableHead className="text-center">Ações</TableHead>}
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {isLoading ? (
                   <TableRow>
-                    <TableCell colSpan={11} className="h-24 text-center">
+                    <TableCell colSpan={Object.values(columnVisibility).filter(Boolean).length} className="h-24 text-center">
                       <Loader2 className="mx-auto h-6 w-6 animate-spin" />
                     </TableCell>
                   </TableRow>
                 ) : paginatedDemand.length > 0 ? (
                   paginatedDemand.map((item) => (
                     <TableRow key={item.sku}>
-                      <TableCell className="font-medium">{item.sku}</TableCell>
-                      <TableCell>{item.description}</TableCell>
-                      <TableCell className="text-right font-bold">{item.stockMin ?? ''}</TableCell>
-                      <TableCell className="text-right font-bold">{item.stockMax ?? ''}</TableCell>
-                      <TableCell className="text-right font-bold">{item.stockLevel ?? ''}</TableCell>
-                      <TableCell className="text-right font-bold">{item.orderCount}</TableCell>
-                      <TableCell className="text-right font-bold">{item.totalQuantitySold}</TableCell>
-                      <TableCell className="text-right">{item.weeklyAverage.toFixed(1)}</TableCell>
-                      <TableCell className="text-right">{item.corte.toFixed(1)}</TableCell>
-                      <TableCell className="text-right">{item.dobra.toFixed(1)}</TableCell>
-                      <TableCell className="text-center">
-                          <Button 
-                              variant="outline" 
-                              size="sm"
-                              onClick={() => handleUpdateStock(item.sku)}
-                              disabled={updatingSku === item.sku}
-                          >
-                              {updatingSku === item.sku ? (
-                                  <Loader2 className="h-4 w-4 animate-spin" />
-                              ) : (
-                                  <RefreshCw className="h-4 w-4" />
-                              )}
-                          </Button>
-                      </TableCell>
+                      {columnVisibility.sku && <TableCell className="font-medium">{item.sku}</TableCell>}
+                      {columnVisibility.description && <TableCell>{item.description}</TableCell>}
+                      {columnVisibility.stockMin && <TableCell className="text-right font-bold">{item.stockMin ?? ''}</TableCell>}
+                      {columnVisibility.stockMax && <TableCell className="text-right font-bold">{item.stockMax ?? ''}</TableCell>}
+                      {columnVisibility.stockLevel && <TableCell className="text-right font-bold">{item.stockLevel ?? ''}</TableCell>}
+                      {columnVisibility.orderCount && <TableCell className="text-right font-bold">{item.orderCount}</TableCell>}
+                      {columnVisibility.totalQuantitySold && <TableCell className="text-right font-bold">{item.totalQuantitySold}</TableCell>}
+                      {columnVisibility.weeklyAverage && <TableCell className="text-right">{item.weeklyAverage.toFixed(1)}</TableCell>}
+                      {columnVisibility.corte && <TableCell className="text-right">{item.corte.toFixed(1)}</TableCell>}
+                      {columnVisibility.dobra && <TableCell className="text-right">{item.dobra.toFixed(1)}</TableCell>}
+                      {columnVisibility.actions && (
+                          <TableCell className="text-center">
+                              <Button 
+                                  variant="outline" 
+                                  size="sm"
+                                  onClick={() => handleUpdateStock(item.sku)}
+                                  disabled={updatingSku === item.sku}
+                              >
+                                  {updatingSku === item.sku ? (
+                                      <Loader2 className="h-4 w-4 animate-spin" />
+                                  ) : (
+                                      <RefreshCw className="h-4 w-4" />
+                                  )}
+                              </Button>
+                          </TableCell>
+                      )}
                     </TableRow>
                   ))
                 ) : (
                   <TableRow>
-                    <TableCell colSpan={11} className="h-24 text-center">
+                    <TableCell colSpan={Object.values(columnVisibility).filter(Boolean).length} className="h-24 text-center">
                       Nenhum item vendido com nota fiscal encontrada para o período.
                     </TableCell>
                   </TableRow>
@@ -402,3 +475,5 @@ export default function ProducaoPage() {
     </DashboardLayout>
   );
 }
+
+    
