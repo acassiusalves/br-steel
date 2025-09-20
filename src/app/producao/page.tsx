@@ -1,4 +1,5 @@
 
+
 'use client';
 
 import * as React from 'react';
@@ -151,10 +152,13 @@ export default function ProducaoPage() {
           
           if (stock === undefined || min === undefined || max === undefined) return false;
 
-          const needsProduction = stock <= min;
-          const isOverstocked = stock > max;
+          // Regras atualizadas:
+          // 1. Estoque atual < Estoque Mínimo (Exclui quando é igual)
+          const needsProduction = stock < min;
+          // 2. Estoque atual NÃO está acima do máximo
+          const isNotOverstocked = stock <= max;
           
-          return needsProduction && !isOverstocked;
+          return needsProduction && isNotOverstocked;
         })
         .sort((a, b) => b.weeklyAverage - a.weeklyAverage);
     }
@@ -518,3 +522,4 @@ export default function ProducaoPage() {
     </DashboardLayout>
   );
 }
+
