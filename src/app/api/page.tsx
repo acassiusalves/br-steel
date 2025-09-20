@@ -13,16 +13,16 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
-import { getBlingCredentials, saveBlingCredentials, countImportedOrders, getBlingOrderDetails, getImportedOrderIds, getBlingProducts, getBlingChannelByOrderId, smartSyncOrders, fullSyncOrders, deleteAllSalesOrders, getBlingProductBySku, clearBlingCredentials } from '@/app/actions';
+import { getBlingCredentials, saveBlingCredentials, disconnectBling, countImportedOrders, getBlingOrderDetails, getImportedOrderIds, getBlingProducts, getBlingChannelByOrderId, smartSyncOrders, fullSyncOrders, deleteAllSalesOrders, getBlingProductBySku } from '@/app/actions';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Calendar } from '@/components/ui/calendar';
 import { cn } from '@/lib/utils';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Separator } from '@/components/ui/separator';
-import { Progress } from '@/components/ui/progress';
-import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
+import { Separator } from "@/components/ui/separator";
+import { Progress } from "@/components/ui/progress";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 
 
 type ApiStatus = 'valid' | 'invalid' | 'unchecked';
@@ -40,7 +40,7 @@ const ApiStatusBadge = ({ status }: { status: ApiStatus }) => {
 
 
 export default function ApiPage() {
-  const [credentials, setCredentials] = React.useState({ clientId: '', clientSecret: '', accessToken: '' });
+  const [credentials, setCredentials] = React.useState({ clientId: '', clientSecret: '' });
   const [isLoading, setIsLoading] = React.useState(true);
   const [isSaving, setIsSaving] = React.useState(false);
   const [isGenerating, setIsGenerating] = React.useState(false);
@@ -75,13 +75,9 @@ export default function ApiPage() {
             getBlingCredentials(),
             countImportedOrders()
         ]);
-        setCredentials(prev => ({...prev, ...savedCreds}));
+        setCredentials(prev => ({ ...prev, clientId: savedCreds.clientId || '', clientSecret: savedCreds.clientSecret || '' }));
         setImportedCount(count);
-        if (savedCreds.accessToken) {
-            setApiStatus('valid');
-        } else {
-            setApiStatus('unchecked');
-        }
+        setApiStatus(savedCreds.connected ? 'valid' : 'unchecked');
 
     } catch (error) {
         console.error("Failed to load Bling credentials:", error);
@@ -116,10 +112,13 @@ export default function ApiPage() {
   const handleSaveCredentials = async () => {
     setIsSaving(true);
     try {
-        await saveBlingCredentials({});
+        await saveBlingCredentials({
+            clientId: credentials.clientId,
+            clientSecret: credentials.clientSecret,
+        });
         toast({
-            title: "Configuração Salva!",
-            description: "Suas credenciais do Bling devem ser configuradas via variáveis de ambiente no servidor.",
+            title: "Credenciais Salvas!",
+            description: "Suas credenciais do Bling foram salvas com sucesso.",
         });
         const savedCreds = await getBlingCredentials();
         setCredentials(prev => ({...prev, ...savedCreds}));
@@ -128,7 +127,7 @@ export default function ApiPage() {
         toast({
             variant: "destructive",
             title: "Erro ao Salvar",
-            description: "Não foi possível salvar a configuração.",
+            description: "Não foi possível salvar as credenciais.",
         });
     } finally {
         setIsSaving(false);
@@ -140,7 +139,7 @@ export default function ApiPage() {
         toast({
             variant: "destructive",
             title: "Client ID Faltando",
-            description: "O Client ID do Bling não foi encontrado nas variáveis de ambiente do servidor.",
+            description: "Por favor, insira e salve seu Client ID do Bling.",
         });
         return;
     }
@@ -157,25 +156,17 @@ export default function ApiPage() {
   const handleDisconnect = async () => {
     setIsSaving(true);
     try {
-        await clearBlingCredentials();
-        setCredentials({ clientId: '', clientSecret: '', accessToken: '' });
-        setApiStatus('unchecked');
-        setAuthUrl("");
-        await loadInitialData();
-         toast({
-            title: "Desconectado!",
-            description: "A integração com o Bling foi removida.",
-        });
-    } catch (error) {
-         toast({
-            variant: "destructive",
-            title: "Erro ao Desconectar",
-            description: "Não foi possível remover a integração.",
-        });
+        await disconnectBling();
+        localStorage.removeItem('bling_oauth_state');
+        setAuthUrl('');
+        await loadInitialData(); // Recarrega estado real (desconectado)
+        toast({ title: 'Desconectado!', description: 'A integração com o Bling foi removida.' });
+    } catch (error: any) {
+        toast({ variant: 'destructive', title: 'Erro ao Desconectar', description: String(error?.message || error) });
     } finally {
         setIsSaving(false);
     }
-  }
+  };
 
   const handleCopy = (text: string) => {
     if (!text) return;
@@ -771,30 +762,38 @@ export default function ApiPage() {
     return (
         <div className="flex flex-col items-start gap-6 max-w-lg">
             <div className="w-full space-y-2">
-            <Label htmlFor="clientId">Client ID (de `process.env`)</Label>
+            <Label htmlFor="clientId">Client ID</Label>
             <Input 
                 id="clientId" 
                 type="text"
-                readOnly
-                disabled
-                placeholder="Não configurado no servidor" 
+                placeholder="Cole seu Client ID aqui" 
                 value={credentials.clientId}
-                className="bg-muted"
+                onChange={handleInputChange}
             />
-            <p className="text-sm text-muted-foreground">Seu Client ID é configurado via variável de ambiente `BLING_CLIENT_ID` no servidor.</p>
             </div>
             <div className="w-full space-y-2">
-            <Label htmlFor="clientSecret">Client Secret (de `process.env`)</Label>
+            <Label htmlFor="clientSecret">Client Secret</Label>
             <Input 
                 id="clientSecret" 
                 type="password"
-                disabled
-                readOnly
-                placeholder="********"
+                placeholder={credentials.clientSecret === '********' ? '********' : 'Cole seu Client Secret aqui'}
+                onChange={handleInputChange}
             />
-             <p className="text-sm text-muted-foreground">Seu Client Secret é confidencial e configurado via variável de ambiente `BLING_CLIENT_SECRET` no servidor.</p>
             </div>
             <div className="flex flex-wrap gap-2">
+            <Button onClick={handleSaveCredentials} disabled={isSaving}>
+                {isSaving ? (
+                    <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Salvando...
+                    </>
+                ) : (
+                    <>
+                    <Save className="mr-2 h-4 w-4" />
+                    Salvar Credenciais
+                    </>
+                )}
+            </Button>
             <Button onClick={handleConnect} disabled={isGenerating || !credentials.clientId}>
                 {isGenerating ? (
                 <>
@@ -804,7 +803,7 @@ export default function ApiPage() {
                 ) : (
                 <>
                     <Plug className="mr-2 h-4 w-4" />
-                    Conectar com Bling
+                    Gerar Link de Conexão
                 </>
                 )}
             </Button>

@@ -47,8 +47,7 @@ export async function GET(request: Request) {
       await saveBlingCredentials({
         accessToken: tokenData.access_token,
         refreshToken: tokenData.refresh_token,
-        // Add a 5-minute buffer to be safe with expiration
-        expiresAt: Date.now() + ((Number(tokenData.expires_in) - 300) * 1000)
+        expiresAt: Date.now() + (Number(tokenData.expires_in) * 1000),
       });
 
       return new NextResponse(`

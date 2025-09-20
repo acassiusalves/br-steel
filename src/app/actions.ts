@@ -4,7 +4,7 @@
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import { format, parseISO, startOfMonth, endOfMonth, eachMonthOfInterval, getMonth, getYear, differenceInDays } from 'date-fns';
-import { collection, getDocs, doc, writeBatch, query, where, setDoc, getDoc } from 'firebase/firestore';
+import { collection, getDocs, doc, writeBatch, query, where, setDoc, getDoc, deleteField } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 
 import { saveSalesOrders, filterNewOrders, getLastImportedOrderDate, orderExists, saveSalesOrdersOptimized, getImportedOrderIdsWithDetails } from '@/services/order-service';
@@ -27,208 +27,150 @@ type BlingCredentials = {
 
 const credentialsDocRef = doc(db, "appConfig", "blingCredentials");
 
-/**
- * Saves partial Bling API credentials to Firestore.
- * Used to store tokens and expiration dates.
- * Client ID and Secret are managed via environment variables.
- * @param credentials - The partial credentials to save (e.g., { accessToken, refreshToken, expiresAt }).
- */
-export async function saveBlingCredentials(credentials: Partial<BlingCredentials>): Promise<void> {
-    try {
-        // Only accessToken, refreshToken, and expiresAt should be managed here.
-        // If undefined is passed, the field will be removed by the merge.
-        const dataToSave: Partial<BlingCredentials> = {
-            accessToken: credentials.accessToken,
-            refreshToken: credentials.refreshToken,
-            expiresAt: credentials.expiresAt
-        };
-        await setDoc(credentialsDocRef, dataToSave, { merge: true });
-    } catch (error) {
-        console.error("Error saving Bling credentials to Firestore:", error);
-        throw new Error("Failed to save credentials to the database.");
-    }
+export async function disconnectBling(): Promise<void> {
+  await setDoc(
+    credentialsDocRef,
+    {
+      clientId: deleteField(),
+      clientSecret: deleteField(),
+      accessToken: deleteField(),
+      refreshToken: deleteField(),
+      expiresAt: deleteField(),
+    },
+    { merge: true }
+  );
 }
 
-/**
- * Retrieves Bling API credentials for client-side display.
- * Client Secret is NEVER exposed. Client ID is read from environment for display purposes.
- * @returns The saved credentials, with secrets masked.
- */
-export async function getBlingCredentials(): Promise<Partial<BlingCredentials>> {
-    try {
-        const docSnap = await getDoc(credentialsDocRef);
-        const savedCreds = docSnap.exists() ? docSnap.data() as BlingCredentials : {};
-        
-        // The client ID is not sensitive and can be shown on the client.
-        // It comes from the server environment variables.
-        const clientId = process.env.BLING_CLIENT_ID;
+function asField(v?: string | null) {
+  return v === '' || v == null ? deleteField() : v;
+}
 
-        return { 
-            clientId: clientId,
-            accessToken: savedCreds.accessToken, // Used to check if connected
-            clientSecret: savedCreds.accessToken ? '********' : '' // Mask if connected
-        };
-    } catch (error) {
-        console.error("Error getting Bling credentials from Firestore:", error);
-        return {};
-    }
+export async function saveBlingCredentials(partial: Partial<BlingCredentials>): Promise<void> {
+  await setDoc(
+    credentialsDocRef,
+    {
+      ...(partial.clientId       !== undefined ? { clientId: asField(partial.clientId) }       : {}),
+      ...(partial.clientSecret   !== undefined ? { clientSecret: asField(partial.clientSecret) } : {}),
+      ...(partial.accessToken    !== undefined ? { accessToken: asField(partial.accessToken) }   : {}),
+      ...(partial.refreshToken   !== undefined ? { refreshToken: asField(partial.refreshToken) } : {}),
+      ...(partial.expiresAt      !== undefined ? { expiresAt: partial.expiresAt ?? deleteField() } : {}),
+    },
+    { merge: true }
+  );
+}
+
+export async function getBlingCredentials(): Promise<{
+  clientId?: string;
+  clientSecret?: string; // mascarado
+  connected: boolean;
+}> {
+  const snap = await getDoc(credentialsDocRef);
+  if (!snap.exists()) return { connected: false };
+
+  const d = snap.data() as BlingCredentials;
+  return {
+    clientId: d.clientId,
+    clientSecret: d.clientSecret ? '********' : undefined,
+    connected: !!d.accessToken,
+  };
 }
 
 
 /**
- * Fetches all Bling credentials, including secrets, for server-side use ONLY.
+ * Fetches all Bling credentials, including secrets, for server-side use.
  * @returns The complete credentials object.
- * @throws An error if server-side environment variables are missing.
  */
 async function getFullBlingCredentials(): Promise<BlingCredentials> {
-    try {
-        const docSnap = await getDoc(credentialsDocRef);
-        const savedCreds = docSnap.exists() ? docSnap.data() as BlingCredentials : {};
-        
-        // Environment variables are the single source of truth for client id/secret on the server.
-        const clientId = process.env.BLING_CLIENT_ID;
-        const clientSecret = process.env.BLING_CLIENT_SECRET;
-
-        if (!clientId || !clientSecret) {
-            // This is a server-side configuration error.
-            throw new Error("Client ID ou Client Secret do Bling não estão configurados nas variáveis de ambiente do servidor.");
-        }
-
-        return {
-            clientId: clientId,
-            clientSecret: clientSecret,
-            accessToken: savedCreds.accessToken,
-            refreshToken: savedCreds.refreshToken,
-            expiresAt: savedCreds.expiresAt,
-        };
-    } catch (error) {
-        console.error("Error getting full Bling credentials:", error);
-        if (error instanceof Error) {
-            throw error; // Re-throw the original error
-        }
-        throw new Error("Could not retrieve server-side credentials.");
-    }
+  const snap = await getDoc(credentialsDocRef);
+  const saved = snap.exists() ? (snap.data() as BlingCredentials) : {};
+  return {
+    clientId:     saved.clientId     || process.env.BLING_CLIENT_ID,
+    clientSecret: saved.clientSecret || process.env.BLING_CLIENT_SECRET,
+    accessToken:  saved.accessToken,
+    refreshToken: saved.refreshToken,
+    expiresAt:    saved.expiresAt,
+  };
 }
 
 
 async function refreshAccessToken() {
   const creds = await getFullBlingCredentials();
-  
-  if (!creds.refreshToken) {
-      throw new Error("Refresh token do Bling não encontrado. Por favor, conecte a conta novamente.");
+  if (!creds.clientId || !creds.clientSecret || !creds.refreshToken) {
+    throw new Error('Credenciais do Bling incompletas para renovar o token.');
   }
 
-  const basic = Buffer.from(`${creds.clientId}:${creds.clientSecret}`).toString("base64");
+  const basic = Buffer.from(`${creds.clientId}:${creds.clientSecret}`).toString('base64');
   const body = new URLSearchParams({
-    grant_type: "refresh_token",
-    refresh_token: creds.refreshToken,
+    grant_type: 'refresh_token',
+    refresh_token: String(creds.refreshToken),
   });
-  
-  console.log("🔄 Tentando renovar token com refresh_token...");
 
-  const res = await fetch("https://www.bling.com.br/Api/v3/oauth/token", {
-    method: "POST",
+  const res = await fetch('https://www.bling.com.br/Api/v3/oauth/token', {
+    method: 'POST',
     headers: {
-      "Content-Type": "application/x-www-form-urlencoded",
-      "Authorization": `Basic ${basic}`,
-      "Accept": "application/json", 
+      'Content-Type': 'application/x-www-form-urlencoded',
+      'Authorization': `Basic ${basic}`,
+      'Accept': '1.0', // obrigatório no Bling
     },
     body: body.toString(),
-    cache: "no-store",
+    cache: 'no-store',
   });
 
-  const text = await res.text();
-  let json: any = null;
-  try { json = text ? JSON.parse(text) : null; } catch {}
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(`Refresh falhou (${res.status}): ${json?.error?.description || res.statusText}`);
 
-  // Normalize Bling error fields
-  const errCode = json?.error?.type || json?.error;
-  const errDesc = json?.error?.description || json?.error_description;
+  const update: Partial<BlingCredentials> = {};
+  if (json.access_token) update.accessToken = json.access_token;
+  if (json.refresh_token) update.refreshToken = json.refresh_token;
+  if (json.expires_in)   update.expiresAt   = Date.now() + Number(json.expires_in) * 1000;
 
-  if (!res.ok) {
-    console.error("Erro ao renovar token:", json || text);
-
-    const isInvalidGrant = res.status === 400 && (String(errCode).includes('invalid_grant') || String(errCode).includes('invalid_refresh_token'));
-
-    if (isInvalidGrant) {
-        await saveBlingCredentials({
-            accessToken: undefined,
-            refreshToken: undefined,
-            expiresAt: undefined
-        });
-        throw new Error("Sessão do Bling expirada. Por favor, reconecte sua conta.");
-    }
-    
-    throw new Error(`Refresh falhou (${res.status}): ${errDesc || errCode || res.statusText}`);
-  }
-
-  const newCredentials: Partial<BlingCredentials> = {};
-  if (json.access_token) newCredentials.accessToken = json.access_token;
-  if (json.refresh_token) newCredentials.refreshToken = json.refresh_token;
-  if (json.expires_in) {
-    // Add a 5-minute buffer to be safe
-    newCredentials.expiresAt = Date.now() + (Math.max(0, Number(json.expires_in) - 300) * 1000);
-  }
-  
-  await saveBlingCredentials(newCredentials);
-
-  return {
-      ...creds,
-      ...newCredentials
-  };
+  await saveBlingCredentials(update);
+  return { ...creds, ...update };
 }
 
 async function blingFetchWithRefresh(url: string, init?: RequestInit): Promise<any> {
-    let creds = await getFullBlingCredentials();
-    let accessToken = creds.accessToken;
+  let creds = await getFullBlingCredentials();
+  const skewMs = 60 * 1000;
 
-    // Check if token is non-existent, expired, or close to expiring
-    const isTokenExpired = !accessToken || (creds.expiresAt ? Date.now() > creds.expiresAt : true);
+  const needsEarlyRefresh = !creds.expiresAt || (Date.now() + skewMs >= creds.expiresAt);
+  if (needsEarlyRefresh) {
+    try { creds = await refreshAccessToken(); } catch {}
+  }
 
-    if(isTokenExpired) {
-        console.log("Token de acesso inválido ou expirado. Renovando...");
-        creds = await refreshAccessToken();
-        accessToken = creds.accessToken;
-    }
+  const call = async (token: string) => {
+    const res = await fetch(url, {
+      ...init,
+      headers: {
+        'Accept': 'application/json',
+        'Authorization': `Bearer ${token}`,
+        ...(init?.headers || {}),
+      },
+      cache: 'no-store',
+    });
+    const text = await res.text();
+    return { res, text };
+  };
 
-    const doCall = async (token: string) => {
-        const res = await fetch(url, {
-            ...init,
-            headers: {
-                "Accept": "application/json",
-                "Authorization": `Bearer ${token}`,
-                ...(init?.headers || {}),
-            },
-            cache: "no-store",
-        });
-        const text = await res.text(); // Read text immediately
-        return { res, text };
-    };
+  let { res, text } = await call(String(creds.accessToken || ''));
 
-    let { res, text } = await doCall(accessToken!);
+  const maybeInvalid = (status: number, body: string) =>
+    status === 401 || (status === 400 && /invalid_token|token expir|unauthorized/i.test(body));
 
-    if (res.status === 401) {
-        console.log("Token de acesso inválido (401). Tentando renovar...");
-        creds = await refreshAccessToken();
-        accessToken = creds.accessToken;
-        ({ res, text } = await doCall(accessToken!));
-    }
+  if (maybeInvalid(res.status, text)) {
+    creds = await refreshAccessToken();
+    ({ res, text } = await call(String(creds.accessToken || '')));
+  }
 
-    if (!res.ok) {
-        let payload: any;
-        try { payload = JSON.parse(text); } catch {}
-        const rawErr = payload?.error?.description || payload?.error_description || payload?.message || payload?.error || text;
-        const msg = typeof rawErr === "object" ? JSON.stringify(rawErr) : rawErr;
-        throw new Error(`Erro do Bling (${res.status}): ${msg}`);
-    }
+  if (!res.ok) {
+    let payload: any; try { payload = JSON.parse(text); } catch {}
+    const msg = payload?.error?.description || res.statusText || text;
+    throw new Error(`Erro do Bling (${res.status}): ${msg}`);
+  }
 
-    try {
-        return text ? JSON.parse(text) : null;
-    } catch (e) {
-        console.error("Failed to parse Bling API response as JSON:", text);
-        throw new Error("A resposta da API do Bling não era um JSON válido.");
-    }
+  try { return text ? JSON.parse(text) : null; }
+  catch { throw new Error('A resposta da API do Bling não era um JSON válido.'); }
 }
+
 
 async function blingGetPaged(baseUrl: string) {
     const allData: any[] = [];
