@@ -13,13 +13,13 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
-import { getBlingCredentials, saveBlingCredentials, countImportedOrders, getBlingOrderDetails, getImportedOrderIds, getBlingProducts, getBlingChannelByOrderId, smartSyncOrders, fullSyncOrders, deleteAllSalesOrders, getBlingProductBySku } from '@/app/actions';
+import { getBlingCredentials, saveBlingCredentials, countImportedOrders, getBlingOrderDetails, getImportedOrderIds, getBlingProducts, getBlingChannelByOrderId, smartSyncOrders, fullSyncOrders, deleteAllSalesOrders, getBlingProductBySku, clearBlingCredentials } from '@/app/actions';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Calendar } from '@/components/ui/calendar';
 import { cn } from '@/lib/utils';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from '@/components/ui/badge';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from '@/components/ui/separator';
 import { Progress } from '@/components/ui/progress';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
@@ -157,10 +157,11 @@ export default function ApiPage() {
   const handleDisconnect = async () => {
     setIsSaving(true);
     try {
-        await saveBlingCredentials({ accessToken: '', refreshToken: '' });
+        await clearBlingCredentials();
         setCredentials({ clientId: '', clientSecret: '', accessToken: '' });
         setApiStatus('unchecked');
         setAuthUrl("");
+        await loadInitialData();
          toast({
             title: "Desconectado!",
             description: "A integração com o Bling foi removida.",
@@ -512,7 +513,7 @@ export default function ApiPage() {
                     <Button variant="ghost" className="justify-start text-left font-normal h-8 px-2" onClick={() => setDatePreset('yesterday')}>Ontem</Button>
                     <Button variant="ghost" className="justify-start text-left font-normal h-8 px-2" onClick={() => setDatePreset('last7')}>Últimos 7 dias</Button>
                     <Button variant="ghost" className="justify-start text-left font-normal h-8 px-2" onClick={() => setDatePreset('last30')}>Últimos 30 dias</Button>
-                    <Button variant="ghost" className="justify-start text-left font-normal h-8 px-2" onClick={() => setDatePreset('last3Months')}>Últimos 3 meses</Button>
+                    <Button variant="ghost" className="justify-start text-left font-normal h-8 px-2" onClick={() setDatePreset('last3Months')}>Últimos 3 meses</Button>
                     <Separator />
                     <Button variant="ghost" className="justify-start text-left font-normal h-8 px-2" onClick={() => setDatePreset('thisMonth')}>Este mês</Button>
                     <Button variant="ghost" className="justify-start text-left font-normal h-8 px-2" onClick={() => setDatePreset('lastMonth')}>Mês passado</Button>
@@ -916,6 +917,5 @@ export default function ApiPage() {
 }
 
     
-
 
     
