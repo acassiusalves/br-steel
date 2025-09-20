@@ -208,7 +208,7 @@ export default function SalesDashboard() {
     if (isSyncing) return;
 
     const credentials = await getBlingCredentials();
-    if (!credentials.accessToken) {
+    if (!credentials.connected) {
         if(isManual) {
             toast({
                 variant: 'destructive',
