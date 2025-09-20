@@ -44,6 +44,8 @@ import {
   DropdownMenuSeparator as DropdownMenuSeparatorColumn,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
+import { Switch } from '@/components/ui/switch';
+import { Label } from '@/components/ui/label';
 
 
 type ColumnVisibility = {
@@ -52,11 +54,14 @@ type ColumnVisibility = {
 
 export default function ProducaoPage() {
   const [demand, setDemand] = React.useState<ProductionDemand[]>([]);
+  const [displayDemand, setDisplayDemand] = React.useState<ProductionDemand[]>([]);
   const [isLoading, setIsLoading] = React.useState(true);
   const [isSyncing, setIsSyncing] = React.useState(false);
   const [updatingSku, setUpdatingSku] = React.useState<string | null>(null);
   const [date, setDate] = React.useState<DateRange | undefined>(undefined);
   const { toast } = useToast();
+  
+  const [productionQueueFilter, setProductionQueueFilter] = React.useState(false);
 
   const [columnVisibility, setColumnVisibility] = React.useState<ColumnVisibility>({
     sku: true,
@@ -133,6 +138,31 @@ export default function ProducaoPage() {
     setDate(initialDate);
     fetchData(initialDate, false);
   }, [fetchData]);
+
+  React.useEffect(() => {
+    let filteredDemand = [...demand];
+
+    if (productionQueueFilter) {
+      filteredDemand = filteredDemand
+        .filter(item => {
+          const stock = item.stockLevel;
+          const min = item.stockMin;
+          const max = item.stockMax;
+          
+          if (stock === undefined || min === undefined || max === undefined) return false;
+
+          const needsProduction = stock <= min;
+          const isOverstocked = stock > max;
+          
+          return needsProduction && !isOverstocked;
+        })
+        .sort((a, b) => b.weeklyAverage - a.weeklyAverage);
+    }
+
+    setDisplayDemand(filteredDemand);
+    setCurrentPage(1); // Reset page on filter change
+  }, [demand, productionQueueFilter]);
+
 
   const handleFilter = () => {
     if (!date) {
@@ -212,8 +242,8 @@ export default function ProducaoPage() {
   }
 
   // Pagination Logic
-  const totalPages = Math.ceil(demand.length / rowsPerPage);
-  const paginatedDemand = demand.slice(
+  const totalPages = Math.ceil(displayDemand.length / rowsPerPage);
+  const paginatedDemand = displayDemand.slice(
     (currentPage - 1) * rowsPerPage,
     currentPage * rowsPerPage
   );
@@ -296,44 +326,57 @@ export default function ProducaoPage() {
                       A lista abaixo mostra a quantidade de pedidos únicos (com nota fiscal emitida) para cada produto no período selecionado.
                     </CardDescription>
                 </div>
-                 <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button variant="outline" className="ml-auto">
-                        <Columns className="mr-2 h-4 w-4" />
-                        Exibir Colunas
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end">
-                      <DropdownMenuLabel>Alternar Colunas</DropdownMenuLabel>
-                      <DropdownMenuSeparatorColumn />
-                      {Object.keys(columnVisibility).map((key) => {
-                          const name = {
-                              sku: "SKU",
-                              description: "Descrição",
-                              stockMin: "Estoque Mínimo",
-                              stockMax: "Estoque Máximo",
-                              stockLevel: "Estoque Atual",
-                              orderCount: "Qtd. Pedidos",
-                              totalQuantitySold: "Qtd. Vendida",
-                              weeklyAverage: "Média Semanal",
-                              corte: "Corte",
-                              dobra: "Dobra",
-                              actions: "Ações",
-                          }[key] || key;
-                          
-                          return (
-                            <DropdownMenuCheckboxItem
-                              key={key}
-                              className="capitalize"
-                              checked={columnVisibility[key]}
-                              onCheckedChange={() => toggleColumn(key)}
-                            >
-                              {name}
-                            </DropdownMenuCheckboxItem>
-                          )
-                      })}
-                    </DropdownMenuContent>
-                </DropdownMenu>
+                 <div className="flex items-center gap-4">
+                    <div className="flex items-center space-x-2">
+                        <Label htmlFor="production-queue-filter" className="font-semibold text-sm">
+                            Fila de Produção
+                        </Label>
+                        <Switch
+                            id="production-queue-filter"
+                            checked={productionQueueFilter}
+                            onCheckedChange={setProductionQueueFilter}
+                            aria-label="Filtro de Fila de Produção"
+                        />
+                    </div>
+                    <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button variant="outline" className="ml-auto">
+                            <Columns className="mr-2 h-4 w-4" />
+                            Exibir Colunas
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuLabel>Alternar Colunas</DropdownMenuLabel>
+                          <DropdownMenuSeparatorColumn />
+                          {Object.keys(columnVisibility).map((key) => {
+                              const name = {
+                                  sku: "SKU",
+                                  description: "Descrição",
+                                  stockMin: "Estoque Mínimo",
+                                  stockMax: "Estoque Máximo",
+                                  stockLevel: "Estoque Atual",
+                                  orderCount: "Qtd. Pedidos",
+                                  totalQuantitySold: "Qtd. Vendida",
+                                  weeklyAverage: "Média Semanal",
+                                  corte: "Corte",
+                                  dobra: "Dobra",
+                                  actions: "Ações",
+                              }[key] || key;
+                              
+                              return (
+                                <DropdownMenuCheckboxItem
+                                  key={key}
+                                  className="capitalize"
+                                  checked={columnVisibility[key]}
+                                  onCheckedChange={() => toggleColumn(key)}
+                                >
+                                  {name}
+                                </DropdownMenuCheckboxItem>
+                              )
+                          })}
+                        </DropdownMenuContent>
+                    </DropdownMenu>
+                 </div>
             </div>
           </CardHeader>
           <CardContent>
@@ -403,7 +446,7 @@ export default function ProducaoPage() {
           </CardContent>
            <CardFooter className="flex items-center justify-between">
             <div className="text-sm text-muted-foreground">
-              Total de {demand.length} produtos.
+              Total de {displayDemand.length} produtos.
             </div>
             <div className="flex items-center space-x-6 lg:space-x-8">
               <div className="flex items-center space-x-2">
