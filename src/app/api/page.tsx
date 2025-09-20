@@ -613,156 +613,156 @@ export default function ApiPage() {
                       </div>
                   )}
               </div>
-          </div>
-          </div>
-          
-          <Separator />
-
-            <div className="space-y-6">
-              <h3 className="font-semibold text-lg">Testes de Endpoints</h3>
-                <p className="text-sm text-muted-foreground -mt-4">
-                  Use as seções abaixo para fazer chamadas individuais à API do Bling e inspecionar a resposta.
-              </p>
-              <Card className="bg-muted/40">
-                <CardHeader>
-                  <CardTitle className="text-base">Detalhes do Pedido</CardTitle>
-                  <CardDescription>Busque os dados completos de um pedido específico pelo ID.</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <div className="flex items-end gap-2">
-                    <div className="flex-1 space-y-1.5">
-                      <Label htmlFor="orderIdToTest">ID do Pedido no Bling</Label>
-                      <Input 
-                          id="orderIdToTest"
-                          value={orderIdToTest}
-                          onChange={(e) => setOrderIdToTest(e.target.value)}
-                          placeholder="Ex: 123456789"
-                      />
-                    </div>
-                    <Button onClick={handleFetchOrderDetails} disabled={isFetchingOrderDetails}>
-                      {isFetchingOrderDetails ? (
-                        <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Buscando...</>
-                      ) : (
-                        <><Search className="mr-2 h-4 w-4" /> Buscar Detalhes</>
-                      )}
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
-
-                <Card className="bg-muted/40">
-                <CardHeader>
-                  <CardTitle className="text-base">Detalhes do Canal de Venda (Marketplace)</CardTitle>
-                  <CardDescription>Busque o nome do marketplace associado a um pedido pelo ID do pedido.</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <div className="flex items-end gap-2">
-                    <div className="flex-1 space-y-1.5">
-                      <Label htmlFor="orderIdForChannel">ID do Pedido no Bling</Label>
-                      <Input 
-                          id="orderIdForChannel"
-                          value={orderIdForChannel}
-                          onChange={(e) => setOrderIdForChannel(e.target.value)}
-                          placeholder="Ex: 123456789"
-                      />
-                    </div>
-                    <Button onClick={handleFetchChannel} disabled={isFetchingChannel}>
-                      {isFetchingChannel ? (
-                        <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Buscando...</>
-                      ) : (
-                        <><Store className="mr-2 h-4 w-4" /> Buscar Canal de Venda</>
-                      )}
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
-
-              <Card className="bg-muted/40">
-                <CardHeader>
-                  <CardTitle className="text-base">Busca de Produto por SKU</CardTitle>
-                  <CardDescription>Busque os dados de um produto pelo seu SKU (código).</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <div className="flex items-end gap-2">
-                    <div className="flex-1 space-y-1.5">
-                      <Label htmlFor="skuToTest">SKU do Produto</Label>
-                      <Input 
-                          id="skuToTest"
-                          value={skuToTest}
-                          onChange={(e) => setSkuToTest(e.target.value)}
-                          placeholder="Ex: PROD-001"
-                      />
-                    </div>
-                    <Button onClick={handleFetchProductBySku} disabled={isFetchingProductBySku}>
-                      {isFetchingProductBySku ? (
-                        <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Buscando...</>
-                      ) : (
-                        <><Package className="mr-2 h-4 w-4" /> Buscar por SKU</>
-                      )}
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
-
-              <Card className="bg-muted/40">
-                <CardHeader>
-                  <CardTitle className="text-base">Lista de Produtos</CardTitle>
-                    <CardDescription>Busque os produtos cadastrados no Bling.</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <Button onClick={handleFetchProducts} disabled={isFetchingProducts}>
-                      {isFetchingProducts ? (
-                        <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Buscando...</>
-                      ) : (
-                        <><Package className="mr-2 h-4 w-4" /> Buscar Produtos</>
-                      )}
-                  </Button>
-                </CardContent>
-              </Card>
+            </div>
           </div>
           
           <Separator />
 
-            <Card className="border-destructive">
+          <div className="space-y-6">
+            <h3 className="font-semibold text-lg">Testes de Endpoints</h3>
+              <p className="text-sm text-muted-foreground -mt-4">
+                Use as seções abaixo para fazer chamadas individuais à API do Bling e inspecionar a resposta.
+            </p>
+            <Card className="bg-muted/40">
               <CardHeader>
-                  <CardTitle className="text-destructive">Ações de Risco</CardTitle>
-                  <CardDescription>
-                      Cuidado: as ações nesta seção são permanentes e não podem ser desfeitas.
-                  </CardDescription>
+                <CardTitle className="text-base">Detalhes do Pedido</CardTitle>
+                <CardDescription>Busque os dados completos de um pedido específico pelo ID.</CardDescription>
               </CardHeader>
               <CardContent>
-                  <AlertDialog>
-                      <AlertDialogTrigger asChild>
-                          <Button variant="destructive" disabled={isDeleting || isImporting}>
-                              {isDeleting ? (
-                                  <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Apagando...</>
-                              ) : (
-                                  <><Trash2 className="mr-2 h-4 w-4" /> Apagar Todos os Pedidos</>
-                              )}
-                          </Button>
-                      </AlertDialogTrigger>
-                      <AlertDialogContent>
-                          <AlertDialogHeader>
-                              <AlertDialogTitle>Você tem certeza absoluta?</AlertDialogTitle>
-                              <AlertDialogDescription>
-                                  Esta ação é irreversível. Todos os <strong>{importedCount}</strong> pedidos de venda importados serão
-                                  permanentemente apagados do banco de dados. Os dados no Bling não serão afetados. 
-                                  Use esta função se precisar forçar uma re-sincronização completa do zero.
-                              </AlertDialogDescription>
-                          </AlertDialogHeader>
-                          <AlertDialogFooter>
-                              <AlertDialogCancel>Cancelar</AlertDialogCancel>
-                              <AlertDialogAction onClick={handleDeleteAllOrders} className="bg-destructive hover:bg-destructive/90">
-                                  Sim, apagar tudo
-                              </AlertDialogAction>
-                          </AlertDialogFooter>
-                      </AlertDialogContent>
-                  </AlertDialog>
-                    <p className="text-sm text-muted-foreground mt-2">
-                      Use esta função para limpar a base de dados e começar uma nova sincronização do zero.
-                  </p>
+                <div className="flex items-end gap-2">
+                  <div className="flex-1 space-y-1.5">
+                    <Label htmlFor="orderIdToTest">ID do Pedido no Bling</Label>
+                    <Input 
+                        id="orderIdToTest"
+                        value={orderIdToTest}
+                        onChange={(e) => setOrderIdToTest(e.target.value)}
+                        placeholder="Ex: 123456789"
+                    />
+                  </div>
+                  <Button onClick={handleFetchOrderDetails} disabled={isFetchingOrderDetails}>
+                    {isFetchingOrderDetails ? (
+                      <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Buscando...</>
+                    ) : (
+                      <><Search className="mr-2 h-4 w-4" /> Buscar Detalhes</>
+                    )}
+                  </Button>
+                </div>
               </CardContent>
             </Card>
+
+              <Card className="bg-muted/40">
+              <CardHeader>
+                <CardTitle className="text-base">Detalhes do Canal de Venda (Marketplace)</CardTitle>
+                <CardDescription>Busque o nome do marketplace associado a um pedido pelo ID do pedido.</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="flex items-end gap-2">
+                  <div className="flex-1 space-y-1.5">
+                    <Label htmlFor="orderIdForChannel">ID do Pedido no Bling</Label>
+                    <Input 
+                        id="orderIdForChannel"
+                        value={orderIdForChannel}
+                        onChange={(e) => setOrderIdForChannel(e.target.value)}
+                        placeholder="Ex: 123456789"
+                    />
+                  </div>
+                  <Button onClick={handleFetchChannel} disabled={isFetchingChannel}>
+                    {isFetchingChannel ? (
+                      <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Buscando...</>
+                    ) : (
+                      <><Store className="mr-2 h-4 w-4" /> Buscar Canal de Venda</>
+                    )}
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card className="bg-muted/40">
+              <CardHeader>
+                <CardTitle className="text-base">Busca de Produto por SKU</CardTitle>
+                <CardDescription>Busque os dados de um produto pelo seu SKU (código).</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="flex items-end gap-2">
+                  <div className="flex-1 space-y-1.5">
+                    <Label htmlFor="skuToTest">SKU do Produto</Label>
+                    <Input 
+                        id="skuToTest"
+                        value={skuToTest}
+                        onChange={(e) => setSkuToTest(e.target.value)}
+                        placeholder="Ex: PROD-001"
+                    />
+                  </div>
+                  <Button onClick={handleFetchProductBySku} disabled={isFetchingProductBySku}>
+                    {isFetchingProductBySku ? (
+                      <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Buscando...</>
+                    ) : (
+                      <><Package className="mr-2 h-4 w-4" /> Buscar por SKU</>
+                    )}
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card className="bg-muted/40">
+              <CardHeader>
+                <CardTitle className="text-base">Lista de Produtos</CardTitle>
+                  <CardDescription>Busque os produtos cadastrados no Bling.</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <Button onClick={handleFetchProducts} disabled={isFetchingProducts}>
+                    {isFetchingProducts ? (
+                      <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Buscando...</>
+                    ) : (
+                      <><Package className="mr-2 h-4 w-4" /> Buscar Produtos</>
+                    )}
+                </Button>
+              </CardContent>
+            </Card>
+        </div>
+          
+        <Separator />
+
+          <Card className="border-destructive">
+            <CardHeader>
+                <CardTitle className="text-destructive">Ações de Risco</CardTitle>
+                <CardDescription>
+                    Cuidado: as ações nesta seção são permanentes e não podem ser desfeitas.
+                </CardDescription>
+            </CardHeader>
+            <CardContent>
+                <AlertDialog>
+                    <AlertDialogTrigger asChild>
+                        <Button variant="destructive" disabled={isDeleting || isImporting}>
+                            {isDeleting ? (
+                                <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Apagando...</>
+                            ) : (
+                                <><Trash2 className="mr-2 h-4 w-4" /> Apagar Todos os Pedidos</>
+                            )}
+                        </Button>
+                    </AlertDialogTrigger>
+                    <AlertDialogContent>
+                        <AlertDialogHeader>
+                            <AlertDialogTitle>Você tem certeza absoluta?</AlertDialogTitle>
+                            <AlertDialogDescription>
+                                Esta ação é irreversível. Todos os <strong>{importedCount}</strong> pedidos de venda importados serão
+                                permanentemente apagados do banco de dados. Os dados no Bling não serão afetados. 
+                                Use esta função se precisar forçar uma re-sincronização completa do zero.
+                            </AlertDialogDescription>
+                        </AlertDialogHeader>
+                        <AlertDialogFooter>
+                            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                            <AlertDialogAction onClick={handleDeleteAllOrders} className="bg-destructive hover:bg-destructive/90">
+                                Sim, apagar tudo
+                            </AlertDialogAction>
+                        </AlertDialogFooter>
+                    </AlertDialogContent>
+                </AlertDialog>
+                  <p className="text-sm text-muted-foreground mt-2">
+                    Use esta função para limpar a base de dados e começar uma nova sincronização do zero.
+                </p>
+            </CardContent>
+          </Card>
 
         </div>
       );
