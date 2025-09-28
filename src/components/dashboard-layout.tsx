@@ -69,6 +69,7 @@ const navItems = [
     },
     { href: "/estoque", icon: Warehouse, label: "Estoque" },
     { href: "/api", icon: Code, label: "API" },
+    { href: "/configuracoes", icon: Settings, label: "Configurações" },
 ];
 
 const NavLink = ({ item, pathname, searchParams }: { item: typeof navItems[0], pathname: string, searchParams: URLSearchParams }) => {
