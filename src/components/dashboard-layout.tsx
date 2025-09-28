@@ -3,7 +3,7 @@
 
 import type { ReactNode } from "react";
 import Link from "next/link";
-import { usePathname, useRouter } from 'next/navigation';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import {
   LayoutDashboard,
   Settings,
@@ -70,15 +70,7 @@ const navItems = [
     },
     { href: "/estoque", icon: Warehouse, label: "Estoque" },
     { href: "/api", icon: Code, label: "API" },
-    { 
-        href: "/configuracoes", 
-        icon: Settings, 
-        label: "Configurações",
-        subItems: [
-            { href: "/configuracoes?tab=geral", icon: Settings, label: "Geral" },
-            { href: "/configuracoes?tab=usuarios", icon: Users, label: "Usuários" },
-        ]
-    },
+    { href: "/configuracoes", icon: Users, label: "Configurações" },
 ];
 
 const NavLink = ({ item, pathname, searchParams }: { item: typeof navItems[0], pathname: string, searchParams: URLSearchParams }) => {
@@ -107,7 +99,7 @@ const NavLink = ({ item, pathname, searchParams }: { item: typeof navItems[0], p
                 <DropdownMenuContent>
                     {item.subItems.map(subItem => {
                         const subItemTab = subItem.href.split('tab=')[1];
-                        const isSubItemActive = baseIsActive && (currentTab === subItemTab || (!currentTab && subItemTab === 'geral'));
+                        const isSubItemActive = baseIsActive && (currentTab === subItemTab || (!currentTab && subItemTab === 'dashboard'));
                         return (
                             <Link key={subItem.href} href={subItem.href} passHref>
                                 <DropdownMenuItem className={cn(isSubItemActive && "bg-accent")}>
@@ -138,8 +130,7 @@ const NavLink = ({ item, pathname, searchParams }: { item: typeof navItems[0], p
 
 export default function DashboardLayout({ children }: { children: ReactNode }) {
   const pathname = usePathname();
-  const searchParamsString = usePathname().split('?')[1] || '';
-  const searchParams = new URLSearchParams(searchParamsString);
+  const searchParams = useSearchParams();
   const router = useRouter();
   const { toast } = useToast();
   const [open, setOpen] = React.useState(false);
@@ -182,7 +173,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
               {item.subItems.map(sub => {
                   const currentTab = searchParams.get('tab');
                   const subItemTab = sub.href.split('tab=')[1];
-                  const isSubItemActive = baseIsActive && (currentTab === subItemTab || (!currentTab && subItemTab === 'geral'));
+                  const isSubItemActive = baseIsActive && (currentTab === subItemTab || (!currentTab && subItemTab === 'dashboard'));
                   return (
                     <Link
                       key={sub.href}
@@ -285,5 +276,3 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
     </div>
   );
 }
-
-    
