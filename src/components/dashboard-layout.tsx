@@ -17,6 +17,7 @@ import {
   ChevronDown,
   PackagePlus,
   Boxes,
+  Users,
 } from "lucide-react";
 import * as React from "react";
 
@@ -69,7 +70,15 @@ const navItems = [
     },
     { href: "/estoque", icon: Warehouse, label: "Estoque" },
     { href: "/api", icon: Code, label: "API" },
-    { href: "/configuracoes", icon: Settings, label: "Configurações" },
+    { 
+        href: "/configuracoes", 
+        icon: Settings, 
+        label: "Configurações",
+        subItems: [
+            { href: "/configuracoes?tab=geral", icon: Settings, label: "Geral" },
+            { href: "/configuracoes?tab=usuarios", icon: Users, label: "Usuários" },
+        ]
+    },
 ];
 
 const NavLink = ({ item, pathname, searchParams }: { item: typeof navItems[0], pathname: string, searchParams: URLSearchParams }) => {
@@ -97,7 +106,8 @@ const NavLink = ({ item, pathname, searchParams }: { item: typeof navItems[0], p
                 </DropdownMenuTrigger>
                 <DropdownMenuContent>
                     {item.subItems.map(subItem => {
-                        const isSubItemActive = baseIsActive && currentTab === subItem.href.split('tab=')[1];
+                        const subItemTab = subItem.href.split('tab=')[1];
+                        const isSubItemActive = baseIsActive && (currentTab === subItemTab || (!currentTab && subItemTab === 'geral'));
                         return (
                             <Link key={subItem.href} href={subItem.href} passHref>
                                 <DropdownMenuItem className={cn(isSubItemActive && "bg-accent")}>
@@ -128,7 +138,8 @@ const NavLink = ({ item, pathname, searchParams }: { item: typeof navItems[0], p
 
 export default function DashboardLayout({ children }: { children: ReactNode }) {
   const pathname = usePathname();
-  const searchParams = new URLSearchParams(usePathname().split('?')[1] || '');
+  const searchParamsString = usePathname().split('?')[1] || '';
+  const searchParams = new URLSearchParams(searchParamsString);
   const router = useRouter();
   const { toast } = useToast();
   const [open, setOpen] = React.useState(false);
@@ -170,7 +181,8 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
             <div className="flex flex-col pl-8 pt-2">
               {item.subItems.map(sub => {
                   const currentTab = searchParams.get('tab');
-                  const isSubItemActive = baseIsActive && currentTab === sub.href.split('tab=')[1];
+                  const subItemTab = sub.href.split('tab=')[1];
+                  const isSubItemActive = baseIsActive && (currentTab === subItemTab || (!currentTab && subItemTab === 'geral'));
                   return (
                     <Link
                       key={sub.href}
@@ -273,3 +285,5 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
     </div>
   );
 }
+
+    
