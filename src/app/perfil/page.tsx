@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { Loader2, KeyRound, User } from 'lucide-react';
+import { Loader2, KeyRound, User, Shield } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { Separator } from '@/components/ui/separator';
 
@@ -19,7 +19,8 @@ export default function PerfilPage() {
     const user = {
         name: 'Admin',
         email: 'admin@brsteel.com',
-        avatarUrl: 'https://picsum.photos/seed/user/100/100'
+        avatarUrl: 'https://picsum.photos/seed/user/100/100',
+        role: 'Administrador'
     };
 
     const handleSaveChanges = (event: React.FormEvent<HTMLFormElement>) => {
@@ -47,7 +48,7 @@ export default function PerfilPage() {
                         <CardHeader>
                             <CardTitle>Informações Pessoais</CardTitle>
                             <CardDescription>
-                                Atualize seus dados. O e-mail não pode ser alterado.
+                                Atualize seus dados. O e-mail e a função não podem ser alterados.
                             </CardDescription>
                         </CardHeader>
                         <CardContent className="space-y-6">
@@ -66,6 +67,10 @@ export default function PerfilPage() {
                                 <div className="space-y-2">
                                     <Label htmlFor="email">E-mail</Label>
                                     <Input id="email" type="email" defaultValue={user.email} disabled />
+                                </div>
+                                 <div className="space-y-2">
+                                    <Label htmlFor="role">Função</Label>
+                                    <Input id="role" defaultValue={user.role} disabled />
                                 </div>
                             </div>
                         </CardContent>
