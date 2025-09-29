@@ -13,5 +13,6 @@ export const pagePermissions: Record<string, string[]> = {
     '/insumos': ['Administrador', 'Operador'],
     '/estoque': ['Administrador', 'Operador', 'Vendedor'],
     '/configuracoes': ['Administrador'],
+    '/api-settings': ['Administrador'],
     '/perfil': ['Administrador', 'Vendedor', 'Operador'],
 };

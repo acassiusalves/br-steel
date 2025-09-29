@@ -9,7 +9,7 @@ export default function ApiRedirectPage() {
   const router = useRouter();
 
   useEffect(() => {
-    router.replace('/configuracoes?tab=api');
+    router.replace('/api-settings');
   }, [router]);
 
   return (

@@ -20,6 +20,7 @@ import {
   Users,
   User,
   Loader2,
+  Plug,
 } from "lucide-react";
 import * as React from "react";
 
@@ -76,19 +77,15 @@ const allNavItems = [
         icon: Settings, 
         label: "Configurações",
         subItems: [
-            { href: "/configuracoes?tab=usuarios", icon: Users, label: "Usuários" },
-            { href: "/configuracoes?tab=api", icon: Code, label: "Conexão API" },
+            { href: "/configuracoes", icon: Users, label: "Usuários e Permissões" },
+            { href: "/api-settings", icon: Plug, label: "Conexão API" },
         ]
     },
 ];
 
 const NavLink = ({ item, pathname, searchParams }: { item: typeof allNavItems[0], pathname: string, searchParams: URLSearchParams }) => {
     const currentTab = searchParams.get('tab');
-    const baseIsActive = pathname.startsWith(item.href);
-
-    // This logic determines if the top-level menu item should be highlighted.
-    // It's active if the path matches AND (it has no sub-items OR one of its sub-items is the current tab).
-    const isActive = baseIsActive;
+    const baseIsActive = pathname.startsWith(item.href) || (item.subItems && item.subItems.some(sub => pathname.startsWith(sub.href.split('?')[0])));
 
 
     if (item.subItems) {
@@ -99,7 +96,7 @@ const NavLink = ({ item, pathname, searchParams }: { item: typeof allNavItems[0]
                         variant="ghost"
                         className={cn(
                             "transition-colors text-sm font-medium hover:text-primary gap-1",
-                             isActive ? "text-primary" : "text-muted-foreground"
+                             baseIsActive ? "text-primary" : "text-muted-foreground"
                         )}
                     >
                         {item.label}
@@ -108,8 +105,11 @@ const NavLink = ({ item, pathname, searchParams }: { item: typeof allNavItems[0]
                 </DropdownMenuTrigger>
                 <DropdownMenuContent>
                     {item.subItems.map(subItem => {
-                        const subItemTab = subItem.href.split('tab=')[1];
-                        const isSubItemActive = baseIsActive && (currentTab === subItemTab || (!currentTab && (subItemTab === 'dashboard' || subItemTab === 'usuarios' || subItemTab === 'cadastro')));
+                        const subItemPath = subItem.href.split('?')[0];
+                        const subItemTab = subItem.href.includes('?tab=') ? subItem.href.split('tab=')[1] : null;
+
+                        const isSubItemActive = pathname.startsWith(subItemPath) && (!subItemTab || currentTab === subItemTab);
+
                         return (
                             <Link key={subItem.href} href={subItem.href} passHref>
                                 <DropdownMenuItem className={cn(isSubItemActive && "bg-accent")}>
@@ -129,7 +129,7 @@ const NavLink = ({ item, pathname, searchParams }: { item: typeof allNavItems[0]
             href={item.href}
             className={cn(
                 "transition-colors text-sm font-medium hover:text-primary",
-                isActive ? "text-primary" : "text-muted-foreground"
+                baseIsActive ? "text-primary" : "text-muted-foreground"
             )}
         >
             {item.label}
@@ -179,11 +179,34 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
             const permissions = settings?.permissions || pagePermissions;
             const inactivePages = settings?.inactivePages || [];
             
-            const filteredNavItems = allNavItems.filter(item => {
-                const isPageActive = !inactivePages.includes(item.href);
-                const userHasPermission = permissions[item.href]?.includes(userRole) || userRole === 'Administrador';
-                return isPageActive && userHasPermission;
-            });
+             const filteredNavItems = allNavItems
+                .map(item => {
+                    // If the item has subItems, filter them first
+                    if (item.subItems) {
+                        const allowedSubItems = item.subItems.filter(subItem => {
+                             const subItemPath = subItem.href.split('?')[0];
+                             const isSubItemActive = !inactivePages.includes(subItemPath);
+                             const userHasPermissionForSubItem = permissions[subItemPath]?.includes(userRole) || userRole === 'Administrador';
+                             return isSubItemActive && userHasPermissionForSubItem;
+                        });
+
+                        // If there are any allowed sub-items, return the main item with the filtered sub-items
+                        if (allowedSubItems.length > 0) {
+                            return { ...item, subItems: allowedSubItems };
+                        }
+                        return null;
+                    }
+
+                    // For items without sub-items
+                    const isPageActive = !inactivePages.includes(item.href);
+                    const userHasPermission = permissions[item.href]?.includes(userRole) || userRole === 'Administrador';
+                    
+                    if (isPageActive && userHasPermission) {
+                        return item;
+                    }
+                    return null;
+                })
+                .filter((item): item is typeof allNavItems[0] => item !== null);
             
             setNavItems(filteredNavItems);
 
@@ -236,8 +259,10 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
             <div className="flex flex-col pl-8 pt-2">
               {item.subItems.map(sub => {
                   const currentTab = searchParams.get('tab');
-                  const subItemTab = sub.href.split('tab=')[1];
-                  const isSubItemActive = baseIsActive && (currentTab === subItemTab || (!currentTab && (subItemTab === 'dashboard' || subItemTab === 'usuarios' || subItemTab === 'cadastro')));
+                  const subItemPath = sub.href.split('?')[0];
+                  const subItemTab = sub.href.includes('?tab=') ? sub.href.split('tab=')[1] : null;
+                  const isSubItemActive = pathname.startsWith(subItemPath) && (!subItemTab || currentTab === subItemTab);
+
                   return (
                     <Link
                       key={sub.href}
@@ -338,9 +363,6 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
                 <DropdownMenuSeparator />
                 <Link href="/perfil" passHref>
                   <DropdownMenuItem>Meu Perfil</DropdownMenuItem>
-                </Link>
-                <Link href="/configuracoes" passHref>
-                  <DropdownMenuItem>Configurações</DropdownMenuItem>
                 </Link>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem onClick={handleLogout}>Sair</DropdownMenuItem>
