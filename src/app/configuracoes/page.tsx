@@ -31,7 +31,7 @@ function UsersTabContent() {
     const [isLoading, setIsLoading] = React.useState(true);
     const [isFormOpen, setIsFormOpen] = React.useState(false);
     
-    const [isSavingUsers, setIsSavingUsers] = React.useState(false);
+    const [isSaving, setIsSaving] = React.useState(false);
     const [isSavingPermissions, setIsSavingPermissions] = React.useState(false);
 
     const [deletingUser, setDeletingUser] = React.useState<User | null>(null);
@@ -132,7 +132,7 @@ function UsersTabContent() {
     };
     
     const handleSaveUsers = async () => {
-        setIsSavingUsers(true);
+        setIsSaving(true);
         try {
             const updatePromises = users.map(user => updateUserRole(user.id, user.role));
             await Promise.all(updatePromises);
@@ -143,14 +143,14 @@ function UsersTabContent() {
         } catch (e) {
              toast({ variant: "destructive", title: "Erro", description: "Não foi possível salvar as funções dos usuários."})
         } finally {
-            setIsSavingUsers(false);
+            setIsSaving(false);
         }
     }
 
 
     const handleSaveUser = async (event: React.FormEvent<HTMLFormElement>) => {
         event.preventDefault();
-        setIsSavingUsers(true);
+        setIsSaving(true);
         const formData = new FormData(event.currentTarget);
         const userData = {
             name: formData.get('name') as string,
@@ -173,7 +173,7 @@ function UsersTabContent() {
                 description: error.message,
             });
         } finally {
-            setIsSavingUsers(false);
+            setIsSaving(false);
         }
     };
 
@@ -278,7 +278,7 @@ function UsersTabContent() {
                                 <DialogHeader>
                                     <DialogTitle>Adicionar Novo Usuário</DialogTitle>
                                     <DialogDescription>
-                                        Preencha os dados abaixo para criar um novo acesso.
+                                        Preencha os dados abaixo para criar um novo acesso. O usuário receberá um convite por e-mail para definir sua senha.
                                     </DialogDescription>
                                 </DialogHeader>
                                 <div className="grid gap-4 py-4">
@@ -308,9 +308,9 @@ function UsersTabContent() {
                                 </div>
                                 <DialogFooter>
                                     <Button type="button" variant="ghost" onClick={() => setIsFormOpen(false)}>Cancelar</Button>
-                                    <Button type="submit" disabled={isSavingUsers}>
-                                        {isSavingUsers && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                                        Salvar Usuário
+                                    <Button type="submit" disabled={isSaving}>
+                                        {isSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                                        Salvar e Enviar Convite
                                     </Button>
                                 </DialogFooter>
                             </form>
@@ -358,7 +358,7 @@ function UsersTabContent() {
                                             </Select>
                                         </TableCell>
                                         <TableCell className="text-right">
-                                            <Button variant="ghost" size="icon" onClick={() => setDeletingUser(user)}>
+                                            <Button variant="ghost" size="icon" onClick={() => setDeletingUser(user)} disabled={user.email?.toLowerCase().includes('admin@')}>
                                                 <Trash2 className="h-4 w-4 text-destructive" />
                                             </Button>
                                         </TableCell>
@@ -375,8 +375,8 @@ function UsersTabContent() {
                     </Table>
                 </CardContent>
                  <CardFooter className="justify-end">
-                    <Button onClick={handleSaveUsers} disabled={isSavingUsers}>
-                         {isSavingUsers && <Loader2 className="animate-spin mr-2"/>}
+                    <Button onClick={handleSaveUsers} disabled={isSaving}>
+                         {isSaving && <Loader2 className="animate-spin mr-2"/>}
                         Salvar Funções de Usuário
                     </Button>
                 </CardFooter>
@@ -436,3 +436,5 @@ export default function ConfiguracoesPage() {
     </Suspense>
   );
 }
+
+    
