@@ -70,7 +70,14 @@ const navItems = [
     },
     { href: "/estoque", icon: Warehouse, label: "Estoque" },
     { href: "/api", icon: Code, label: "API" },
-    { href: "/configuracoes", icon: Users, label: "Configurações" },
+    { 
+        href: "/configuracoes", 
+        icon: Settings, 
+        label: "Configurações",
+        subItems: [
+            { href: "/configuracoes?tab=usuarios", icon: Users, label: "Usuários" },
+        ]
+    },
 ];
 
 const NavLink = ({ item, pathname, searchParams }: { item: typeof navItems[0], pathname: string, searchParams: URLSearchParams }) => {
@@ -99,7 +106,7 @@ const NavLink = ({ item, pathname, searchParams }: { item: typeof navItems[0], p
                 <DropdownMenuContent>
                     {item.subItems.map(subItem => {
                         const subItemTab = subItem.href.split('tab=')[1];
-                        const isSubItemActive = baseIsActive && (currentTab === subItemTab || (!currentTab && subItemTab === 'dashboard'));
+                        const isSubItemActive = baseIsActive && (currentTab === subItemTab || (!currentTab && (subItemTab === 'dashboard' || subItemTab === 'usuarios' || subItemTab === 'cadastro')));
                         return (
                             <Link key={subItem.href} href={subItem.href} passHref>
                                 <DropdownMenuItem className={cn(isSubItemActive && "bg-accent")}>
@@ -173,7 +180,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
               {item.subItems.map(sub => {
                   const currentTab = searchParams.get('tab');
                   const subItemTab = sub.href.split('tab=')[1];
-                  const isSubItemActive = baseIsActive && (currentTab === subItemTab || (!currentTab && subItemTab === 'dashboard'));
+                  const isSubItemActive = baseIsActive && (currentTab === subItemTab || (!currentTab && (subItemTab === 'dashboard' || subItemTab === 'usuarios' || subItemTab === 'cadastro')));
                   return (
                     <Link
                       key={sub.href}

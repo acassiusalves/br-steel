@@ -2,15 +2,17 @@
 'use client';
 
 import * as React from 'react';
+import { Suspense } from 'react';
+import { useSearchParams } from 'next/navigation';
 import DashboardLayout from '@/components/dashboard-layout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { useToast } from '@/hooks/use-toast';
 import { PlusCircle, Trash2 } from 'lucide-react';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 
-function UsersTab() {
+function UsersTabContent() {
     // Mock data - replace with actual data fetching
     const users = [
         { id: '1', name: 'Admin', email: 'admin@brsteel.com', role: 'Administrador' },
@@ -61,19 +63,37 @@ function UsersTab() {
     );
 }
 
+function ConfiguracoesClient() {
+  const searchParams = useSearchParams();
+  const tab = searchParams.get('tab') || 'usuarios';
 
-export default function ConfiguracoesPage() {
   return (
-    <DashboardLayout>
+     <DashboardLayout>
       <div className="flex-1 space-y-8 p-4 pt-6 md:p-8">
         <div>
           <h2 className="text-3xl font-bold tracking-tight">Configurações</h2>
           <p className="text-muted-foreground">
-            Gerencie os usuários da sua aplicação.
+            Gerencie as configurações de usuários e do sistema.
           </p>
         </div>
-        <UsersTab />
+
+        <Tabs defaultValue={tab} className="w-full">
+            <TabsList className="grid w-full grid-cols-1 max-w-lg">
+                <TabsTrigger value="usuarios">Usuários</TabsTrigger>
+            </TabsList>
+            <TabsContent value="usuarios" className="pt-6">
+                <UsersTabContent />
+            </TabsContent>
+        </Tabs>
       </div>
     </DashboardLayout>
+  )
+}
+
+export default function ConfiguracoesPage() {
+  return (
+    <Suspense fallback={<div className="p-4">Carregando Configurações…</div>}>
+      <ConfiguracoesClient />
+    </Suspense>
   );
 }
