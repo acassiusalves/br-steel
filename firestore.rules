@@ -7,5 +7,14 @@ service cloud.firestore {
     match /{document=**} {
       allow read, write: if true;
     }
+
+    // Regras específicas para coleções (exemplo)
+    match /users/{userId} {
+      allow read, write: if true;
+    }
+
+    match /appSettings/{settingId} {
+      allow read, write: if true;
+    }
   }
 }
