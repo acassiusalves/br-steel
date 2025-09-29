@@ -15,7 +15,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useToast } from '@/hooks/use-toast';
-import { getUsers, addUser, deleteUser, updateUserRole } from '@/services/user-service';
+import { getUsers, addUser, deleteUser, updateUserRole, seedUsers } from '@/services/user-service';
 import { loadAppSettings, saveAppSettings } from '@/services/app-settings-service';
 import type { User } from '@/types/user';
 import { pagePermissions as defaultPagePermissions, availableRoles } from "@/lib/permissions";
@@ -25,7 +25,7 @@ import { Switch } from '@/components/ui/switch';
 
 function UsersTabContent() {
     const [users, setUsers] = React.useState<User[]>([]);
-    const [currentUserEmail, setCurrentUserEmail] = React.useState<string | null>(null);
+    const [currentUser, setCurrentUser] = React.useState<User | null>(null);
     const [permissions, setPermissions] = React.useState(defaultPagePermissions);
     const [inactivePages, setInactivePages] = React.useState<string[]>([]);
     
@@ -41,10 +41,14 @@ function UsersTabContent() {
     const fetchInitialData = React.useCallback(async () => {
         setIsLoading(true);
         try {
+            const userEmail = localStorage.getItem('userEmail');
             const [userList, appSettings] = await Promise.all([
                 getUsers(),
                 loadAppSettings()
             ]);
+
+            const loggedInUser = userList.find(u => u.email === userEmail);
+            setCurrentUser(loggedInUser || null);
             
             setUsers(userList);
 
@@ -81,8 +85,6 @@ function UsersTabContent() {
     }, [toast]);
     
     React.useEffect(() => {
-        const email = localStorage.getItem('userEmail');
-        setCurrentUserEmail(email);
         fetchInitialData();
     }, [fetchInitialData]);
 
@@ -199,6 +201,15 @@ function UsersTabContent() {
         }
     };
 
+    const rolesForNewUser = React.useMemo(() => {
+        if (currentUser?.role === 'Administrador') {
+            return availableRoles;
+        }
+        // Operador e Vendedor só podem criar Vendedores e Operadores
+        return availableRoles.filter(role => role.key !== 'Administrador');
+    }, [currentUser]);
+
+
     if (isLoading) {
         return <div className="flex items-center justify-center h-[calc(100vh-200px)]"><Loader2 className="animate-spin h-8 w-8" /></div>
     }
@@ -300,7 +311,7 @@ function UsersTabContent() {
                                                 <SelectValue placeholder="Selecione a função" />
                                             </SelectTrigger>
                                             <SelectContent>
-                                                {availableRoles.map(role => (
+                                                {rolesForNewUser.map(role => (
                                                     <SelectItem key={role.key} value={role.key}>
                                                         {role.name}
                                                     </SelectItem>
@@ -340,7 +351,7 @@ function UsersTabContent() {
                             ) : users.length > 0 ? (
                                 users.map(user => {
                                     const isAdministrator = user.role === 'Administrador';
-                                    const isCurrentUser = user.email === currentUserEmail;
+                                    const isCurrentUserFromState = user.email === currentUser?.email;
 
                                     return (
                                         <TableRow key={user.id}>
@@ -350,14 +361,14 @@ function UsersTabContent() {
                                                 <Select
                                                     value={user.role}
                                                     onValueChange={(newRole) => handleRoleChange(user.id, newRole)}
-                                                    disabled={isAdministrator}
+                                                    disabled={isAdministrator || isCurrentUserFromState}
                                                 >
                                                     <SelectTrigger className="w-[180px]">
                                                         <SelectValue placeholder="Selecione a função" />
                                                     </SelectTrigger>
                                                     <SelectContent>
                                                         {availableRoles.map(role => (
-                                                            <SelectItem key={role.key} value={role.key}>
+                                                            <SelectItem key={role.key} value={role.key} disabled={role.key === 'Administrador' && currentUser?.role !== 'Administrador'}>
                                                                 {role.name}
                                                             </SelectItem>
                                                         ))}
@@ -369,7 +380,7 @@ function UsersTabContent() {
                                                   variant="ghost" 
                                                   size="icon" 
                                                   onClick={() => setDeletingUser(user)} 
-                                                  disabled={isAdministrator || isCurrentUser}
+                                                  disabled={isAdministrator || isCurrentUserFromState}
                                                 >
                                                     <Trash2 className="h-4 w-4 text-destructive" />
                                                 </Button>

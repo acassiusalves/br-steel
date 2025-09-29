@@ -13,11 +13,19 @@ export async function getUsers(): Promise<User[]> {
     const snapshot = await getDocs(q);
     return snapshot.docs.map(doc => {
         const data = doc.data();
-        const createdAtTimestamp = data.createdAt as Timestamp;
+        // Handle both Firestore Timestamp and ISO string
+        const createdAt = data.createdAt;
+        let isoString: string | undefined;
+        if (createdAt instanceof Timestamp) {
+            isoString = createdAt.toDate().toISOString();
+        } else if (typeof createdAt === 'string') {
+            isoString = createdAt;
+        }
+
         return {
             id: doc.id,
             ...data,
-            createdAt: createdAtTimestamp?.toDate().toISOString(),
+            createdAt: isoString,
         } as User;
     });
 }
@@ -34,7 +42,7 @@ export async function addUser(userData: Omit<User, 'id' | 'createdAt'>): Promise
 
   const docRef = await addDoc(usersCollection, {
     ...userData,
-    createdAt: serverTimestamp(),
+    createdAt: new Date().toISOString(), // Use ISO string directly
     mustChangePassword: true, // Force password change on first login
   });
   return { id: docRef.id };
@@ -63,12 +71,12 @@ export async function seedUsers() {
     const usersToSeed = [
         { name: 'Admin', email: 'admin@brsteel.com', role: 'Administrador' },
         { name: 'Usuário Vendas', email: 'vendas@brsteel.com', role: 'Vendedor' },
+        { name: 'Usuário Operador', email: 'operador@brsteel.com', role: 'Operador' },
     ];
 
     const usersCollection = collection(db, 'users');
-    const snapshot = await getDocs(usersCollection);
+    const snapshot = await getDocs(query(usersCollection));
     
-    // Only seed if the collection is empty
     if (snapshot.empty) {
         console.log("Populando coleção de usuários...");
         const batch = writeBatch(db);
@@ -76,8 +84,8 @@ export async function seedUsers() {
             const docRef = doc(db, 'users', user.email);
             batch.set(docRef, { 
                 ...user, 
-                createdAt: serverTimestamp(),
-                mustChangePassword: user.email !== 'admin@brsteel.com' // Admin user doesn't need to change password initially
+                createdAt: new Date().toISOString(),
+                mustChangePassword: user.role !== 'Administrador'
             });
         });
         await batch.commit();
