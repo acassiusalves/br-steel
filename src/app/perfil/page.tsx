@@ -49,38 +49,46 @@ export default function PerfilPage() {
         fetchUserData();
     }, [toast]);
 
-    const handlePasswordChange = async (event: React.FormEvent<HTMLFormElement>) => {
+    const handleProfileUpdate = async (event: React.FormEvent<HTMLFormElement>) => {
         event.preventDefault();
         if (!user || !user.id || user.id === 'local') return;
 
         setIsSaving(true);
         const formData = new FormData(event.currentTarget);
+        const newName = formData.get('name') as string;
         const newPassword = formData.get('new-password') as string;
         const confirmPassword = formData.get('confirm-password') as string;
 
-        if (newPassword !== confirmPassword) {
+        if (newPassword && newPassword !== confirmPassword) {
             toast({ variant: 'destructive', title: 'Erro', description: 'As novas senhas não coincidem.' });
             setIsSaving(false);
             return;
         }
 
         try {
-            // In a real app, you would call Firebase Auth to update the password.
-            // Here, we just update the flag in Firestore.
             const userDocRef = doc(db, 'users', user.id);
-            await updateDoc(userDocRef, {
-                mustChangePassword: false
-            });
+            const dataToUpdate: any = {
+                name: newName
+            };
+
+            if (mustChangePassword && newPassword) {
+                // In a real app, you would call Firebase Auth to update the password.
+                // Here, we just update the flag in Firestore.
+                dataToUpdate.mustChangePassword = false;
+            }
             
-            setMustChangePassword(false);
-            setUser(prev => prev ? { ...prev, mustChangePassword: false } : null);
+            await updateDoc(userDocRef, dataToUpdate);
+
+            setUser(prev => prev ? { ...prev, name: newName, mustChangePassword: false } : null);
+            if (mustChangePassword) setMustChangePassword(false);
+
 
             toast({
-                title: "Senha Alterada!",
-                description: "Sua senha foi atualizada com sucesso."
+                title: "Perfil Atualizado!",
+                description: "Suas informações foram salvas com sucesso."
             });
         } catch (error) {
-             toast({ variant: 'destructive', title: 'Erro', description: 'Não foi possível alterar a senha.' });
+             toast({ variant: 'destructive', title: 'Erro', description: 'Não foi possível salvar as alterações.' });
         } finally {
             setIsSaving(false);
         }
@@ -115,34 +123,33 @@ export default function PerfilPage() {
                         </AlertDescription>
                     </Alert>
                 )}
-
-                <Card>
-                    <CardHeader>
-                        <CardTitle>Informações Pessoais</CardTitle>
-                        <CardDescription>
-                            Seu e-mail e função não podem ser alterados nesta tela.
-                        </CardDescription>
-                    </CardHeader>
-                    <CardContent className="space-y-6">
-                        <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
-                            <div className="space-y-2">
-                                <Label htmlFor="name">Nome</Label>
-                                <Input id="name" defaultValue={user?.name} required disabled />
-                            </div>
-                            <div className="space-y-2">
-                                <Label htmlFor="email">E-mail</Label>
-                                <Input id="email" type="email" defaultValue={user?.email} disabled />
-                            </div>
+                 <form onSubmit={handleProfileUpdate}>
+                    <Card>
+                        <CardHeader>
+                            <CardTitle>Informações Pessoais</CardTitle>
+                            <CardDescription>
+                                Seu e-mail e função não podem ser alterados nesta tela.
+                            </CardDescription>
+                        </CardHeader>
+                        <CardContent className="space-y-6">
+                            <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
                                 <div className="space-y-2">
-                                <Label htmlFor="role">Função</Label>
-                                <Input id="role" defaultValue={user?.role} disabled />
+                                    <Label htmlFor="name">Nome</Label>
+                                    <Input id="name" name="name" defaultValue={user?.name} required />
+                                </div>
+                                <div className="space-y-2">
+                                    <Label htmlFor="email">E-mail</Label>
+                                    <Input id="email" type="email" defaultValue={user?.email} disabled />
+                                </div>
+                                    <div className="space-y-2">
+                                    <Label htmlFor="role">Função</Label>
+                                    <Input id="role" defaultValue={user?.role} disabled />
+                                </div>
                             </div>
-                        </div>
-                    </CardContent>
-                </Card>
+                        </CardContent>
+                    </Card>
 
-                 <form onSubmit={handlePasswordChange}>
-                     <Card>
+                    <Card className="mt-8">
                         <CardHeader>
                             <CardTitle>Alterar Senha</CardTitle>
                             <CardDescription>
@@ -150,25 +157,27 @@ export default function PerfilPage() {
                             </CardDescription>
                         </CardHeader>
                         <CardContent className="space-y-4">
-                            <div className="space-y-2">
-                                <Label htmlFor="current-password">Senha Atual</Label>
-                                <Input id="current-password" type="password" required />
-                            </div>
+                             {!mustChangePassword && (
+                                <div className="space-y-2">
+                                    <Label htmlFor="current-password">Senha Atual</Label>
+                                    <Input id="current-password" type="password" />
+                                </div>
+                             )}
                              <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
                                 <div className="space-y-2">
                                     <Label htmlFor="new-password">Nova Senha</Label>
-                                    <Input id="new-password" name="new-password" type="password" required />
+                                    <Input id="new-password" name="new-password" type="password" required={mustChangePassword} />
                                 </div>
                                 <div className="space-y-2">
                                     <Label htmlFor="confirm-password">Confirmar Nova Senha</Label>
-                                    <Input id="confirm-password" name="confirm-password" type="password" required />
+                                    <Input id="confirm-password" name="confirm-password" type="password" required={mustChangePassword} />
                                 </div>
                             </div>
                         </CardContent>
                         <CardFooter className="border-t px-6 py-4">
                             <Button type="submit" disabled={isSaving}>
                                 {isSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                                Salvar Nova Senha
+                                Salvar Alterações
                             </Button>
                         </CardFooter>
                     </Card>
