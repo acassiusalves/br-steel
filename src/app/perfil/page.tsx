@@ -1,3 +1,4 @@
+
 'use client';
 
 import * as React from 'react';
@@ -6,22 +7,42 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter }
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { Loader2, KeyRound, User, Shield } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
-import { Separator } from '@/components/ui/separator';
+import { collection, query, where, getDocs } from 'firebase/firestore';
+import { db } from '@/lib/firebase';
+import type { User } from '@/types/user';
 
 export default function PerfilPage() {
+    const [user, setUser] = React.useState<User | null>(null);
+    const [isLoading, setIsLoading] = React.useState(true);
     const [isSaving, setIsSaving] = React.useState(false);
     const { toast } = useToast();
 
-    // Placeholder data
-    const user = {
-        name: 'Admin',
-        email: 'admin@brsteel.com',
-        avatarUrl: 'https://picsum.photos/seed/user/100/100',
-        role: 'Administrador'
-    };
+    React.useEffect(() => {
+        const fetchUserData = async () => {
+            setIsLoading(true);
+            const userEmail = localStorage.getItem('userEmail');
+            if (userEmail) {
+                try {
+                    const q = query(collection(db, "users"), where("email", "==", userEmail));
+                    const querySnapshot = await getDocs(q);
+                    if (!querySnapshot.empty) {
+                        const userData = querySnapshot.docs[0].data() as User;
+                        setUser({ id: querySnapshot.docs[0].id, ...userData });
+                    } else {
+                         // Fallback for user not in DB (e.g. initial login)
+                        setUser({ id: 'local', name: 'Usuário Local', email: userEmail, role: 'Desconhecido' });
+                    }
+                } catch (error) {
+                    console.error("Erro ao buscar usuário:", error);
+                    toast({ variant: 'destructive', title: 'Erro', description: 'Não foi possível carregar os dados do usuário.' });
+                }
+            }
+            setIsLoading(false);
+        };
+        fetchUserData();
+    }, [toast]);
 
     const handleSaveChanges = (event: React.FormEvent<HTMLFormElement>) => {
         event.preventDefault();
@@ -32,6 +53,16 @@ export default function PerfilPage() {
         });
         setTimeout(() => setIsSaving(false), 1000);
     };
+    
+    if (isLoading) {
+        return (
+             <DashboardLayout>
+                <div className="flex-1 space-y-8 p-4 pt-6 md:p-8 flex items-center justify-center">
+                    <Loader2 className="h-8 w-8 animate-spin" />
+                </div>
+            </DashboardLayout>
+        )
+    }
 
     return (
         <DashboardLayout>
@@ -55,15 +86,15 @@ export default function PerfilPage() {
                             <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
                                 <div className="space-y-2">
                                     <Label htmlFor="name">Nome</Label>
-                                    <Input id="name" defaultValue={user.name} required />
+                                    <Input id="name" defaultValue={user?.name} required />
                                 </div>
                                 <div className="space-y-2">
                                     <Label htmlFor="email">E-mail</Label>
-                                    <Input id="email" type="email" defaultValue={user.email} disabled />
+                                    <Input id="email" type="email" defaultValue={user?.email} disabled />
                                 </div>
                                  <div className="space-y-2">
                                     <Label htmlFor="role">Função</Label>
-                                    <Input id="role" defaultValue={user.role} disabled />
+                                    <Input id="role" defaultValue={user?.role} disabled />
                                 </div>
                             </div>
                         </CardContent>

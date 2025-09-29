@@ -32,9 +32,12 @@ export default function LoginPage() {
   const { toast } = useToast();
   const [isLoading, setIsLoading] = React.useState(false);
 
-  const handleLogin = (event: React.FormEvent) => {
+  const handleLogin = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setIsLoading(true);
+
+    const formData = new FormData(event.currentTarget);
+    const email = formData.get('email') as string;
 
     // Simulate API call
     setTimeout(() => {
@@ -42,6 +45,7 @@ export default function LoginPage() {
       // In a real app, you'd handle authentication here.
       if (typeof window !== "undefined") {
           localStorage.setItem('isAuthenticated', 'true');
+          localStorage.setItem('userEmail', email); // Save user email
       }
       
       toast({
@@ -72,10 +76,11 @@ export default function LoginPage() {
               <Label htmlFor="email">E-mail</Label>
               <Input 
                 id="email" 
+                name="email"
                 type="email" 
                 placeholder="seu@email.com" 
                 required 
-                defaultValue="admin@brsteel.com"
+                defaultValue="acassiusalves@gmail.com"
               />
             </div>
             <div className="space-y-2">
