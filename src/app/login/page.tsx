@@ -16,7 +16,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from '@/hooks/use-toast';
 import { Loader2 } from 'lucide-react';
-import { collection, query, where, getDocs } from 'firebase/firestore';
+import { collection, query, where, getDocs, doc, updateDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import type { User } from '@/types/user';
 
@@ -48,9 +48,12 @@ export default function LoginPage() {
         const querySnapshot = await getDocs(q);
         
         let user: User | null = null;
+        let userDocRef;
+
         if (!querySnapshot.empty) {
-             const userDoc = querySnapshot.docs[0];
+            const userDoc = querySnapshot.docs[0];
             user = { id: userDoc.id, ...userDoc.data() } as User;
+            userDocRef = userDoc.ref;
         }
 
         // Simulate password check
@@ -58,6 +61,12 @@ export default function LoginPage() {
              throw new Error("Usuário ou senha inválidos.");
         }
 
+        // Update last login timestamp
+        if (userDocRef) {
+            await updateDoc(userDocRef, {
+                lastLogin: new Date().toISOString()
+            });
+        }
 
         // Simulate successful login
         if (typeof window !== "undefined") {

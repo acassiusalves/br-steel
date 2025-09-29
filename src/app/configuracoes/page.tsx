@@ -1,3 +1,4 @@
+
 'use client';
 
 import * as React from 'react';
@@ -6,7 +7,7 @@ import { useSearchParams } from 'next/navigation';
 import DashboardLayout from '@/components/dashboard-layout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { PlusCircle, Trash2, Loader2, Lock, Users, UserPlus } from 'lucide-react';
+import { PlusCircle, Trash2, Loader2, Lock, Users, UserPlus, Clock } from 'lucide-react';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
@@ -14,6 +15,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useToast } from '@/hooks/use-toast';
 import { getUsers, addUser, deleteUser, updateUserRole, seedUsers } from '@/services/user-service';
 import { loadAppSettings, saveAppSettings } from '@/services/app-settings-service';
@@ -209,6 +211,17 @@ function UsersTabContent() {
         return availableRoles.filter(role => role.key !== 'Administrador');
     }, [currentUser]);
 
+    const formatLastLogin = (isoString?: string) => {
+        if (!isoString) return "Nunca acessou";
+        try {
+            return new Date(isoString).toLocaleString('pt-BR', {
+                dateStyle: 'short',
+                timeStyle: 'medium'
+            });
+        } catch {
+            return "Data inválida";
+        }
+    }
 
     if (isLoading) {
         return <div className="flex items-center justify-center h-[calc(100vh-200px)]"><Loader2 className="animate-spin h-8 w-8" /></div>
@@ -332,71 +345,89 @@ function UsersTabContent() {
                     </Dialog>
                 </CardHeader>
                 <CardContent>
-                    <Table>
-                        <TableHeader>
-                            <TableRow>
-                                <TableHead>Nome</TableHead>
-                                <TableHead>Email</TableHead>
-                                <TableHead>Função</TableHead>
-                                <TableHead className="text-right">Ações</TableHead>
-                            </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                            {isLoading ? (
+                    <TooltipProvider>
+                        <Table>
+                            <TableHeader>
                                 <TableRow>
-                                    <TableCell colSpan={4} className="h-24 text-center">
-                                        <Loader2 className="mx-auto h-6 w-6 animate-spin" />
-                                    </TableCell>
+                                    <TableHead>Nome</TableHead>
+                                    <TableHead>Email</TableHead>
+                                    <TableHead>Função</TableHead>
+                                    <TableHead className="text-right">Ações</TableHead>
                                 </TableRow>
-                            ) : users.length > 0 ? (
-                                users.map(user => {
-                                    const isAdministrator = user.role === 'Administrador';
-                                    const isCurrentUserFromState = user.email === currentUser?.email;
+                            </TableHeader>
+                            <TableBody>
+                                {isLoading ? (
+                                    <TableRow>
+                                        <TableCell colSpan={4} className="h-24 text-center">
+                                            <Loader2 className="mx-auto h-6 w-6 animate-spin" />
+                                        </TableCell>
+                                    </TableRow>
+                                ) : users.length > 0 ? (
+                                    users.map(user => {
+                                        const isAdministrator = user.role === 'Administrador';
+                                        const isCurrentUserFromState = user.email === currentUser?.email;
 
-                                    return (
-                                        <TableRow key={user.id}>
-                                            <TableCell className="font-medium">{user.name}</TableCell>
-                                            <TableCell>{user.email}</TableCell>
-                                            <TableCell>
-                                                <Select
-                                                    value={user.role}
-                                                    onValueChange={(newRole) => handleRoleChange(user.id, newRole)}
-                                                    disabled={isAdministrator || isCurrentUserFromState}
-                                                >
-                                                    <SelectTrigger className="w-[180px]">
-                                                        <SelectValue placeholder="Selecione a função" />
-                                                    </SelectTrigger>
-                                                    <SelectContent>
-                                                        {availableRoles.map(role => (
-                                                            <SelectItem key={role.key} value={role.key} disabled={role.key === 'Administrador' && currentUser?.role !== 'Administrador'}>
-                                                                {role.name}
-                                                            </SelectItem>
-                                                        ))}
-                                                    </SelectContent>
-                                                </Select>
-                                            </TableCell>
-                                            <TableCell className="text-right">
-                                                <Button 
-                                                  variant="ghost" 
-                                                  size="icon" 
-                                                  onClick={() => setDeletingUser(user)} 
-                                                  disabled={isAdministrator || isCurrentUserFromState}
-                                                >
-                                                    <Trash2 className="h-4 w-4 text-destructive" />
-                                                </Button>
-                                            </TableCell>
-                                        </TableRow>
-                                    );
-                                })
-                            ) : (
-                                 <TableRow>
-                                    <TableCell colSpan={4} className="h-24 text-center">
-                                        Nenhum usuário cadastrado.
-                                    </TableCell>
-                                </TableRow>
-                            )}
-                        </TableBody>
-                    </Table>
+                                        return (
+                                            <TableRow key={user.id}>
+                                                <TableCell className="font-medium">
+                                                    <div className="flex items-center gap-2">
+                                                        <span>{user.name}</span>
+                                                        {currentUser?.role === 'Administrador' && (
+                                                            <Tooltip>
+                                                                <TooltipTrigger asChild>
+                                                                    <button>
+                                                                        <Clock className="h-4 w-4 text-muted-foreground hover:text-foreground" />
+                                                                    </button>
+                                                                </TooltipTrigger>
+                                                                <TooltipContent>
+                                                                    <p>Último acesso: {formatLastLogin(user.lastLogin)}</p>
+                                                                </TooltipContent>
+                                                            </Tooltip>
+                                                        )}
+                                                    </div>
+                                                </TableCell>
+                                                <TableCell>{user.email}</TableCell>
+                                                <TableCell>
+                                                    <Select
+                                                        value={user.role}
+                                                        onValueChange={(newRole) => handleRoleChange(user.id, newRole)}
+                                                        disabled={isAdministrator || isCurrentUserFromState}
+                                                    >
+                                                        <SelectTrigger className="w-[180px]">
+                                                            <SelectValue placeholder="Selecione a função" />
+                                                        </SelectTrigger>
+                                                        <SelectContent>
+                                                            {availableRoles.map(role => (
+                                                                <SelectItem key={role.key} value={role.key} disabled={role.key === 'Administrador' && currentUser?.role !== 'Administrador'}>
+                                                                    {role.name}
+                                                                </SelectItem>
+                                                            ))}
+                                                        </SelectContent>
+                                                    </Select>
+                                                </TableCell>
+                                                <TableCell className="text-right">
+                                                    <Button 
+                                                      variant="ghost" 
+                                                      size="icon" 
+                                                      onClick={() => setDeletingUser(user)} 
+                                                      disabled={isAdministrator || isCurrentUserFromState}
+                                                    >
+                                                        <Trash2 className="h-4 w-4 text-destructive" />
+                                                    </Button>
+                                                </TableCell>
+                                            </TableRow>
+                                        );
+                                    })
+                                ) : (
+                                     <TableRow>
+                                        <TableCell colSpan={4} className="h-24 text-center">
+                                            Nenhum usuário cadastrado.
+                                        </TableCell>
+                                    </TableRow>
+                                )}
+                            </TableBody>
+                        </Table>
+                    </TooltipProvider>
                 </CardContent>
                  <CardFooter className="justify-end">
                     <Button onClick={handleSaveUsers} disabled={isSaving}>
