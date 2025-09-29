@@ -4,13 +4,14 @@
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import { format, parseISO, startOfMonth, endOfMonth, eachMonthOfInterval, getMonth, getYear, differenceInDays } from 'date-fns';
-import { collection, getDocs, doc, writeBatch, query, where, setDoc, getDoc, deleteField } from 'firebase/firestore';
+import { collection, getDocs, doc, writeBatch, query, where, setDoc, getDoc, deleteField, addDoc, deleteDoc, orderBy, serverTimestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 
 import { saveSalesOrders, filterNewOrders, getLastImportedOrderDate, orderExists, saveSalesOrdersOptimized, getImportedOrderIdsWithDetails } from '@/services/order-service';
 import { updateSupplyBySku } from '@/services/supply-service';
 import type { SaleOrder } from '@/types/sale-order';
 import type { Supply } from '@/types/supply';
+import type { User } from '@/types/user';
 
 
 // Bling API actions
@@ -883,7 +884,64 @@ export async function clearBlingCredentials() {
         return { success: false, error: (error as Error).message };
     }
 }
+
+// User Management Actions
+export async function getUsers(): Promise<User[]> {
+  const usersCollection = collection(db, 'users');
+  const q = query(usersCollection, orderBy('createdAt', 'desc'));
+  const snapshot = await getDocs(q);
+  return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as User));
+}
+
+export async function addUser(userData: Omit<User, 'id' | 'createdAt'>): Promise<{ id: string }> {
+  const usersCollection = collection(db, 'users');
+  // Check for existing user with the same email
+  const q = query(usersCollection, where('email', '==', userData.email));
+  const existing = await getDocs(q);
+  if (!existing.empty) {
+    throw new Error(`O e-mail "${userData.email}" já está em uso.`);
+  }
+
+  const docRef = await addDoc(usersCollection, {
+    ...userData,
+    createdAt: serverTimestamp(),
+  });
+  return { id: docRef.id };
+}
+
+export async function deleteUser(userId: string): Promise<void> {
+  const userDoc = doc(db, 'users', userId);
+  await deleteDoc(userDoc);
+}
+
+// One-time function to seed initial users
+export async function seedUsers() {
+    const usersToSeed = [
+        { name: 'Admin', email: 'admin@brsteel.com', role: 'Administrador' },
+        { name: 'Usuário Vendas', email: 'vendas@brsteel.com', role: 'Vendedor' },
+    ];
+
+    const usersCollection = collection(db, 'users');
+    const snapshot = await getDocs(usersCollection);
+    
+    // Only seed if the collection is empty
+    if (snapshot.empty) {
+        console.log("Populando coleção de usuários...");
+        const batch = writeBatch(db);
+        usersToSeed.forEach(user => {
+            const docRef = doc(usersCollection); // Automatically generate ID
+            batch.set(docRef, { ...user, createdAt: serverTimestamp() });
+        });
+        await batch.commit();
+        console.log("Usuários iniciais cadastrados com sucesso.");
+        return { seeded: usersToSeed.length };
+    } else {
+        console.log("Coleção de usuários já possui dados. Não há necessidade de popular.");
+        return { seeded: 0 };
+    }
+}
     
 
     
+
 
