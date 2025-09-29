@@ -15,7 +15,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useToast } from '@/hooks/use-toast';
-import { getUsers, addUser, deleteUser, seedUsers, updateUserRole } from '@/services/user-service';
+import { getUsers, addUser, deleteUser, updateUserRole } from '@/services/user-service';
 import { loadAppSettings, saveAppSettings } from '@/services/app-settings-service';
 import type { User } from '@/types/user';
 import { pagePermissions as defaultPagePermissions, availableRoles } from "@/lib/permissions";
@@ -25,6 +25,7 @@ import { Switch } from '@/components/ui/switch';
 
 function UsersTabContent() {
     const [users, setUsers] = React.useState<User[]>([]);
+    const [currentUserEmail, setCurrentUserEmail] = React.useState<string | null>(null);
     const [permissions, setPermissions] = React.useState(defaultPagePermissions);
     const [inactivePages, setInactivePages] = React.useState<string[]>([]);
     
@@ -80,6 +81,8 @@ function UsersTabContent() {
     }, [toast]);
     
     React.useEffect(() => {
+        const email = localStorage.getItem('userEmail');
+        setCurrentUserEmail(email);
         fetchInitialData();
     }, [fetchInitialData]);
 
@@ -335,35 +338,45 @@ function UsersTabContent() {
                                     </TableCell>
                                 </TableRow>
                             ) : users.length > 0 ? (
-                                users.map(user => (
-                                    <TableRow key={user.id}>
-                                        <TableCell className="font-medium">{user.name}</TableCell>
-                                        <TableCell>{user.email}</TableCell>
-                                        <TableCell>
-                                             <Select
-                                                value={user.role}
-                                                onValueChange={(newRole) => handleRoleChange(user.id, newRole)}
-                                                disabled={user.email?.toLowerCase().includes('admin@')}
-                                            >
-                                                <SelectTrigger className="w-[180px]">
-                                                    <SelectValue placeholder="Selecione a função" />
-                                                </SelectTrigger>
-                                                <SelectContent>
-                                                    {availableRoles.map(role => (
-                                                        <SelectItem key={role.key} value={role.key}>
-                                                            {role.name}
-                                                        </SelectItem>
-                                                    ))}
-                                                </SelectContent>
-                                            </Select>
-                                        </TableCell>
-                                        <TableCell className="text-right">
-                                            <Button variant="ghost" size="icon" onClick={() => setDeletingUser(user)} disabled={user.email?.toLowerCase().includes('admin@')}>
-                                                <Trash2 className="h-4 w-4 text-destructive" />
-                                            </Button>
-                                        </TableCell>
-                                    </TableRow>
-                                ))
+                                users.map(user => {
+                                    const isAdministrator = user.role === 'Administrador';
+                                    const isCurrentUser = user.email === currentUserEmail;
+
+                                    return (
+                                        <TableRow key={user.id}>
+                                            <TableCell className="font-medium">{user.name}</TableCell>
+                                            <TableCell>{user.email}</TableCell>
+                                            <TableCell>
+                                                <Select
+                                                    value={user.role}
+                                                    onValueChange={(newRole) => handleRoleChange(user.id, newRole)}
+                                                    disabled={isAdministrator}
+                                                >
+                                                    <SelectTrigger className="w-[180px]">
+                                                        <SelectValue placeholder="Selecione a função" />
+                                                    </SelectTrigger>
+                                                    <SelectContent>
+                                                        {availableRoles.map(role => (
+                                                            <SelectItem key={role.key} value={role.key}>
+                                                                {role.name}
+                                                            </SelectItem>
+                                                        ))}
+                                                    </SelectContent>
+                                                </Select>
+                                            </TableCell>
+                                            <TableCell className="text-right">
+                                                <Button 
+                                                  variant="ghost" 
+                                                  size="icon" 
+                                                  onClick={() => setDeletingUser(user)} 
+                                                  disabled={isAdministrator || isCurrentUser}
+                                                >
+                                                    <Trash2 className="h-4 w-4 text-destructive" />
+                                                </Button>
+                                            </TableCell>
+                                        </TableRow>
+                                    );
+                                })
                             ) : (
                                  <TableRow>
                                     <TableCell colSpan={4} className="h-24 text-center">
@@ -436,5 +449,3 @@ export default function ConfiguracoesPage() {
     </Suspense>
   );
 }
-
-    
