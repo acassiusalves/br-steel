@@ -281,7 +281,7 @@ function UsersTabContent() {
                                 <DialogHeader>
                                     <DialogTitle>Adicionar Novo Usuário</DialogTitle>
                                     <DialogDescription>
-                                        Preencha os dados abaixo para criar um novo acesso. O usuário receberá um convite por e-mail para definir sua senha.
+                                        Preencha os dados abaixo para criar um novo acesso. A senha padrão para o primeiro login será '123456'. O usuário poderá entrar no sistema imediatamente.
                                     </DialogDescription>
                                 </DialogHeader>
                                 <div className="grid gap-4 py-4">
@@ -313,7 +313,7 @@ function UsersTabContent() {
                                     <Button type="button" variant="ghost" onClick={() => setIsFormOpen(false)}>Cancelar</Button>
                                     <Button type="submit" disabled={isSaving}>
                                         {isSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                                        Salvar e Enviar Convite
+                                        Salvar Usuário
                                     </Button>
                                 </DialogFooter>
                             </form>
