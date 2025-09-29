@@ -1,3 +1,4 @@
+
 "use server";
 
 import { db } from '@/lib/firebase';
@@ -15,9 +16,7 @@ export async function getUsers(): Promise<User[]> {
         const createdAtTimestamp = data.createdAt as Timestamp;
         return {
             id: doc.id,
-            name: data.name,
-            email: data.email,
-            role: data.role,
+            ...data,
             createdAt: createdAtTimestamp?.toDate().toISOString(),
         } as User;
     });
@@ -36,6 +35,7 @@ export async function addUser(userData: Omit<User, 'id' | 'createdAt'>): Promise
   const docRef = await addDoc(usersCollection, {
     ...userData,
     createdAt: serverTimestamp(),
+    mustChangePassword: true, // Force password change on first login
   });
   return { id: docRef.id };
 }
@@ -73,9 +73,12 @@ export async function seedUsers() {
         console.log("Populando coleção de usuários...");
         const batch = writeBatch(db);
         usersToSeed.forEach(user => {
-            // Use e-mail como ID para evitar duplicatas em futuras execuções
             const docRef = doc(db, 'users', user.email);
-            batch.set(docRef, { ...user, createdAt: serverTimestamp() });
+            batch.set(docRef, { 
+                ...user, 
+                createdAt: serverTimestamp(),
+                mustChangePassword: user.email !== 'admin@brsteel.com' // Admin user doesn't need to change password initially
+            });
         });
         await batch.commit();
         console.log("Usuários iniciais cadastrados com sucesso.");

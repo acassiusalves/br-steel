@@ -7,16 +7,18 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter }
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Loader2 } from 'lucide-react';
+import { Loader2, AlertCircle } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
-import { collection, query, where, getDocs } from 'firebase/firestore';
+import { collection, query, where, getDocs, doc, updateDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import type { User } from '@/types/user';
+import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
 
 export default function PerfilPage() {
     const [user, setUser] = React.useState<User | null>(null);
     const [isLoading, setIsLoading] = React.useState(true);
     const [isSaving, setIsSaving] = React.useState(false);
+    const [mustChangePassword, setMustChangePassword] = React.useState(false);
     const { toast } = useToast();
 
     React.useEffect(() => {
@@ -28,10 +30,13 @@ export default function PerfilPage() {
                     const q = query(collection(db, "users"), where("email", "==", userEmail));
                     const querySnapshot = await getDocs(q);
                     if (!querySnapshot.empty) {
-                        const userData = querySnapshot.docs[0].data() as User;
-                        setUser({ id: querySnapshot.docs[0].id, ...userData });
+                        const userDoc = querySnapshot.docs[0];
+                        const userData = userDoc.data() as User;
+                        setUser({ id: userDoc.id, ...userData });
+                        if (userData.mustChangePassword) {
+                            setMustChangePassword(true);
+                        }
                     } else {
-                         // Fallback for user not in DB (e.g. initial login)
                         setUser({ id: 'local', name: 'Usuário Local', email: userEmail, role: 'Desconhecido' });
                     }
                 } catch (error) {
@@ -44,14 +49,41 @@ export default function PerfilPage() {
         fetchUserData();
     }, [toast]);
 
-    const handleSaveChanges = (event: React.FormEvent<HTMLFormElement>) => {
+    const handlePasswordChange = async (event: React.FormEvent<HTMLFormElement>) => {
         event.preventDefault();
+        if (!user || !user.id || user.id === 'local') return;
+
         setIsSaving(true);
-        toast({
-            title: "Simulação",
-            description: "A funcionalidade de salvar ainda não foi implementada."
-        });
-        setTimeout(() => setIsSaving(false), 1000);
+        const formData = new FormData(event.currentTarget);
+        const newPassword = formData.get('new-password') as string;
+        const confirmPassword = formData.get('confirm-password') as string;
+
+        if (newPassword !== confirmPassword) {
+            toast({ variant: 'destructive', title: 'Erro', description: 'As novas senhas não coincidem.' });
+            setIsSaving(false);
+            return;
+        }
+
+        try {
+            // In a real app, you would call Firebase Auth to update the password.
+            // Here, we just update the flag in Firestore.
+            const userDocRef = doc(db, 'users', user.id);
+            await updateDoc(userDocRef, {
+                mustChangePassword: false
+            });
+            
+            setMustChangePassword(false);
+            setUser(prev => prev ? { ...prev, mustChangePassword: false } : null);
+
+            toast({
+                title: "Senha Alterada!",
+                description: "Sua senha foi atualizada com sucesso."
+            });
+        } catch (error) {
+             toast({ variant: 'destructive', title: 'Erro', description: 'Não foi possível alterar a senha.' });
+        } finally {
+            setIsSaving(false);
+        }
     };
     
     if (isLoading) {
@@ -74,68 +106,73 @@ export default function PerfilPage() {
                     </p>
                 </div>
 
-                <form onSubmit={handleSaveChanges}>
-                    <Card>
+                {mustChangePassword && (
+                    <Alert variant="destructive">
+                        <AlertCircle className="h-4 w-4" />
+                        <AlertTitle>Ação Necessária</AlertTitle>
+                        <AlertDescription>
+                            Este é seu primeiro acesso. Por favor, cadastre uma nova senha para continuar.
+                        </AlertDescription>
+                    </Alert>
+                )}
+
+                <Card>
+                    <CardHeader>
+                        <CardTitle>Informações Pessoais</CardTitle>
+                        <CardDescription>
+                            Seu e-mail e função não podem ser alterados nesta tela.
+                        </CardDescription>
+                    </CardHeader>
+                    <CardContent className="space-y-6">
+                        <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
+                            <div className="space-y-2">
+                                <Label htmlFor="name">Nome</Label>
+                                <Input id="name" defaultValue={user?.name} required disabled />
+                            </div>
+                            <div className="space-y-2">
+                                <Label htmlFor="email">E-mail</Label>
+                                <Input id="email" type="email" defaultValue={user?.email} disabled />
+                            </div>
+                                <div className="space-y-2">
+                                <Label htmlFor="role">Função</Label>
+                                <Input id="role" defaultValue={user?.role} disabled />
+                            </div>
+                        </div>
+                    </CardContent>
+                </Card>
+
+                 <form onSubmit={handlePasswordChange}>
+                     <Card>
                         <CardHeader>
-                            <CardTitle>Informações Pessoais</CardTitle>
+                            <CardTitle>Alterar Senha</CardTitle>
                             <CardDescription>
-                                Atualize seus dados. O e-mail e a função não podem ser alterados.
+                               Para sua segurança, recomendamos o uso de uma senha forte.
                             </CardDescription>
                         </CardHeader>
-                        <CardContent className="space-y-6">
-                            <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
+                        <CardContent className="space-y-4">
+                            <div className="space-y-2">
+                                <Label htmlFor="current-password">Senha Atual</Label>
+                                <Input id="current-password" type="password" required />
+                            </div>
+                             <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
                                 <div className="space-y-2">
-                                    <Label htmlFor="name">Nome</Label>
-                                    <Input id="name" defaultValue={user?.name} required />
+                                    <Label htmlFor="new-password">Nova Senha</Label>
+                                    <Input id="new-password" name="new-password" type="password" required />
                                 </div>
                                 <div className="space-y-2">
-                                    <Label htmlFor="email">E-mail</Label>
-                                    <Input id="email" type="email" defaultValue={user?.email} disabled />
-                                </div>
-                                 <div className="space-y-2">
-                                    <Label htmlFor="role">Função</Label>
-                                    <Input id="role" defaultValue={user?.role} disabled />
+                                    <Label htmlFor="confirm-password">Confirmar Nova Senha</Label>
+                                    <Input id="confirm-password" name="confirm-password" type="password" required />
                                 </div>
                             </div>
                         </CardContent>
                         <CardFooter className="border-t px-6 py-4">
                             <Button type="submit" disabled={isSaving}>
                                 {isSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                                Salvar Alterações
+                                Salvar Nova Senha
                             </Button>
                         </CardFooter>
                     </Card>
                 </form>
-
-                 <Card>
-                    <CardHeader>
-                        <CardTitle>Alterar Senha</CardTitle>
-                        <CardDescription>
-                           Para sua segurança, recomendamos o uso de uma senha forte.
-                        </CardDescription>
-                    </CardHeader>
-                    <CardContent className="space-y-4">
-                        <div className="space-y-2">
-                            <Label htmlFor="current-password">Senha Atual</Label>
-                            <Input id="current-password" type="password" />
-                        </div>
-                         <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
-                            <div className="space-y-2">
-                                <Label htmlFor="new-password">Nova Senha</Label>
-                                <Input id="new-password" type="password" />
-                            </div>
-                            <div className="space-y-2">
-                                <Label htmlFor="confirm-password">Confirmar Nova Senha</Label>
-                                <Input id="confirm-password" type="password" />
-                            </div>
-                        </div>
-                    </CardContent>
-                    <CardFooter className="border-t px-6 py-4">
-                        <Button type="button" disabled={isSaving}>
-                            Alterar Senha
-                        </Button>
-                    </CardFooter>
-                </Card>
             </div>
         </DashboardLayout>
     );

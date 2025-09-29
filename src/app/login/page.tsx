@@ -16,6 +16,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from '@/hooks/use-toast';
 import { Loader2 } from 'lucide-react';
+import { collection, query, where, getDocs } from 'firebase/firestore';
+import { db } from '@/lib/firebase';
+import type { User } from '@/types/user';
 
 const Logo = () => (
     <svg width="120" height="30" viewBox="0 0 120 30" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -32,30 +35,50 @@ export default function LoginPage() {
   const { toast } = useToast();
   const [isLoading, setIsLoading] = React.useState(false);
 
-  const handleLogin = (event: React.FormEvent<HTMLFormElement>) => {
+  const handleLogin = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setIsLoading(true);
 
     const formData = new FormData(event.currentTarget);
     const email = formData.get('email') as string;
+    const password = formData.get('password') as string;
 
-    // Simulate API call
-    setTimeout(() => {
-      // For this prototype, we'll simulate a successful login every time.
-      // In a real app, you'd handle authentication here.
-      if (typeof window !== "undefined") {
-          localStorage.setItem('isAuthenticated', 'true');
-          localStorage.setItem('userEmail', email); // Save user email
-      }
-      
-      toast({
-        title: "Login bem-sucedido!",
-        description: "Redirecionando para o painel...",
-      });
+    try {
+        const q = query(collection(db, "users"), where("email", "==", email));
+        const querySnapshot = await getDocs(q);
+        
+        let user: User | null = null;
+        if (!querySnapshot.empty) {
+            user = querySnapshot.docs[0].data() as User;
+        }
 
-      router.push('/vendas?tab=dashboard');
+        // Simulate successful login
+        if (typeof window !== "undefined") {
+            localStorage.setItem('isAuthenticated', 'true');
+            localStorage.setItem('userEmail', email);
+        }
+        
+        toast({
+          title: "Login bem-sucedido!",
+          description: "Redirecionando...",
+        });
+
+        // Check for password change requirement
+        if (user && user.mustChangePassword) {
+            router.push('/perfil');
+        } else {
+            router.push('/vendas?tab=dashboard');
+        }
+
+    } catch (error: any) {
+        toast({
+            variant: "destructive",
+            title: "Erro no Login",
+            description: error.message || "Não foi possível conectar ao sistema.",
+        });
+    } finally {
       setIsLoading(false);
-    }, 1000);
+    }
   };
 
   return (
@@ -80,16 +103,17 @@ export default function LoginPage() {
                 type="email" 
                 placeholder="seu@email.com" 
                 required 
-                defaultValue="acassiusalves@gmail.com"
+                defaultValue="admin@brsteel.com"
               />
             </div>
             <div className="space-y-2">
               <Label htmlFor="password">Senha</Label>
               <Input 
                 id="password" 
+                name="password"
                 type="password" 
                 required 
-                defaultValue="password"
+                defaultValue="123456"
               />
             </div>
           </CardContent>
