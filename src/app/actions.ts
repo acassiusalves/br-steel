@@ -4,7 +4,7 @@
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import { format, parseISO, startOfMonth, endOfMonth, eachMonthOfInterval, getMonth, getYear, differenceInDays } from 'date-fns';
-import { collection, getDocs, doc, writeBatch, query, where, setDoc, getDoc, deleteField, addDoc, deleteDoc, orderBy, serverTimestamp } from 'firebase/firestore';
+import { collection, getDocs, doc, writeBatch, query, where, setDoc, getDoc, deleteField, addDoc, deleteDoc, orderBy, serverTimestamp, Timestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 
 import { saveSalesOrders, filterNewOrders, getLastImportedOrderDate, orderExists, saveSalesOrdersOptimized, getImportedOrderIdsWithDetails } from '@/services/order-service';
@@ -887,11 +887,22 @@ export async function clearBlingCredentials() {
 
 // User Management Actions
 export async function getUsers(): Promise<User[]> {
-  const usersCollection = collection(db, 'users');
-  const q = query(usersCollection, orderBy('createdAt', 'desc'));
-  const snapshot = await getDocs(q);
-  return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as User));
+    const usersCollection = collection(db, 'users');
+    const q = query(usersCollection, orderBy('createdAt', 'desc'));
+    const snapshot = await getDocs(q);
+    return snapshot.docs.map(doc => {
+        const data = doc.data();
+        const createdAtTimestamp = data.createdAt as Timestamp;
+        return {
+            id: doc.id,
+            name: data.name,
+            email: data.email,
+            role: data.role,
+            createdAt: createdAtTimestamp?.toDate().toISOString(),
+        } as User;
+    });
 }
+
 
 export async function addUser(userData: Omit<User, 'id' | 'createdAt'>): Promise<{ id: string }> {
   const usersCollection = collection(db, 'users');
@@ -945,3 +956,6 @@ export async function seedUsers() {
     
 
 
+
+
+    
