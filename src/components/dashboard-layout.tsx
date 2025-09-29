@@ -18,6 +18,7 @@ import {
   PackagePlus,
   Boxes,
   Users,
+  User,
 } from "lucide-react";
 import * as React from "react";
 
@@ -260,10 +261,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
              <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                 <Button variant="secondary" size="icon" className="rounded-full">
-                    <Avatar className="h-9 w-9">
-                        <AvatarImage src="https://picsum.photos/100" alt="Avatar do usuário" data-ai-hint="profile picture" />
-                        <AvatarFallback>JD</AvatarFallback>
-                    </Avatar>
+                    <User className="h-5 w-5" />
                     <span className="sr-only">Toggle user menu</span>
                 </Button>
                 </DropdownMenuTrigger>
