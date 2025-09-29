@@ -271,7 +271,9 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
                 <DropdownMenuItem asChild>
                   <Link href="/perfil">Meu Perfil</Link>
                 </DropdownMenuItem>
-                <DropdownMenuItem>Configurações</DropdownMenuItem>
+                <DropdownMenuItem asChild>
+                  <Link href="/configuracoes">Configurações</Link>
+                </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem onClick={handleLogout}>Sair</DropdownMenuItem>
                 </DropdownMenuContent>
