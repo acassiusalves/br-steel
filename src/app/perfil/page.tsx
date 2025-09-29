@@ -52,13 +52,6 @@ export default function PerfilPage() {
                             </CardDescription>
                         </CardHeader>
                         <CardContent className="space-y-6">
-                             <div className="flex items-center gap-4">
-                                <Avatar className="h-16 w-16">
-                                    <AvatarImage src={user.avatarUrl} alt="Avatar do usuário" data-ai-hint="profile picture" />
-                                    <AvatarFallback>AD</AvatarFallback>
-                                </Avatar>
-                                <Button type="button" variant="outline">Alterar Foto</Button>
-                            </div>
                             <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
                                 <div className="space-y-2">
                                     <Label htmlFor="name">Nome</Label>
