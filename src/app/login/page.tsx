@@ -49,8 +49,15 @@ export default function LoginPage() {
         
         let user: User | null = null;
         if (!querySnapshot.empty) {
-            user = querySnapshot.docs[0].data() as User;
+             const userDoc = querySnapshot.docs[0];
+            user = { id: userDoc.id, ...userDoc.data() } as User;
         }
+
+        // Simulate password check
+        if (!user) {
+             throw new Error("Usuário ou senha inválidos.");
+        }
+
 
         // Simulate successful login
         if (typeof window !== "undefined") {

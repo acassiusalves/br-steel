@@ -19,14 +19,10 @@ import {
   Boxes,
   Users,
   User,
+  Loader2,
 } from "lucide-react";
 import * as React from "react";
 
-import {
-  Avatar,
-  AvatarFallback,
-  AvatarImage,
-} from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -39,6 +35,11 @@ import {
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
+import { getDoc, doc, collection, query, where, getDocs } from "firebase/firestore";
+import { db } from "@/lib/firebase";
+import { pagePermissions, availableRoles } from "@/lib/permissions";
+import { loadAppSettings } from "@/services/app-settings-service";
+import type { User as AppUser } from "@/types/user";
 
 const Logo = () => (
     <svg width="120" height="30" viewBox="0 0 120 30" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -49,7 +50,7 @@ const Logo = () => (
     </svg>
 );
 
-const navItems = [
+const allNavItems = [
     { 
         href: "/vendas", 
         icon: ShoppingCart, 
@@ -81,7 +82,7 @@ const navItems = [
     },
 ];
 
-const NavLink = ({ item, pathname, searchParams }: { item: typeof navItems[0], pathname: string, searchParams: URLSearchParams }) => {
+const NavLink = ({ item, pathname, searchParams }: { item: typeof allNavItems[0], pathname: string, searchParams: URLSearchParams }) => {
     const currentTab = searchParams.get('tab');
     const baseIsActive = pathname.startsWith(item.href);
 
@@ -142,16 +143,70 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
   const router = useRouter();
   const { toast } = useToast();
   const [open, setOpen] = React.useState(false);
+  const [navItems, setNavItems] = React.useState<typeof allNavItems>([]);
+  const [isLoadingNav, setIsLoadingNav] = React.useState(true);
+
 
   React.useEffect(() => {
     const isAuthenticated = localStorage.getItem('isAuthenticated');
     if (!isAuthenticated) {
       router.push('/login');
+      return;
     }
-  }, [router]);
+
+    const fetchUserAndPermissions = async () => {
+        setIsLoadingNav(true);
+        const userEmail = localStorage.getItem('userEmail');
+        if (!userEmail) {
+            router.push('/login');
+            return;
+        }
+
+        try {
+            // Fetch user role
+            const userQuery = query(collection(db, "users"), where("email", "==", userEmail));
+            const userSnapshot = await getDocs(userQuery);
+            let userRole = '';
+            if (!userSnapshot.empty) {
+                userRole = (userSnapshot.docs[0].data() as AppUser).role;
+            } else {
+                 throw new Error("Usuário não encontrado.");
+            }
+
+            // Fetch app settings
+            const settings = await loadAppSettings();
+            const permissions = settings?.permissions || pagePermissions;
+            const inactivePages = settings?.inactivePages || [];
+            
+            const filteredNavItems = allNavItems.filter(item => {
+                const isPageActive = !inactivePages.includes(item.href);
+                const userHasPermission = permissions[item.href]?.includes(userRole) || userRole === 'Administrador';
+                return isPageActive && userHasPermission;
+            });
+            
+            setNavItems(filteredNavItems);
+
+        } catch (error: any) {
+            console.error("Erro ao carregar permissões:", error);
+            toast({
+                variant: 'destructive',
+                title: 'Erro de Permissão',
+                description: 'Não foi possível carregar as permissões do usuário.'
+            });
+            // Fallback to no nav items to prevent unauthorized access
+            setNavItems([]);
+        } finally {
+            setIsLoadingNav(false);
+        }
+    };
+
+    fetchUserAndPermissions();
+  }, [pathname, toast, router]);
+
 
   const handleLogout = () => {
     localStorage.removeItem('isAuthenticated');
+    localStorage.removeItem('userEmail');
     toast({
         title: "Logout realizado com sucesso!",
         description: "Você será redirecionado para a tela de login.",
@@ -159,7 +214,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
     router.push('/login');
   };
 
-  const MobileNavLink = ({ item }: { item: typeof navItems[0]}) => {
+  const MobileNavLink = ({ item }: { item: typeof allNavItems[0]}) => {
     const baseIsActive = pathname.startsWith(item.href);
     const [isSubMenuOpen, setIsSubMenuOpen] = React.useState(baseIsActive);
 
@@ -221,15 +276,21 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
   return (
      <div className="flex min-h-screen w-full flex-col bg-muted/40">
         <header className="sticky top-0 flex h-16 items-center gap-4 border-b bg-background px-4 md:px-6 z-50">
-            <nav className="hidden flex-col gap-6 text-lg font-medium md:flex md:flex-row md:items-center md:gap-5 md:text-sm lg:gap-6">
+            <div className="hidden flex-col gap-6 text-lg font-medium md:flex md:flex-row md:items-center md:gap-5 md:text-sm lg:gap-6">
                 <Link
                 href="/vendas?tab=dashboard"
                 className="flex items-center gap-2 text-lg font-semibold md:text-base"
                 >
                     <Logo />
                 </Link>
-                {navItems.map(item => <NavLink key={item.href} item={item} pathname={pathname} searchParams={searchParams} />)}
-            </nav>
+                {isLoadingNav ? (
+                    <div className="flex items-center gap-5">
+                       <Loader2 className="h-5 w-5 animate-spin" />
+                    </div>
+                ) : (
+                   navItems.map(item => <NavLink key={item.href} item={item} pathname={pathname} searchParams={searchParams} />)
+                )}
+            </div>
           
           <Sheet open={open} onOpenChange={setOpen}>
             <SheetTrigger asChild>
@@ -251,7 +312,13 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
                 >
                   <Logo />
                 </Link>
-                 {navItems.map(item => <MobileNavLink key={item.href} item={item} />)}
+                 {isLoadingNav ? (
+                     <div className="flex items-center justify-center p-8">
+                       <Loader2 className="h-8 w-8 animate-spin" />
+                    </div>
+                 ) : (
+                    navItems.map(item => <MobileNavLink key={item.href} item={item} />)
+                 )}
               </nav>
             </SheetContent>
           </Sheet>
