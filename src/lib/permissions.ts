@@ -1,3 +1,4 @@
+
 // src/lib/permissions.ts
 
 export const availableRoles = [
@@ -11,7 +12,6 @@ export const pagePermissions: Record<string, string[]> = {
     '/producao': ['Administrador', 'Operador'],
     '/insumos': ['Administrador', 'Operador'],
     '/estoque': ['Administrador', 'Operador', 'Vendedor'],
-    '/api': ['Administrador'],
     '/configuracoes': ['Administrador'],
     '/perfil': ['Administrador', 'Vendedor', 'Operador'],
 };

@@ -71,13 +71,13 @@ const allNavItems = [
         ]
     },
     { href: "/estoque", icon: Warehouse, label: "Estoque" },
-    { href: "/api", icon: Code, label: "API" },
     { 
         href: "/configuracoes", 
         icon: Settings, 
         label: "Configurações",
         subItems: [
             { href: "/configuracoes?tab=usuarios", icon: Users, label: "Usuários" },
+            { href: "/configuracoes?tab=api", icon: Code, label: "Conexão API" },
         ]
     },
 ];
@@ -86,9 +86,10 @@ const NavLink = ({ item, pathname, searchParams }: { item: typeof allNavItems[0]
     const currentTab = searchParams.get('tab');
     const baseIsActive = pathname.startsWith(item.href);
 
-    const isActive = item.subItems ? 
-        baseIsActive : 
-        pathname === item.href;
+    // This logic determines if the top-level menu item should be highlighted.
+    // It's active if the path matches AND (it has no sub-items OR one of its sub-items is the current tab).
+    const isActive = baseIsActive;
+
 
     if (item.subItems) {
         return (
@@ -98,7 +99,7 @@ const NavLink = ({ item, pathname, searchParams }: { item: typeof allNavItems[0]
                         variant="ghost"
                         className={cn(
                             "transition-colors text-sm font-medium hover:text-primary gap-1",
-                            isActive ? "text-primary" : "text-muted-foreground"
+                             isActive ? "text-primary" : "text-muted-foreground"
                         )}
                     >
                         {item.label}
