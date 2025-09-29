@@ -14,7 +14,7 @@ import { db } from '@/lib/firebase';
 import type { User } from '@/types/user';
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
 
-export default function PerfilPage() {
+export default function PerfilPageClient() {
     const [user, setUser] = React.useState<User | null>(null);
     const [isLoading, setIsLoading] = React.useState(true);
     const [isSaving, setIsSaving] = React.useState(false);
@@ -186,3 +186,4 @@ export default function PerfilPage() {
         </DashboardLayout>
     );
 }
+
