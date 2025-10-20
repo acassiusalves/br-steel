@@ -28,15 +28,19 @@ function UsersPageContent() {
     const [currentUser, setCurrentUser] = React.useState<User | null>(null);
     const [permissions, setPermissions] = React.useState(defaultPagePermissions);
     const [inactivePages, setInactivePages] = React.useState<string[]>([]);
-    
+
     const [isLoading, setIsLoading] = React.useState(true);
     const [isFormOpen, setIsFormOpen] = React.useState(false);
-    
+
     const [isSaving, setIsSaving] = React.useState(false);
     const [isSavingPermissions, setIsSavingPermissions] = React.useState(false);
+    const [hasUnsavedChanges, setHasUnsavedChanges] = React.useState(false);
 
     const [deletingUser, setDeletingUser] = React.useState<User | null>(null);
     const { toast } = useToast();
+
+    // Validação de permissão
+    const isAdmin = React.useMemo(() => currentUser?.role === 'Administrador', [currentUser]);
 
     const fetchInitialData = React.useCallback(async () => {
         setIsLoading(true);
@@ -49,34 +53,27 @@ function UsersPageContent() {
 
             const loggedInUser = userList.find(u => u.email === userEmail);
             setCurrentUser(loggedInUser || null);
-            
-            setUsers(userList);
 
-            if (appSettings) {
-                 if (appSettings.permissions) {
-                    const mergedPermissions = { ...defaultPagePermissions };
-                    for (const page in mergedPermissions) {
-                        if (appSettings.permissions[page]) {
-                            mergedPermissions[page] = appSettings.permissions[page];
-                        }
-                    }
-                     // Add any new pages from default permissions that might not be in saved settings
-                    for (const page in defaultPagePermissions) {
-                        if (!mergedPermissions[page]) {
-                            mergedPermissions[page] = defaultPagePermissions[page];
-                        }
-                    }
-                    setPermissions(mergedPermissions);
-                }
-                if (appSettings.inactivePages) {
-                    setInactivePages(appSettings.inactivePages);
-                }
-            }
-            
+            // Seed users apenas se não houver usuários
             if (userList.length === 0) {
               await seedUsers();
               const seededUsers = await getUsers();
               setUsers(seededUsers);
+            } else {
+              setUsers(userList);
+            }
+
+            // Merge de permissões otimizado
+            if (appSettings?.permissions) {
+                const mergedPermissions = {
+                    ...defaultPagePermissions,
+                    ...appSettings.permissions
+                };
+                setPermissions(mergedPermissions);
+            }
+
+            if (appSettings?.inactivePages) {
+                setInactivePages(appSettings.inactivePages);
             }
 
         } catch (error: any) {
@@ -94,7 +91,24 @@ function UsersPageContent() {
         fetchInitialData();
     }, [fetchInitialData]);
 
+    // Aviso ao sair da página com mudanças não salvas
+    React.useEffect(() => {
+        const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+            if (hasUnsavedChanges) {
+                e.preventDefault();
+                e.returnValue = '';
+            }
+        };
+
+        window.addEventListener('beforeunload', handleBeforeUnload);
+        return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+    }, [hasUnsavedChanges]);
+
     const handlePermissionChange = (page: string, role: string, checked: boolean) => {
+        if (!isAdmin) {
+            toast({ variant: 'destructive', title: 'Sem Permissão', description: 'Apenas administradores podem alterar permissões.' });
+            return;
+        }
         setPermissions(prev => {
             const newPermissions = { ...prev };
             const pageRoles = newPermissions[page] || [];
@@ -107,9 +121,14 @@ function UsersPageContent() {
             }
             return newPermissions;
         });
+        setHasUnsavedChanges(true);
     };
 
     const handlePageActiveChange = (page: string, isActive: boolean) => {
+        if (!isAdmin) {
+            toast({ variant: 'destructive', title: 'Sem Permissão', description: 'Apenas administradores podem alterar páginas ativas.' });
+            return;
+        }
         setInactivePages(prev => {
             const newInactive = new Set(prev);
             if (isActive) {
@@ -119,48 +138,55 @@ function UsersPageContent() {
             }
             return Array.from(newInactive);
         });
+        setHasUnsavedChanges(true);
     };
 
     const handleRoleChange = (userId: string, newRole: string) => {
+        if (!isAdmin) {
+            toast({ variant: 'destructive', title: 'Sem Permissão', description: 'Apenas administradores podem alterar funções.' });
+            return;
+        }
         setUsers(currentUsers =>
             currentUsers.map(u => (u.id === userId ? { ...u, role: newRole } : u))
         );
+        setHasUnsavedChanges(true);
     };
 
-    const handleSavePermissions = async () => {
-        setIsSavingPermissions(true);
-        try {
-            await saveAppSettings({ permissions: permissions, inactivePages: inactivePages });
-            toast({
-                title: "Permissões Salvas!",
-                description: "As regras de acesso foram atualizadas."
-            })
-        } catch (e) {
-            toast({ variant: "destructive", title: "Erro", description: "Não foi possível salvar as permissões."})
-        } finally {
-            setIsSavingPermissions(false);
+    const handleSaveAll = async () => {
+        if (!isAdmin) {
+            toast({ variant: 'destructive', title: 'Sem Permissão', description: 'Apenas administradores podem salvar alterações.' });
+            return;
         }
-    };
-    
-    const handleSaveUsers = async () => {
+
         setIsSaving(true);
         try {
+            // Salva permissões e funções de usuários em paralelo
             const updatePromises = users.map(user => updateUserRole(user.id, user.role));
-            await Promise.all(updatePromises);
+            await Promise.all([
+                saveAppSettings({ permissions: permissions, inactivePages: inactivePages }),
+                ...updatePromises
+            ]);
+
+            setHasUnsavedChanges(false);
             toast({
-                title: "Funções Salvas!",
-                description: "As funções dos usuários foram atualizadas com sucesso."
+                title: "Alterações Salvas!",
+                description: "Todas as configurações foram atualizadas com sucesso."
             });
         } catch (e) {
-             toast({ variant: "destructive", title: "Erro", description: "Não foi possível salvar as funções dos usuários."})
+             toast({ variant: "destructive", title: "Erro", description: "Não foi possível salvar as configurações."})
         } finally {
             setIsSaving(false);
         }
-    }
+    };
 
 
     const handleSaveUser = async (event: React.FormEvent<HTMLFormElement>) => {
         event.preventDefault();
+        if (!isAdmin) {
+            toast({ variant: 'destructive', title: 'Sem Permissão', description: 'Apenas administradores podem adicionar usuários.' });
+            return;
+        }
+
         setIsSaving(true);
         const formData = new FormData(event.currentTarget);
         const userData = {
@@ -234,6 +260,16 @@ function UsersPageContent() {
 
     return (
         <div className="space-y-8">
+            {!isAdmin && (
+                <Card className="border-yellow-500 bg-yellow-50 dark:bg-yellow-950">
+                    <CardContent className="pt-6">
+                        <p className="text-sm text-yellow-800 dark:text-yellow-200">
+                            Você está visualizando esta página no modo somente leitura. Apenas administradores podem fazer alterações.
+                        </p>
+                    </CardContent>
+                </Card>
+            )}
+
            <Card>
                 <CardHeader>
                     <CardTitle className="flex items-center gap-2"><Lock /> Permissões por Função</CardTitle>
@@ -263,7 +299,7 @@ function UsersPageContent() {
                                                     <Checkbox
                                                         checked={isChecked}
                                                         onCheckedChange={(checked) => handlePermissionChange(page, role.key, !!checked)}
-                                                        disabled={isSuperUser}
+                                                        disabled={isSuperUser || !isAdmin}
                                                     />
                                                 </TableCell>
                                             );
@@ -272,7 +308,7 @@ function UsersPageContent() {
                                             <Switch
                                                 checked={!inactivePages.includes(page)}
                                                 onCheckedChange={(checked) => handlePageActiveChange(page, checked)}
-                                                disabled={page === '/configuracoes'} // prevent locking out
+                                                disabled={page === '/configuracoes' || !isAdmin}
                                             />
                                         </TableCell>
                                     </TableRow>
@@ -281,12 +317,6 @@ function UsersPageContent() {
                         </Table>
                     </div>
                 </CardContent>
-                 <CardFooter className="justify-end">
-                    <Button onClick={handleSavePermissions} disabled={isSavingPermissions}>
-                        {isSavingPermissions && <Loader2 className="animate-spin mr-2"/>}
-                        Salvar Permissões
-                    </Button>
-                </CardFooter>
             </Card>
 
              <Card>
@@ -299,7 +329,7 @@ function UsersPageContent() {
                     </div>
                      <Dialog open={isFormOpen} onOpenChange={setIsFormOpen}>
                         <DialogTrigger asChild>
-                            <Button>
+                            <Button disabled={!isAdmin}>
                                 <PlusCircle className="mr-2 h-4 w-4" />
                                 Adicionar Usuário
                             </Button>
@@ -395,7 +425,7 @@ function UsersPageContent() {
                                                     <Select
                                                         value={user.role}
                                                         onValueChange={(newRole) => handleRoleChange(user.id, newRole)}
-                                                        disabled={isAdministrator || isCurrentUserFromState}
+                                                        disabled={!isAdmin || isAdministrator || isCurrentUserFromState}
                                                     >
                                                         <SelectTrigger className="w-[180px]">
                                                             <SelectValue placeholder="Selecione a função" />
@@ -410,11 +440,11 @@ function UsersPageContent() {
                                                     </Select>
                                                 </TableCell>
                                                 <TableCell className="text-right">
-                                                    <Button 
-                                                      variant="ghost" 
-                                                      size="icon" 
-                                                      onClick={() => setDeletingUser(user)} 
-                                                      disabled={isAdministrator || isCurrentUserFromState}
+                                                    <Button
+                                                      variant="ghost"
+                                                      size="icon"
+                                                      onClick={() => setDeletingUser(user)}
+                                                      disabled={!isAdmin || isAdministrator || isCurrentUserFromState}
                                                     >
                                                         <Trash2 className="h-4 w-4 text-destructive" />
                                                     </Button>
@@ -433,14 +463,24 @@ function UsersPageContent() {
                         </Table>
                     </TooltipProvider>
                 </CardContent>
-                 <CardFooter className="justify-end">
-                    <Button onClick={handleSaveUsers} disabled={isSaving}>
-                         {isSaving && <Loader2 className="animate-spin mr-2"/>}
-                        Salvar Funções de Usuário
-                    </Button>
-                </CardFooter>
             </Card>
-            
+
+            {isAdmin && (
+                <div className="flex items-center justify-between p-4 bg-muted rounded-lg">
+                    <div className="flex-1">
+                        {hasUnsavedChanges && (
+                            <p className="text-sm text-muted-foreground">
+                                Você tem alterações não salvas. Clique em "Salvar Todas as Alterações" para aplicá-las.
+                            </p>
+                        )}
+                    </div>
+                    <Button onClick={handleSaveAll} disabled={isSaving || !hasUnsavedChanges} size="lg">
+                        {isSaving && <Loader2 className="animate-spin mr-2"/>}
+                        Salvar Todas as Alterações
+                    </Button>
+                </div>
+            )}
+
             <AlertDialog open={!!deletingUser} onOpenChange={(open) => !open && setDeletingUser(null)}>
                 <AlertDialogContent>
                     <AlertDialogHeader>

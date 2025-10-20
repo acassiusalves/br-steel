@@ -612,17 +612,21 @@ export async function getSalesDashboardData(
   const fromDateStr = format(from, 'yyyy-MM-dd');
   const toDateStr = format(to, 'yyyy-MM-dd');
 
-  const q = query(salesCollection);
-  
+  // Otimização: Query com filtros no Firestore em vez de filtrar em memória
+  const q = query(
+    salesCollection,
+    where('data', '>=', fromDateStr),
+    where('data', '<=', toDateStr)
+  );
+
   const snapshot = await getDocs(q);
 
   const orders: SaleOrder[] = [];
   snapshot.forEach(doc => {
     const order = doc.data() as SaleOrder;
-    if (order.data >= fromDateStr && order.data <= toDateStr) {
-      if(order.itens && order.itens.length > 0) {
-        orders.push(order);
-      }
+    // Agora só filtra por itens, pois a data já foi filtrada no query
+    if(order.itens && order.itens.length > 0) {
+      orders.push(order);
     }
   });
 

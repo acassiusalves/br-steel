@@ -96,7 +96,7 @@ const StatCard = ({ title, value, icon: Icon, change, isLoading, valueFormatter 
   );
 };
 
-const CustomTooltip = ({ active, payload, label }: TooltipProps<number, string>) => {
+const CustomTooltip = React.memo(({ active, payload, label }: TooltipProps<number, string>) => {
   if (active && payload && payload.length) {
     const data = payload[0].payload;
     return (
@@ -112,9 +112,10 @@ const CustomTooltip = ({ active, payload, label }: TooltipProps<number, string>)
     );
   }
   return null;
-};
+});
+CustomTooltip.displayName = 'CustomTooltip';
 
-const PieChartTooltip = ({ active, payload }: TooltipProps<number, string>) => {
+const PieChartTooltip = React.memo(({ active, payload }: TooltipProps<number, string>) => {
     if (active && payload && payload.length) {
         const data = payload[0];
         return (
@@ -127,7 +128,8 @@ const PieChartTooltip = ({ active, payload }: TooltipProps<number, string>) => {
         );
     }
     return null;
-};
+});
+PieChartTooltip.displayName = 'PieChartTooltip';
 
 const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#AF19FF', '#FF1919', '#19B2FF', '#FF6666', '#66FF66', '#6666FF'];
 
@@ -141,7 +143,7 @@ const stateMap: { [key: string]: string } = {
   'SP': 'São Paulo', 'SE': 'Sergipe', 'TO': 'Tocantins', 'N/A': 'Não Aplicável'
 };
 
-const CustomLegend = ({ payload, totalRevenue }: { payload: any[], totalRevenue: number }) => {
+const CustomLegend = React.memo(({ payload, totalRevenue }: { payload: any[], totalRevenue: number }) => {
     return (
         <ScrollArea className="h-[350px] w-full lg:w-56">
             <div className="space-y-3 pr-4">
@@ -162,7 +164,8 @@ const CustomLegend = ({ payload, totalRevenue }: { payload: any[], totalRevenue:
             </div>
         </ScrollArea>
     )
-}
+});
+CustomLegend.displayName = 'CustomLegend';
 
 const SYNC_INTERVAL = 15 * 60 * 1000; // 15 minutes
 
@@ -183,11 +186,13 @@ export default function SalesDashboard() {
 
   const { toast } = useToast();
 
-  const fetchData = React.useCallback(async (currentDate: DateRange | undefined) => {
+  const fetchData = React.useCallback(async (currentDate: DateRange | undefined, showLoadingState: boolean = true) => {
       if (!currentDate?.from || !currentDate?.to) {
         return;
       }
-      setIsLoading(true);
+      if (showLoadingState) {
+        setIsLoading(true);
+      }
       try {
         const result = await getSalesDashboardData({ from: currentDate.from, to: currentDate.to });
         setData(result);
@@ -200,7 +205,9 @@ export default function SalesDashboard() {
         });
         setData(null);
       } finally {
-        setIsLoading(false);
+        if (showLoadingState) {
+          setIsLoading(false);
+        }
       }
   }, [toast]);
   
@@ -218,20 +225,21 @@ export default function SalesDashboard() {
         }
         return;
     }
-    
+
     setIsSyncing(true);
     if(isManual) {
         toast({ title: "Sincronizando...", description: "Buscando novos pedidos do Bling." });
     }
 
     try {
-        const result = await smartSyncOrders(); 
+        const result = await smartSyncOrders();
         if (result.summary.created > 0) {
             toast({
               title: "Painel Atualizado!",
               description: `${result.summary.created} novo(s) pedido(s) foram importados.`,
             });
-            fetchData(date); 
+            // Não mostra loading state em syncs automáticos
+            fetchData(date, isManual);
         } else {
              if(isManual) {
                 toast({ title: "Tudo certo!", description: "Seu painel já está atualizado com os últimos pedidos." });
@@ -248,17 +256,24 @@ export default function SalesDashboard() {
     }
   }, [isSyncing, date, fetchData, toast]);
 
+  // Carrega dados ao montar o componente ou quando a data muda
   React.useEffect(() => {
     fetchData(date);
-  }, [date, fetchData]); 
+  }, [date, fetchData]);
 
+  // Sincronização inicial em background (não bloqueia o carregamento da página)
   React.useEffect(() => {
     if (!initialSyncDone) {
-        autoSyncBling(false);
+        // Adiciona um pequeno delay para não competir com o carregamento inicial
+        const timer = setTimeout(() => {
+          autoSyncBling(false);
+        }, 2000);
         setInitialSyncDone(true);
+        return () => clearTimeout(timer);
     }
   }, [initialSyncDone, autoSyncBling]);
 
+  // Sincronização periódica em background
   React.useEffect(() => {
     const intervalId = setInterval(() => {
       console.log('Iniciando rotina de sincronização automática...');
