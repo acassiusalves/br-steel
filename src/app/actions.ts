@@ -761,7 +761,7 @@ export async function getProductionDemand(
     const result = Array.from(productDemand.entries())
         .map(([sku, data]) => {
             const orderCount = data.orderIds.size;
-            const weeklyAverage = orderCount / weeks;
+            const weeklyAverage = data.totalQuantity / weeks;
             const corte = Math.floor(weeklyAverage * 2);
             const dobra = Math.floor(weeklyAverage * 1.5);
             const supplyInfo = supplyInfoMap.get(sku);
