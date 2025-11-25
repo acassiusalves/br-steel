@@ -11,7 +11,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useToast } from '@/hooks/use-toast';
-import { getBlingCredentials, saveBlingCredentials, disconnectBling, countImportedOrders, getBlingOrderDetails, smartSyncOrders, fullSyncOrders, deleteAllSalesOrders, getBlingProductBySku, getBlingChannelByOrderId, getBlingProducts } from '@/app/actions';
+import { getBlingCredentials, saveBlingCredentials, disconnectBling, countImportedOrders, getBlingOrderDetails, smartSyncOrders, fullSyncOrders, deleteAllSalesOrders, getBlingProductBySku, getBlingChannelByOrderId, getBlingProducts, diagnoseSku, type SyncProgress } from '@/app/actions';
 import { format, startOfMonth, endOfMonth, subDays } from 'date-fns';
 import { Calendar as CalendarIcon } from 'lucide-react';
 import type { DateRange } from 'react-day-picker';
@@ -64,6 +64,13 @@ function ApiSettingsContent() {
 
   const [syncMode, setSyncMode] = React.useState<'smart' | 'period'>('smart');
   const [importSummary, setImportSummary] = React.useState<any>(null);
+  const [syncStatusMessage, setSyncStatusMessage] = React.useState<string>('');
+  const [syncProgressData, setSyncProgressData] = React.useState<SyncProgress | null>(null);
+
+  // Diagnóstico de SKU
+  const [skuToDiagnose, setSkuToDiagnose] = React.useState('CNUL440205140IN');
+  const [isDiagnosing, setIsDiagnosing] = React.useState(false);
+  const [diagnosisResult, setDiagnosisResult] = React.useState<any>(null);
 
   const { toast } = useToast();
   
@@ -182,49 +189,95 @@ function ApiSettingsContent() {
       setImportProgress(0);
       setImportStatus({ current: 0, total: 0 });
       setImportSummary(null);
+      setSyncStatusMessage('Iniciando sincronização...');
+      setSyncProgressData(null);
+
+      // Log inicial no console do browser
+      console.log('═══════════════════════════════════════════════════════════');
+      console.log('🚀 [SYNC FRONTEND] Iniciando sincronização');
+      console.log(`📅 Período: ${date?.from ? format(date.from, 'dd/MM/yyyy') : 'auto'} - ${date?.to ? format(date.to, 'dd/MM/yyyy') : 'auto'}`);
+      console.log(`📋 Modo: ${syncFunction === fullSyncOrders ? 'Completa' : 'Inteligente'}`);
+      console.log('═══════════════════════════════════════════════════════════');
+
+      const startTime = Date.now();
+
+      // Polling do progresso a cada 500ms usando API route (não Server Action)
+      const progressInterval = setInterval(async () => {
+          try {
+              const response = await fetch('/api/sync-progress', {
+                  cache: 'no-store',
+                  headers: {
+                      'Cache-Control': 'no-cache',
+                      'Pragma': 'no-cache',
+                  }
+              });
+
+              if (response.ok) {
+                  const data = await response.json();
+                  const progress = data.progress as SyncProgress | null;
+
+                  if (progress && progress.isRunning) {
+                      setSyncProgressData(progress);
+                      setImportProgress(progress.percentage);
+                      setImportStatus({
+                          current: progress.currentOrder,
+                          total: progress.totalOrders
+                      });
+
+                      const elapsed = Math.floor((Date.now() - startTime) / 1000);
+                      setSyncStatusMessage(`${progress.currentStep} (${elapsed}s)`);
+
+                      console.log(`📊 [POLL] Progresso: ${progress.percentage}% - ${progress.currentOrder}/${progress.totalOrders} - ${progress.phase}`);
+                  }
+              }
+          } catch (e) {
+              console.warn('Erro ao obter progresso:', e);
+          }
+      }, 500);
 
       try {
           const result = await syncFunction(date?.from, date?.to);
+
+          clearInterval(progressInterval);
+
+          const elapsed = Math.floor((Date.now() - startTime) / 1000);
+          console.log('═══════════════════════════════════════════════════════════');
+          console.log(`✅ [SYNC FRONTEND] Sincronização concluída em ${elapsed}s`);
+          console.log(`📊 Resultado:`, result.summary);
+          console.log('═══════════════════════════════════════════════════════════');
+
+          setSyncStatusMessage(`Sincronização concluída em ${elapsed}s!`);
           setApiResponse(result);
           setImportSummary(result.summary);
 
           const totalToProcess = result.summary.new || 0;
-          setImportStatus({ current: 0, total: totalToProcess });
-          
-          if (totalToProcess > 0) {
-              // Simulate progress
-              const interval = setInterval(() => {
-                  setImportStatus(prev => {
-                      const newCurrent = prev.current + 1;
-                      if (newCurrent >= totalToProcess) {
-                          clearInterval(interval);
-                          setImportProgress(100);
-                          return { current: totalToProcess, total: totalToProcess };
-                      }
-                      setImportProgress((newCurrent / totalToProcess) * 100);
-                      return { current: newCurrent, total: totalToProcess };
-                  });
-              }, 100); // Adjust timing for smoother animation
-          } else {
-             setImportProgress(100);
-          }
-          
+          setImportStatus({ current: totalToProcess, total: totalToProcess });
+          setImportProgress(100);
+
           const totalCount = await countImportedOrders();
           setImportedCount(totalCount);
 
           if (result.summary.created === 0 && result.summary.updated === 0) {
               toast({
-                  title: "Tudo Atualizado! ✅",
+                  title: "Tudo Atualizado!",
                   description: `Nenhum pedido novo para importar. Total de ${totalCount} na base.`,
               });
           } else {
               toast({
-                  title: "Sincronização Concluída! 🎉",
+                  title: "Sincronização Concluída!",
                   description: `${result.summary.created} novos, ${result.summary.updated} atualizados. Total: ${totalCount}`,
               });
           }
 
       } catch (error: any) {
+          clearInterval(progressInterval);
+          const elapsed = Math.floor((Date.now() - startTime) / 1000);
+
+          console.error('═══════════════════════════════════════════════════════════');
+          console.error(`❌ [SYNC FRONTEND] Erro após ${elapsed}s:`, error.message);
+          console.error('═══════════════════════════════════════════════════════════');
+
+          setSyncStatusMessage(`Erro após ${elapsed}s: ${error.message}`);
           setApiResponse({ error: "Falha na sincronização", message: error.message });
           toast({
               variant: "destructive",
@@ -233,6 +286,7 @@ function ApiSettingsContent() {
           });
       } finally {
           setIsImporting(false);
+          setSyncProgressData(null);
       }
   };
 
@@ -337,6 +391,64 @@ function ApiSettingsContent() {
           });
       } finally {
           setIsFetchingProductBySku(false);
+      }
+  }
+
+  const handleDiagnoseSku = async () => {
+      if (!skuToDiagnose) {
+          toast({ variant: "destructive", title: "SKU Faltando", description: "Por favor, insira um SKU para diagnosticar."});
+          return;
+      }
+      setIsDiagnosing(true);
+      setDiagnosisResult(null);
+      setApiResponse(null);
+
+      toast({
+          title: "Diagnóstico Iniciado",
+          description: `Analisando SKU ${skuToDiagnose}. Isso pode levar vários minutos...`,
+      });
+
+      console.log('═══════════════════════════════════════════════════════════');
+      console.log(`🔍 [DIAGNÓSTICO FRONTEND] Iniciando análise do SKU: ${skuToDiagnose}`);
+      console.log('⚠️ Acompanhe o progresso detalhado no terminal do servidor');
+      console.log('═══════════════════════════════════════════════════════════');
+
+      try {
+          const result = await diagnoseSku(skuToDiagnose);
+          setDiagnosisResult(result);
+          setApiResponse(result);
+
+          console.log('═══════════════════════════════════════════════════════════');
+          console.log('✅ [DIAGNÓSTICO FRONTEND] Análise concluída!');
+          console.log(`📊 Firebase: ${result.firebase.ordersCount} pedidos, ${result.firebase.totalQuantity} unidades`);
+          console.log(`📊 Bling: ${result.bling.ordersWithSku} pedidos, ${result.bling.totalQuantity} unidades`);
+          console.log(`📊 Diferença: ${result.divergence.quantityDiff} unidades`);
+          console.log(`📊 Pedidos faltando no Firebase: ${result.divergence.missingOrders}`);
+          console.log('═══════════════════════════════════════════════════════════');
+
+          if (result.divergence.missingOrders > 0) {
+              toast({
+                  variant: "destructive",
+                  title: "Divergência Encontrada!",
+                  description: `${result.divergence.missingOrders} pedidos do Bling não estão no Firebase. Diferença de ${result.divergence.quantityDiff} unidades.`,
+                  duration: 10000,
+              });
+          } else {
+              toast({
+                  title: "Diagnóstico Concluído",
+                  description: `Todos os pedidos do Bling estão no Firebase. ${result.firebase.totalQuantity} unidades encontradas.`,
+              });
+          }
+      } catch (error: any) {
+          console.error('❌ [DIAGNÓSTICO FRONTEND] Erro:', error.message);
+          setApiResponse({ error: "Falha no diagnóstico", message: error.message });
+          toast({
+              variant: "destructive",
+              title: "Erro no Diagnóstico",
+              description: `Não foi possível completar a análise: ${error.message}`,
+          });
+      } finally {
+          setIsDiagnosing(false);
       }
   }
 
@@ -572,12 +684,36 @@ function ApiSettingsContent() {
                   </div>
 
                   {isImporting && (
-                      <div className="space-y-2">
-                          <Progress value={importProgress} />
-                          <p className="text-sm text-muted-foreground text-center">
-                              {importStatus.total > 0
-                                  ? `Processando ${importStatus.current} de ${importStatus.total} pedidos...`
-                                  : 'Verificando pedidos existentes...'}
+                      <div className="space-y-3 p-4 bg-blue-50 border border-blue-200 rounded-md">
+                          <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-2">
+                                  <Loader2 className="h-5 w-5 animate-spin text-blue-600" />
+                                  <span className="font-medium text-blue-700">Sincronização em andamento</span>
+                              </div>
+                              {importStatus.total > 0 && (
+                                  <span className="text-sm font-bold text-blue-700">
+                                      {importStatus.current} / {importStatus.total} pedidos
+                                  </span>
+                              )}
+                          </div>
+                          <div className="space-y-1">
+                              <Progress value={importProgress} className="h-3" />
+                              <div className="flex justify-between text-xs text-blue-600">
+                                  <span>{importProgress}%</span>
+                                  {syncProgressData?.phase && (
+                                      <span className="capitalize">
+                                          {syncProgressData.phase === 'listing' && 'Listando pedidos'}
+                                          {syncProgressData.phase === 'filtering' && 'Filtrando novos'}
+                                          {syncProgressData.phase === 'fetching_details' && 'Buscando detalhes'}
+                                          {syncProgressData.phase === 'saving' && 'Salvando'}
+                                          {syncProgressData.phase === 'completed' && 'Concluído'}
+                                          {syncProgressData.phase === 'error' && 'Erro'}
+                                      </span>
+                                  )}
+                              </div>
+                          </div>
+                          <p className="text-sm text-blue-600 font-medium">
+                              {syncStatusMessage || 'Iniciando...'}
                           </p>
                       </div>
                   )}
@@ -709,8 +845,94 @@ function ApiSettingsContent() {
                 </Button>
               </CardContent>
             </Card>
+
+            <Card className="bg-amber-50 border-amber-300">
+              <CardHeader>
+                <CardTitle className="text-base text-amber-800">🔍 Diagnóstico de Divergência por SKU</CardTitle>
+                <CardDescription className="text-amber-700">
+                  Compare os dados do Firebase com o Bling para identificar pedidos faltando ou divergências de quantidade.
+                  <br /><strong>⚠️ Esta operação pode levar vários minutos</strong> pois consulta cada pedido individualmente na API do Bling.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="flex items-end gap-2">
+                  <div className="flex-1 space-y-1.5">
+                    <Label htmlFor="skuToDiagnose">SKU para Diagnosticar</Label>
+                    <Input
+                        id="skuToDiagnose"
+                        value={skuToDiagnose}
+                        onChange={(e) => setSkuToDiagnose(e.target.value)}
+                        placeholder="Ex: CNUL440205140IN"
+                    />
+                  </div>
+                  <Button onClick={handleDiagnoseSku} disabled={isDiagnosing} className="bg-amber-600 hover:bg-amber-700">
+                    {isDiagnosing ? (
+                      <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Analisando...</>
+                    ) : (
+                      <><Search className="mr-2 h-4 w-4" /> Executar Diagnóstico</>
+                    )}
+                  </Button>
+                </div>
+
+                {isDiagnosing && (
+                    <div className="p-3 bg-amber-100 border border-amber-300 rounded-md text-sm text-amber-800">
+                        <p className="font-medium">⏳ Diagnóstico em andamento...</p>
+                        <p className="mt-1">Acompanhe o progresso detalhado no terminal do servidor ou no Console do navegador (F12).</p>
+                        <p className="mt-1">Isso pode levar vários minutos dependendo do número de pedidos no período.</p>
+                    </div>
+                )}
+
+                {diagnosisResult && (
+                    <div className="space-y-3 p-4 bg-white border rounded-md">
+                        <h4 className="font-semibold text-sm">Resultado do Diagnóstico: {diagnosisResult.sku}</h4>
+                        <p className="text-xs text-muted-foreground">Período: {diagnosisResult.period.from} a {diagnosisResult.period.to}</p>
+
+                        <div className="grid grid-cols-2 gap-4 text-sm">
+                            <div className="space-y-2">
+                                <h5 className="font-medium text-blue-700">📊 Firebase (Local)</h5>
+                                <div className="bg-blue-50 p-2 rounded">
+                                    <p>Pedidos: <strong>{diagnosisResult.firebase.ordersCount}</strong></p>
+                                    <p>Com NF: {diagnosisResult.firebase.ordersWithNF}</p>
+                                    <p>Sem NF: {diagnosisResult.firebase.ordersWithoutNF}</p>
+                                    <p>Qty Total: <strong>{diagnosisResult.firebase.totalQuantity}</strong></p>
+                                </div>
+                            </div>
+                            <div className="space-y-2">
+                                <h5 className="font-medium text-green-700">🌐 Bling (API)</h5>
+                                <div className="bg-green-50 p-2 rounded">
+                                    <p>Pedidos no período: {diagnosisResult.bling.totalOrdersInPeriod}</p>
+                                    <p>Com este SKU: <strong>{diagnosisResult.bling.ordersWithSku}</strong></p>
+                                    <p>Qty Total: <strong>{diagnosisResult.bling.totalQuantity}</strong></p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className={`p-3 rounded ${diagnosisResult.divergence.missingOrders > 0 ? 'bg-red-50 border border-red-200' : 'bg-green-50 border border-green-200'}`}>
+                            <h5 className={`font-medium ${diagnosisResult.divergence.missingOrders > 0 ? 'text-red-700' : 'text-green-700'}`}>
+                                {diagnosisResult.divergence.missingOrders > 0 ? '❌ Divergência Encontrada' : '✅ Dados Sincronizados'}
+                            </h5>
+                            <p className="text-sm mt-1">
+                                Diferença de quantidade: <strong>{diagnosisResult.divergence.quantityDiff}</strong> unidades
+                            </p>
+                            <p className="text-sm">
+                                Pedidos faltando no Firebase: <strong>{diagnosisResult.divergence.missingOrders}</strong>
+                            </p>
+                            {diagnosisResult.divergence.missingOrderIds.length > 0 && (
+                                <div className="mt-2">
+                                    <p className="text-xs font-medium">IDs dos pedidos faltando (primeiros 10):</p>
+                                    <p className="text-xs text-muted-foreground">
+                                        {diagnosisResult.divergence.missingOrderIds.slice(0, 10).join(', ')}
+                                        {diagnosisResult.divergence.missingOrderIds.length > 10 && ` ... e mais ${diagnosisResult.divergence.missingOrderIds.length - 10}`}
+                                    </p>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                )}
+              </CardContent>
+            </Card>
         </div>
-          
+
         <Separator />
 
           <Card className="border-destructive">

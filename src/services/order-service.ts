@@ -116,6 +116,7 @@ export async function filterNewOrders(orders: any[]): Promise<any[]> {
 
 /**
  * Salva pedidos em lote otimizado com verificação de duplicatas
+ * Divide em lotes menores para evitar o erro "Transaction too big"
  * @param orders - Array de pedidos completos do Bling
  * @returns Resultado da operação
  */
@@ -124,43 +125,64 @@ export async function saveSalesOrdersOptimized(orders: any[]): Promise<{ count: 
         return { count: 0, updated: 0, created: 0 };
     }
 
-    const batch = writeBatch(db);
     const ordersCollection = collection(db, 'salesOrders');
-    
-    let updated = 0;
-    let created = 0;
+
+    let totalUpdated = 0;
+    let totalCreated = 0;
 
     const orderIds = orders.map(order => String(order.id));
     const existingIds = await getExistingOrderIds(orderIds);
 
-    orders.forEach(order => {
-        const docRef = doc(ordersCollection, String(order.id));
-        const isUpdate = existingIds.has(String(order.id));
-        
-        const orderWithMetadata = {
-            ...order,
-            importedAt: new Date().toISOString(),
-            lastUpdated: new Date().toISOString(),
-            isImported: true
-        };
+    // Firebase tem limite de ~500 operações por batch e ~10MB por transação
+    // Usamos lotes de 100 para ter margem de segurança com pedidos grandes
+    const BATCH_SIZE = 100;
+    const totalBatches = Math.ceil(orders.length / BATCH_SIZE);
 
-        batch.set(docRef, orderWithMetadata, { merge: true });
-        
-        if (isUpdate) {
-            updated++;
-        } else {
-            created++;
-        }
-    });
+    console.log(`💾 Salvando ${orders.length} pedidos em ${totalBatches} lotes de até ${BATCH_SIZE}...`);
 
-    await batch.commit();
-    
-    console.log(`✅ ${orders.length} pedidos processados: ${created} criados, ${updated} atualizados`);
-    
-    return { 
-        count: orders.length, 
-        updated, 
-        created 
+    for (let batchIndex = 0; batchIndex < totalBatches; batchIndex++) {
+        const start = batchIndex * BATCH_SIZE;
+        const end = Math.min(start + BATCH_SIZE, orders.length);
+        const ordersBatch = orders.slice(start, end);
+
+        const batch = writeBatch(db);
+        let batchUpdated = 0;
+        let batchCreated = 0;
+
+        ordersBatch.forEach(order => {
+            const docRef = doc(ordersCollection, String(order.id));
+            const isUpdate = existingIds.has(String(order.id));
+
+            const orderWithMetadata = {
+                ...order,
+                importedAt: new Date().toISOString(),
+                lastUpdated: new Date().toISOString(),
+                isImported: true
+            };
+
+            batch.set(docRef, orderWithMetadata, { merge: true });
+
+            if (isUpdate) {
+                batchUpdated++;
+            } else {
+                batchCreated++;
+            }
+        });
+
+        await batch.commit();
+
+        totalUpdated += batchUpdated;
+        totalCreated += batchCreated;
+
+        console.log(`   📦 Lote ${batchIndex + 1}/${totalBatches}: ${ordersBatch.length} pedidos (${batchCreated} novos, ${batchUpdated} atualizados)`);
+    }
+
+    console.log(`✅ ${orders.length} pedidos processados: ${totalCreated} criados, ${totalUpdated} atualizados`);
+
+    return {
+        count: orders.length,
+        updated: totalUpdated,
+        created: totalCreated
     };
 }
 

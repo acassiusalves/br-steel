@@ -12,6 +12,8 @@ import {
   ChevronRight,
   ChevronsRight,
   Columns,
+  TrendingUp,
+  TrendingDown,
 } from "lucide-react";
 import { format, subDays, startOfMonth, endOfMonth, startOfYesterday, endOfYesterday, startOfWeek, endOfWeek, startOfYear, endOfYear, subMonths } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -27,7 +29,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { getProductionDemand, smartSyncOrders, updateSingleSkuStock } from '@/app/actions';
+import { getProductionDemand, updateSingleSkuStock } from '@/app/actions';
 import type { ProductionDemand } from '@/app/actions';
 import { Button } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -56,7 +58,6 @@ export default function ProducaoClient() {
   const [demand, setDemand] = React.useState<ProductionDemand[]>([]);
   const [displayDemand, setDisplayDemand] = React.useState<ProductionDemand[]>([]);
   const [isLoading, setIsLoading] = React.useState(true);
-  const [isSyncing, setIsSyncing] = React.useState(false);
   const [updatingSku, setUpdatingSku] = React.useState<string | null>(null);
   const [date, setDate] = React.useState<DateRange | undefined>(undefined);
   const { toast } = useToast();
@@ -81,11 +82,8 @@ export default function ProducaoClient() {
   const [currentPage, setCurrentPage] = React.useState(1);
   const [rowsPerPage, setRowsPerPage] = React.useState(10);
   
-  const fetchData = React.useCallback(async (currentDate: DateRange | undefined, forceSync: boolean = false) => {
+  const fetchData = React.useCallback(async (currentDate: DateRange | undefined) => {
     setIsLoading(true);
-    if (forceSync) {
-        setIsSyncing(true);
-    }
     try {
       if (!currentDate?.from || !currentDate?.to) {
         toast({
@@ -96,26 +94,13 @@ export default function ProducaoClient() {
         setDemand([]);
         return;
       }
-      
-      if (forceSync) {
-        toast({
-            title: "Sincronizando...",
-            description: "Atualizando pedidos com o Bling para garantir dados precisos.",
-        });
-        await smartSyncOrders();
-      }
 
+      // Buscar pedidos do Firebase + estoque do Bling
       const data = await getProductionDemand({ from: currentDate.from, to: currentDate.to });
       setDemand(data);
-      if(forceSync) {
-        toast({
-            title: "Dados Atualizados!",
-            description: "A análise de produção foi recalculada com sucesso.",
-        });
-      }
 
     } catch (error) {
-      console.error("Failed to fetch production demand:", error);
+      console.error('❌ [PRODUÇÃO] Erro ao buscar dados:', error);
       toast({
         variant: "destructive",
         title: "Erro ao Buscar Dados",
@@ -123,9 +108,6 @@ export default function ProducaoClient() {
       });
     } finally {
       setIsLoading(false);
-      if (forceSync) {
-        setIsSyncing(false);
-      }
     }
   }, [toast]);
 
@@ -136,13 +118,18 @@ export default function ProducaoClient() {
         to: today,
     };
     setDate(initialDate);
-    fetchData(initialDate, false);
+    fetchData(initialDate);
   }, [fetchData]);
 
   React.useEffect(() => {
+    console.log('🔄 [FILTRO] Aplicando filtro na lista de demanda...');
+    console.log(`📊 Total de SKUs antes do filtro: ${demand.length}`);
+    console.log(`🏭 Filtro "Fila de Produção" ativo: ${productionQueueFilter ? 'SIM' : 'NÃO'}`);
+
     let filteredDemand = [...demand];
 
     if (productionQueueFilter) {
+      const beforeFilter = filteredDemand.length;
       filteredDemand = filteredDemand
         .filter(item => {
           const stock = item.stockLevel;
@@ -151,8 +138,8 @@ export default function ProducaoClient() {
 
           if (stock === undefined || min === undefined || max === undefined) return false;
 
-          // Regras atualizadas:
-          // 1. Estoque atual < Estoque Mínimo (Exclui quando é igual)
+          // Regras de inclusão:
+          // 1. Estoque atual < Estoque Mínimo
           const needsProduction = stock < min;
           // 2. Estoque atual NÃO está acima do máximo
           const isNotOverstocked = stock <= max;
@@ -160,18 +147,47 @@ export default function ProducaoClient() {
           return needsProduction && isNotOverstocked;
         })
         .sort((a, b) => {
-          // Prioridade máxima: produtos com estoque 0
-          const aIsZero = a.stockLevel === 0;
-          const bIsZero = b.stockLevel === 0;
+          const aStock = a.stockLevel ?? 0;
+          const bStock = b.stockLevel ?? 0;
+          const aMin = a.stockMin ?? 0;
+          const bMin = b.stockMin ?? 0;
 
-          if (aIsZero && !bIsZero) return -1; // a vem primeiro
-          if (!aIsZero && bIsZero) return 1;  // b vem primeiro
+          // Calcular déficit (quanto falta para o mínimo)
+          const aDeficit = aMin - aStock; // maior = mais urgente
+          const bDeficit = bMin - bStock;
 
-          // Se ambos têm estoque 0 ou ambos têm estoque > 0, ordena por média semanal
-          return b.weeklyAverage - a.weeklyAverage;
+          // PRIORIDADE 1: Estoque = 0 + maior quantidade total vendida
+          const aIsZero = aStock === 0;
+          const bIsZero = bStock === 0;
+
+          if (aIsZero && bIsZero) {
+            // Ambos com estoque 0: desempata por quantidade total vendida
+            return b.totalQuantitySold - a.totalQuantitySold;
+          }
+          if (aIsZero && !bIsZero) return -1; // a vem primeiro (estoque 0)
+          if (!aIsZero && bIsZero) return 1;  // b vem primeiro (estoque 0)
+
+          // PRIORIDADE 2: Maior déficit + maior quantidade total vendida
+          // PRIORIDADE 3: Maior déficit (quando vendas são iguais)
+          if (aDeficit !== bDeficit) {
+            return bDeficit - aDeficit; // maior déficit primeiro
+          }
+
+          // Mesmo déficit: desempata por quantidade total vendida
+          return b.totalQuantitySold - a.totalQuantitySold;
         });
+
+      console.log(`🏭 [FILA DE PRODUÇÃO] Filtro aplicado: ${beforeFilter} -> ${filteredDemand.length} SKUs`);
+      if (filteredDemand.length > 0) {
+        console.log('📋 Primeiros 5 itens na fila de produção:');
+        filteredDemand.slice(0, 5).forEach((item, i) => {
+          const deficit = (item.stockMin ?? 0) - (item.stockLevel ?? 0);
+          console.log(`   ${i+1}. ${item.sku} | Estoque: ${item.stockLevel} | Mín: ${item.stockMin} | Déficit: ${deficit} | Vendido: ${item.totalQuantitySold}`);
+        });
+      }
     }
 
+    console.log(`📊 Total de SKUs após filtro: ${filteredDemand.length}`);
     setDisplayDemand(filteredDemand);
     setCurrentPage(1); // Reset page on filter change
   }, [demand, productionQueueFilter]);
@@ -186,7 +202,7 @@ export default function ProducaoClient() {
         });
         return;
     }
-    fetchData(date, false);
+    fetchData(date);
   };
   
     const setDatePreset = (preset: 'today' | 'yesterday' | 'last7' | 'last30' | 'last3Months' | 'thisMonth' | 'lastMonth') => {
@@ -320,13 +336,13 @@ export default function ProducaoClient() {
                     />
                   </PopoverContent>
                 </Popover>
-                <Button onClick={handleFilter} disabled={isLoading || isSyncing} className="w-full sm:w-auto">
-                    {isLoading || isSyncing ? (
+                <Button onClick={handleFilter} disabled={isLoading} variant="outline" className="w-full sm:w-auto">
+                    {isLoading ? (
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                     ) : (
-                    <RefreshCw className="mr-2 h-4 w-4" />
+                    <Filter className="mr-2 h-4 w-4" />
                     )}
-                    {isSyncing ? 'Sincronizando...' : (isLoading ? 'Carregando...' : 'Atualizar e Filtrar')}
+                    {isLoading ? 'Carregando...' : 'Filtrar'}
                 </Button>
             </div>
         </div>
@@ -426,7 +442,21 @@ export default function ProducaoClient() {
                       {columnVisibility.stockLevel && <TableCell className="text-right font-bold">{item.stockLevel ?? ''}</TableCell>}
                       {columnVisibility.orderCount && <TableCell className="text-right font-bold">{item.orderCount}</TableCell>}
                       {columnVisibility.totalQuantitySold && <TableCell className="text-right font-bold">{item.totalQuantitySold}</TableCell>}
-                      {columnVisibility.weeklyAverage && <TableCell className="text-right">{item.weeklyAverage.toFixed(1)}</TableCell>}
+                      {columnVisibility.weeklyAverage && (
+                        <TableCell className="text-right">
+                          <div className="flex items-center justify-end gap-1">
+                            {item.weeklyAverage.toFixed(1)}
+                            {/* Prioridade: Crítico (vermelho) > Alta demanda (verde) */}
+                            {(item.stockLevel ?? 0) < ((item.stockMin ?? 0) * 0.5) ? (
+                              // Crítico: estoque atual < 50% do mínimo
+                              <TrendingDown className="h-4 w-4 text-red-500" />
+                            ) : item.weeklyAverage > (item.stockLevel ?? 0) ? (
+                              // Alta demanda: média semanal > estoque atual
+                              <TrendingUp className="h-4 w-4 text-green-500" />
+                            ) : null}
+                          </div>
+                        </TableCell>
+                      )}
                       {columnVisibility.corte && <TableCell className="text-right">{item.corte}</TableCell>}
                       {columnVisibility.dobra && <TableCell className="text-right">{item.dobra}</TableCell>}
                       {columnVisibility.actions && (
