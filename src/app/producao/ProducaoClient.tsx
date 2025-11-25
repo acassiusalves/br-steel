@@ -148,7 +148,7 @@ export default function ProducaoClient() {
           const stock = item.stockLevel;
           const min = item.stockMin;
           const max = item.stockMax;
-          
+
           if (stock === undefined || min === undefined || max === undefined) return false;
 
           // Regras atualizadas:
@@ -156,10 +156,20 @@ export default function ProducaoClient() {
           const needsProduction = stock < min;
           // 2. Estoque atual NÃO está acima do máximo
           const isNotOverstocked = stock <= max;
-          
+
           return needsProduction && isNotOverstocked;
         })
-        .sort((a, b) => b.weeklyAverage - a.weeklyAverage);
+        .sort((a, b) => {
+          // Prioridade máxima: produtos com estoque 0
+          const aIsZero = a.stockLevel === 0;
+          const bIsZero = b.stockLevel === 0;
+
+          if (aIsZero && !bIsZero) return -1; // a vem primeiro
+          if (!aIsZero && bIsZero) return 1;  // b vem primeiro
+
+          // Se ambos têm estoque 0 ou ambos têm estoque > 0, ordena por média semanal
+          return b.weeklyAverage - a.weeklyAverage;
+        });
     }
 
     setDisplayDemand(filteredDemand);
