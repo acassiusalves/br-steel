@@ -153,6 +153,7 @@ function ApiSettingsContent() {
     const state = Math.random().toString(36).substring(7);
     localStorage.setItem('bling_oauth_state', state);
 
+    // Bling usa a URL de callback cadastrada no aplicativo automaticamente
     const authorizationUrl = `https://www.bling.com.br/Api/v3/oauth/authorize?response_type=code&client_id=${credentials.clientId}&state=${state}`;
     
     setAuthUrl(authorizationUrl);

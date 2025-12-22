@@ -38,6 +38,7 @@ import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
 import { Separator } from '@/components/ui/separator';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Progress } from '@/components/ui/progress';
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
@@ -61,7 +62,11 @@ export default function ProducaoClient() {
   const [updatingSku, setUpdatingSku] = React.useState<string | null>(null);
   const [date, setDate] = React.useState<DateRange | undefined>(undefined);
   const { toast } = useToast();
-  
+
+  // Progress states
+  const [loadingProgress, setLoadingProgress] = React.useState(0);
+  const [loadingStatus, setLoadingStatus] = React.useState('');
+
   const [productionQueueFilter, setProductionQueueFilter] = React.useState(false);
 
   const [columnVisibility, setColumnVisibility] = React.useState<ColumnVisibility>({
@@ -84,6 +89,9 @@ export default function ProducaoClient() {
   
   const fetchData = React.useCallback(async (currentDate: DateRange | undefined) => {
     setIsLoading(true);
+    setLoadingProgress(0);
+    setLoadingStatus('Iniciando...');
+
     try {
       if (!currentDate?.from || !currentDate?.to) {
         toast({
@@ -92,15 +100,45 @@ export default function ProducaoClient() {
           description: "Por favor, selecione uma data de início e fim.",
         });
         setDemand([]);
+        setIsLoading(false);
         return;
       }
 
+      // Etapas de progresso simulado durante o carregamento
+      const progressSteps = [
+        { progress: 10, status: 'Buscando pedidos do Firebase...' },
+        { progress: 30, status: 'Consultando estoque no Bling...' },
+        { progress: 50, status: 'Carregando dados de suprimentos...' },
+        { progress: 70, status: 'Processando demanda por SKU...' },
+        { progress: 85, status: 'Calculando métricas...' },
+      ];
+
+      let stepIndex = 0;
+      const progressInterval = setInterval(() => {
+        if (stepIndex < progressSteps.length) {
+          setLoadingProgress(progressSteps[stepIndex].progress);
+          setLoadingStatus(progressSteps[stepIndex].status);
+          stepIndex++;
+        }
+      }, 400);
+
       // Buscar pedidos do Firebase + estoque do Bling
       const data = await getProductionDemand({ from: currentDate.from, to: currentDate.to });
+
+      clearInterval(progressInterval);
+      setLoadingProgress(95);
+      setLoadingStatus('Finalizando...');
+
+      // Pequeno delay para mostrar a finalização
+      await new Promise(resolve => setTimeout(resolve, 200));
+
+      setLoadingProgress(100);
+      setLoadingStatus('Concluído!');
       setDemand(data);
 
     } catch (error) {
       console.error('❌ [PRODUÇÃO] Erro ao buscar dados:', error);
+      setLoadingStatus('Erro ao carregar dados');
       toast({
         variant: "destructive",
         title: "Erro ao Buscar Dados",
@@ -428,8 +466,16 @@ export default function ProducaoClient() {
               <TableBody>
                 {isLoading ? (
                   <TableRow>
-                    <TableCell colSpan={Object.values(columnVisibility).filter(Boolean).length} className="h-24 text-center">
-                      <Loader2 className="mx-auto h-6 w-6 animate-spin" />
+                    <TableCell colSpan={Object.values(columnVisibility).filter(Boolean).length} className="h-32 text-center">
+                      <div className="flex flex-col items-center justify-center gap-3 px-4">
+                        <Loader2 className="h-6 w-6 animate-spin text-primary" />
+                        <div className="w-full max-w-xs space-y-2">
+                          <Progress value={loadingProgress} className="h-2" />
+                          <p className="text-sm text-muted-foreground">
+                            {loadingStatus} ({loadingProgress}%)
+                          </p>
+                        </div>
+                      </div>
                     </TableCell>
                   </TableRow>
                 ) : paginatedDemand.length > 0 ? (
