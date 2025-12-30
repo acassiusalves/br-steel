@@ -8,10 +8,28 @@ import { saveBlingCredentials } from '@/app/actions';
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const code = searchParams.get('code');
-  const state = searchParams.get('state'); // You should validate this state against a stored value
+  const state = searchParams.get('state');
+  const error = searchParams.get('error');
+  const errorDescription = searchParams.get('error_description');
+
+  console.log('🔐 [BLING CALLBACK] URL completa:', request.url);
+  console.log('🔐 [BLING CALLBACK] code:', code);
+  console.log('🔐 [BLING CALLBACK] state:', state);
+  console.log('🔐 [BLING CALLBACK] error:', error);
+
+  // Se o Bling retornou um erro
+  if (error) {
+    return NextResponse.json({
+      error: 'Autorização negada pelo Bling',
+      details: errorDescription || error
+    }, { status: 400 });
+  }
 
   if (!code) {
-    return NextResponse.json({ error: 'Nenhum código de autorização recebido.' }, { status: 400 });
+    return NextResponse.json({
+      error: 'Nenhum código de autorização recebido.',
+      hint: 'Verifique se você autorizou o aplicativo no Bling.'
+    }, { status: 400 });
   }
 
   // Client ID and Secret MUST come from environment variables on the server.

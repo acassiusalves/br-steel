@@ -14,10 +14,14 @@ import {
   Columns,
   TrendingUp,
   TrendingDown,
+  Wifi,
+  WifiOff,
 } from "lucide-react";
-import { format, subDays, startOfMonth, endOfMonth, startOfYesterday, endOfYesterday, startOfWeek, endOfWeek, startOfYear, endOfYear, subMonths } from "date-fns";
+import { format, subDays, startOfMonth, endOfMonth, startOfYesterday, endOfYesterday, startOfWeek, endOfWeek, startOfYear, endOfYear, subMonths, formatDistanceToNow } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import type { DateRange } from "react-day-picker";
+import { doc, onSnapshot } from 'firebase/firestore';
+import { db } from '@/lib/firebase';
 
 import DashboardLayout from '@/components/dashboard-layout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card';
@@ -49,6 +53,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
+import { Badge } from '@/components/ui/badge';
 
 
 type ColumnVisibility = {
@@ -86,7 +91,12 @@ export default function ProducaoClient() {
   // Pagination State
   const [currentPage, setCurrentPage] = React.useState(1);
   const [rowsPerPage, setRowsPerPage] = React.useState(10);
-  
+
+  // Real-time webhook state
+  const [lastWebhookUpdate, setLastWebhookUpdate] = React.useState<string | null>(null);
+  const [isWebhookConnected, setIsWebhookConnected] = React.useState(false);
+  const [webhookTotalReceived, setWebhookTotalReceived] = React.useState(0);
+
   const fetchData = React.useCallback(async (currentDate: DateRange | undefined) => {
     setIsLoading(true);
     setLoadingProgress(0);
@@ -158,6 +168,45 @@ export default function ProducaoClient() {
     setDate(initialDate);
     fetchData(initialDate);
   }, [fetchData]);
+
+  // Real-time listener for webhook updates
+  React.useEffect(() => {
+    const webhookStatusRef = doc(db, 'appConfig', 'webhookStatus');
+    let lastKnownTotal = 0;
+
+    const unsubscribe = onSnapshot(
+      webhookStatusRef,
+      (snapshot) => {
+        setIsWebhookConnected(true);
+
+        if (snapshot.exists()) {
+          const data = snapshot.data();
+          const newTotal = data.totalReceived || 0;
+
+          setLastWebhookUpdate(data.lastUpdate || null);
+          setWebhookTotalReceived(newTotal);
+
+          // If we received a new webhook and we have a date range, refresh data
+          if (newTotal > lastKnownTotal && lastKnownTotal > 0 && date?.from && date?.to) {
+            console.log('🔔 [WEBHOOK] Novo pedido recebido! Atualizando dados...');
+            toast({
+              title: "Novo Pedido Recebido!",
+              description: `Pedido ${data.lastOrderId} foi sincronizado via webhook.`,
+            });
+            fetchData(date);
+          }
+
+          lastKnownTotal = newTotal;
+        }
+      },
+      (error) => {
+        console.error('❌ [WEBHOOK] Erro ao escutar webhookStatus:', error);
+        setIsWebhookConnected(false);
+      }
+    );
+
+    return () => unsubscribe();
+  }, [date, fetchData, toast]);
 
   React.useEffect(() => {
     console.log('🔄 [FILTRO] Aplicando filtro na lista de demanda...');
@@ -325,6 +374,30 @@ export default function ProducaoClient() {
                 <p className="text-muted-foreground">
                     Demanda de produtos baseada em vendas com Nota Fiscal emitida no período.
                 </p>
+                {/* Webhook status indicator */}
+                <div className="flex items-center gap-2 mt-2">
+                  {isWebhookConnected ? (
+                    <Badge variant="outline" className="flex items-center gap-1 text-green-600 border-green-300">
+                      <Wifi className="h-3 w-3" />
+                      <span>Real-time ativo</span>
+                    </Badge>
+                  ) : (
+                    <Badge variant="outline" className="flex items-center gap-1 text-muted-foreground">
+                      <WifiOff className="h-3 w-3" />
+                      <span>Conectando...</span>
+                    </Badge>
+                  )}
+                  {lastWebhookUpdate && (
+                    <span className="text-xs text-muted-foreground">
+                      Última atualização: {formatDistanceToNow(new Date(lastWebhookUpdate), { addSuffix: true, locale: ptBR })}
+                    </span>
+                  )}
+                  {webhookTotalReceived > 0 && (
+                    <Badge variant="secondary" className="text-xs">
+                      {webhookTotalReceived} webhooks recebidos
+                    </Badge>
+                  )}
+                </div>
             </div>
              <div className="flex flex-wrap items-center gap-2">
                 <Popover>
