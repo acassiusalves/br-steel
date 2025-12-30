@@ -9,45 +9,17 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Loader2, AlertCircle } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
-import { collection, query, where, getDocs, doc, updateDoc } from 'firebase/firestore';
+import { doc, updateDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
-import type { User } from '@/types/user';
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
+import { useAuth } from '@/contexts/AuthContext';
 
 export default function PerfilPageClient() {
-    const [user, setUser] = React.useState<User | null>(null);
-    const [isLoading, setIsLoading] = React.useState(true);
+    // Usa dados do AuthContext - sem fetch adicional
+    const { user, updateUser } = useAuth();
     const [isSaving, setIsSaving] = React.useState(false);
-    const [mustChangePassword, setMustChangePassword] = React.useState(false);
+    const [mustChangePassword, setMustChangePassword] = React.useState(user?.mustChangePassword || false);
     const { toast } = useToast();
-
-    React.useEffect(() => {
-        const fetchUserData = async () => {
-            setIsLoading(true);
-            const userEmail = localStorage.getItem('userEmail');
-            if (userEmail) {
-                try {
-                    const q = query(collection(db, "users"), where("email", "==", userEmail));
-                    const querySnapshot = await getDocs(q);
-                    if (!querySnapshot.empty) {
-                        const userDoc = querySnapshot.docs[0];
-                        const userData = userDoc.data() as User;
-                        setUser({ id: userDoc.id, ...userData });
-                        if (userData.mustChangePassword) {
-                            setMustChangePassword(true);
-                        }
-                    } else {
-                        setUser({ id: 'local', name: 'Usuário Local', email: userEmail, role: 'Desconhecido' });
-                    }
-                } catch (error) {
-                    console.error("Erro ao buscar usuário:", error);
-                    toast({ variant: 'destructive', title: 'Erro', description: 'Não foi possível carregar os dados do usuário.' });
-                }
-            }
-            setIsLoading(false);
-        };
-        fetchUserData();
-    }, [toast]);
 
     const handleProfileUpdate = async (event: React.FormEvent<HTMLFormElement>) => {
         event.preventDefault();
@@ -79,7 +51,8 @@ export default function PerfilPageClient() {
             
             await updateDoc(userDocRef, dataToUpdate);
 
-            setUser(prev => prev ? { ...prev, name: newName, mustChangePassword: false } : null);
+            // Atualiza o contexto global
+            updateUser({ name: newName, mustChangePassword: false });
             if (mustChangePassword) setMustChangePassword(false);
 
 
@@ -93,16 +66,6 @@ export default function PerfilPageClient() {
             setIsSaving(false);
         }
     };
-    
-    if (isLoading) {
-        return (
-             <DashboardLayout>
-                <div className="flex-1 space-y-8 p-4 pt-6 md:p-8 flex items-center justify-center">
-                    <Loader2 className="h-8 w-8 animate-spin" />
-                </div>
-            </DashboardLayout>
-        )
-    }
 
     return (
         <DashboardLayout>

@@ -62,7 +62,6 @@ type ColumnVisibility = {
 
 export default function ProducaoClient() {
   const [demand, setDemand] = React.useState<ProductionDemand[]>([]);
-  const [displayDemand, setDisplayDemand] = React.useState<ProductionDemand[]>([]);
   const [isLoading, setIsLoading] = React.useState(true);
   const [updatingSku, setUpdatingSku] = React.useState<string | null>(null);
   const [date, setDate] = React.useState<DateRange | undefined>(undefined);
@@ -208,16 +207,12 @@ export default function ProducaoClient() {
     return () => unsubscribe();
   }, [date, fetchData, toast]);
 
-  React.useEffect(() => {
-    console.log('🔄 [FILTRO] Aplicando filtro na lista de demanda...');
-    console.log(`📊 Total de SKUs antes do filtro: ${demand.length}`);
-    console.log(`🏭 Filtro "Fila de Produção" ativo: ${productionQueueFilter ? 'SIM' : 'NÃO'}`);
-
-    let filteredDemand = [...demand];
+  // Memoized display demand - evita recálculos desnecessários
+  const displayDemand = React.useMemo(() => {
+    let filtered = [...demand];
 
     if (productionQueueFilter) {
-      const beforeFilter = filteredDemand.length;
-      filteredDemand = filteredDemand
+      filtered = filtered
         .filter(item => {
           const stock = item.stockLevel;
           const min = item.stockMin;
@@ -248,36 +243,28 @@ export default function ProducaoClient() {
           const bIsZero = bStock === 0;
 
           if (aIsZero && bIsZero) {
-            // Ambos com estoque 0: desempata por quantidade total vendida
             return b.totalQuantitySold - a.totalQuantitySold;
           }
-          if (aIsZero && !bIsZero) return -1; // a vem primeiro (estoque 0)
-          if (!aIsZero && bIsZero) return 1;  // b vem primeiro (estoque 0)
+          if (aIsZero && !bIsZero) return -1;
+          if (!aIsZero && bIsZero) return 1;
 
-          // PRIORIDADE 2: Maior déficit + maior quantidade total vendida
-          // PRIORIDADE 3: Maior déficit (quando vendas são iguais)
+          // PRIORIDADE 2: Maior déficit
           if (aDeficit !== bDeficit) {
-            return bDeficit - aDeficit; // maior déficit primeiro
+            return bDeficit - aDeficit;
           }
 
           // Mesmo déficit: desempata por quantidade total vendida
           return b.totalQuantitySold - a.totalQuantitySold;
         });
-
-      console.log(`🏭 [FILA DE PRODUÇÃO] Filtro aplicado: ${beforeFilter} -> ${filteredDemand.length} SKUs`);
-      if (filteredDemand.length > 0) {
-        console.log('📋 Primeiros 5 itens na fila de produção:');
-        filteredDemand.slice(0, 5).forEach((item, i) => {
-          const deficit = (item.stockMin ?? 0) - (item.stockLevel ?? 0);
-          console.log(`   ${i+1}. ${item.sku} | Estoque: ${item.stockLevel} | Mín: ${item.stockMin} | Déficit: ${deficit} | Vendido: ${item.totalQuantitySold}`);
-        });
-      }
     }
 
-    console.log(`📊 Total de SKUs após filtro: ${filteredDemand.length}`);
-    setDisplayDemand(filteredDemand);
-    setCurrentPage(1); // Reset page on filter change
+    return filtered;
   }, [demand, productionQueueFilter]);
+
+  // Reset página quando filtro muda
+  React.useEffect(() => {
+    setCurrentPage(1);
+  }, [productionQueueFilter]);
 
 
   const handleFilter = () => {

@@ -3,6 +3,7 @@ import { createHmac } from 'crypto';
 import { doc, setDoc, getDoc, deleteDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { saveSalesOrders } from '@/services/order-service';
+import { invalidateStockCache } from '@/app/actions';
 
 // Bling API configuration
 const BLING_API_BASE = 'https://api.bling.com.br/Api/v3';
@@ -285,6 +286,9 @@ export async function POST(request: Request) {
 
       await saveSalesOrders([orderWithSource]);
       await updateWebhookStatus(orderId, event);
+
+      // Invalida o cache de estoque para garantir dados atualizados na próxima requisição
+      invalidateStockCache();
 
       console.log(`✅ [WEBHOOK] Pedido ${orderDetails.numero || orderId} salvo com sucesso`);
       console.log(`⏱️ [WEBHOOK] Processado em ${Date.now() - startTime}ms`);

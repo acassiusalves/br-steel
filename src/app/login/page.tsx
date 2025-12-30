@@ -16,9 +16,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from '@/hooks/use-toast';
 import { Loader2 } from 'lucide-react';
-import { collection, query, where, getDocs, doc, updateDoc } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
-import type { User } from '@/types/user';
+import { useAuth } from '@/contexts/AuthContext';
 
 const Logo = () => (
     <svg width="120" height="30" viewBox="0 0 120 30" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -33,6 +31,7 @@ const Logo = () => (
 export default function LoginPage() {
   const router = useRouter();
   const { toast } = useToast();
+  const { login } = useAuth();
   const [isLoading, setIsLoading] = React.useState(false);
 
   const handleLogin = async (event: React.FormEvent<HTMLFormElement>) => {
@@ -41,46 +40,22 @@ export default function LoginPage() {
 
     const formData = new FormData(event.currentTarget);
     const email = formData.get('email') as string;
-    const password = formData.get('password') as string;
 
     try {
-        const q = query(collection(db, "users"), where("email", "==", email));
-        const querySnapshot = await getDocs(q);
-        
-        let user: User | null = null;
-        let userDocRef;
+        // Login via AuthContext - carrega user + permissions de uma vez
+        const result = await login(email);
 
-        if (!querySnapshot.empty) {
-            const userDoc = querySnapshot.docs[0];
-            user = { id: userDoc.id, ...userDoc.data() } as User;
-            userDocRef = userDoc.ref;
+        if (!result.success) {
+            throw new Error(result.error || "Usuário ou senha inválidos.");
         }
 
-        // Simulate password check
-        if (!user) {
-             throw new Error("Usuário ou senha inválidos.");
-        }
-
-        // Update last login timestamp
-        if (userDocRef) {
-            await updateDoc(userDocRef, {
-                lastLogin: new Date().toISOString()
-            });
-        }
-
-        // Simulate successful login
-        if (typeof window !== "undefined") {
-            localStorage.setItem('isAuthenticated', 'true');
-            localStorage.setItem('userEmail', email);
-        }
-        
         toast({
           title: "Login bem-sucedido!",
           description: "Redirecionando...",
         });
 
         // Check for password change requirement
-        if (user && user.mustChangePassword) {
+        if (result.mustChangePassword) {
             router.push('/perfil');
         } else {
             router.push('/vendas?tab=dashboard');

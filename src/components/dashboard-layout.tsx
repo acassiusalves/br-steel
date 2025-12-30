@@ -7,12 +7,10 @@ import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import {
   LayoutDashboard,
   Settings,
-  Code,
   ShoppingCart,
   Factory,
   Warehouse,
   ClipboardList,
-  LogOut,
   Menu,
   ChevronDown,
   PackagePlus,
@@ -36,11 +34,7 @@ import {
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
-import { getDoc, doc, collection, query, where, getDocs } from "firebase/firestore";
-import { db } from "@/lib/firebase";
-import { pagePermissions, availableRoles } from "@/lib/permissions";
-import { loadAppSettings } from "@/services/app-settings-service";
-import type { User as AppUser } from "@/types/user";
+import { useAuth } from "@/contexts/AuthContext";
 
 const Logo = () => (
     <svg width="120" height="30" viewBox="0 0 120 30" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -52,9 +46,9 @@ const Logo = () => (
 );
 
 const allNavItems = [
-    { 
-        href: "/vendas", 
-        icon: ShoppingCart, 
+    {
+        href: "/vendas",
+        icon: ShoppingCart,
         label: "Vendas",
         subItems: [
             { href: "/vendas?tab=dashboard", icon: LayoutDashboard, label: "Dashboard" },
@@ -62,9 +56,9 @@ const allNavItems = [
         ]
     },
     { href: "/producao", icon: Factory, label: "Produção" },
-    { 
-        href: "/insumos", 
-        icon: ClipboardList, 
+    {
+        href: "/insumos",
+        icon: ClipboardList,
         label: "Insumos",
         subItems: [
             { href: "/insumos?tab=cadastro", icon: PackagePlus, label: "Cadastro" },
@@ -72,9 +66,9 @@ const allNavItems = [
         ]
     },
     { href: "/estoque", icon: Warehouse, label: "Estoque" },
-    { 
-        href: "/configuracoes", 
-        icon: Settings, 
+    {
+        href: "/configuracoes",
+        icon: Settings,
         label: "Configurações",
         subItems: [
             { href: "/configuracoes", icon: Users, label: "Usuários e Permissões" },
@@ -144,93 +138,52 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
   const router = useRouter();
   const { toast } = useToast();
   const [open, setOpen] = React.useState(false);
-  const [navItems, setNavItems] = React.useState<typeof allNavItems>([]);
-  const [isLoadingNav, setIsLoadingNav] = React.useState(true);
 
+  // Usa AuthContext - dados já carregados no login
+  const { user, permissions, inactivePages, isAuthenticated, isLoading, logout } = useAuth();
 
+  // Redireciona para login se não autenticado (após loading inicial)
   React.useEffect(() => {
-    const isAuthenticated = localStorage.getItem('isAuthenticated');
-    if (!isAuthenticated) {
+    if (!isLoading && !isAuthenticated) {
       router.push('/login');
-      return;
     }
+  }, [isLoading, isAuthenticated, router]);
 
-    const fetchUserAndPermissions = async () => {
-        setIsLoadingNav(true);
-        const userEmail = localStorage.getItem('userEmail');
-        if (!userEmail) {
-            router.push('/login');
-            return;
+  // Filtra itens de navegação baseado nas permissões (calculado uma vez, sem fetch)
+  const navItems = React.useMemo(() => {
+    if (!user) return [];
+
+    const userRole = user.role;
+
+    return allNavItems
+      .map(item => {
+        if (item.subItems) {
+          const allowedSubItems = item.subItems.filter(subItem => {
+            const subItemPath = subItem.href.split('?')[0];
+            const isSubItemActive = !inactivePages.includes(subItemPath);
+            const userHasPermissionForSubItem = permissions[subItemPath]?.includes(userRole) || userRole === 'Administrador';
+            return isSubItemActive && userHasPermissionForSubItem;
+          });
+
+          if (allowedSubItems.length > 0) {
+            return { ...item, subItems: allowedSubItems };
+          }
+          return null;
         }
 
-        try {
-            // Fetch user role
-            const userQuery = query(collection(db, "users"), where("email", "==", userEmail));
-            const userSnapshot = await getDocs(userQuery);
-            let userRole = '';
-            if (!userSnapshot.empty) {
-                userRole = (userSnapshot.docs[0].data() as AppUser).role;
-            } else {
-                 throw new Error("Usuário não encontrado.");
-            }
+        const isPageActive = !inactivePages.includes(item.href);
+        const userHasPermission = permissions[item.href]?.includes(userRole) || userRole === 'Administrador';
 
-            // Fetch app settings
-            const settings = await loadAppSettings();
-            const permissions = settings?.permissions || pagePermissions;
-            const inactivePages = settings?.inactivePages || [];
-            
-             const filteredNavItems = allNavItems
-                .map(item => {
-                    // If the item has subItems, filter them first
-                    if (item.subItems) {
-                        const allowedSubItems = item.subItems.filter(subItem => {
-                             const subItemPath = subItem.href.split('?')[0];
-                             const isSubItemActive = !inactivePages.includes(subItemPath);
-                             const userHasPermissionForSubItem = permissions[subItemPath]?.includes(userRole) || userRole === 'Administrador';
-                             return isSubItemActive && userHasPermissionForSubItem;
-                        });
-
-                        // If there are any allowed sub-items, return the main item with the filtered sub-items
-                        if (allowedSubItems.length > 0) {
-                            return { ...item, subItems: allowedSubItems };
-                        }
-                        return null;
-                    }
-
-                    // For items without sub-items
-                    const isPageActive = !inactivePages.includes(item.href);
-                    const userHasPermission = permissions[item.href]?.includes(userRole) || userRole === 'Administrador';
-                    
-                    if (isPageActive && userHasPermission) {
-                        return item;
-                    }
-                    return null;
-                })
-                .filter((item): item is typeof allNavItems[0] => item !== null);
-            
-            setNavItems(filteredNavItems);
-
-        } catch (error: any) {
-            console.error("Erro ao carregar permissões:", error);
-            toast({
-                variant: 'destructive',
-                title: 'Erro de Permissão',
-                description: 'Não foi possível carregar as permissões do usuário.'
-            });
-            // Fallback to no nav items to prevent unauthorized access
-            setNavItems([]);
-        } finally {
-            setIsLoadingNav(false);
+        if (isPageActive && userHasPermission) {
+          return item;
         }
-    };
-
-    fetchUserAndPermissions();
-  }, [pathname, toast, router]);
-
+        return null;
+      })
+      .filter((item): item is typeof allNavItems[0] => item !== null);
+  }, [user, permissions, inactivePages]);
 
   const handleLogout = () => {
-    localStorage.removeItem('isAuthenticated');
-    localStorage.removeItem('userEmail');
+    logout();
     toast({
         title: "Logout realizado com sucesso!",
         description: "Você será redirecionado para a tela de login.",
@@ -283,7 +236,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
         </div>
       );
     }
-    
+
     return (
        <Link
           href={item.href}
@@ -299,6 +252,15 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
     )
   }
 
+  // Mostra loading apenas no carregamento inicial da aplicação
+  if (isLoading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center">
+        <Loader2 className="h-8 w-8 animate-spin" />
+      </div>
+    );
+  }
+
   return (
      <div className="flex min-h-screen w-full flex-col bg-muted/40">
         <header className="sticky top-0 flex h-16 items-center gap-4 border-b bg-background px-4 md:px-6 z-50">
@@ -309,15 +271,9 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
                 >
                     <Logo />
                 </Link>
-                {isLoadingNav ? (
-                    <div className="flex items-center gap-5">
-                       <Loader2 className="h-5 w-5 animate-spin" />
-                    </div>
-                ) : (
-                   navItems.map(item => <NavLink key={item.href} item={item} pathname={pathname} searchParams={searchParams} />)
-                )}
+                {navItems.map(item => <NavLink key={item.href} item={item} pathname={pathname} searchParams={searchParams} />)}
             </div>
-          
+
           <Sheet open={open} onOpenChange={setOpen}>
             <SheetTrigger asChild>
               <Button
@@ -338,13 +294,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
                 >
                   <Logo />
                 </Link>
-                 {isLoadingNav ? (
-                     <div className="flex items-center justify-center p-8">
-                       <Loader2 className="h-8 w-8 animate-spin" />
-                    </div>
-                 ) : (
-                    navItems.map(item => <MobileNavLink key={item.href} item={item} />)
-                 )}
+                {navItems.map(item => <MobileNavLink key={item.href} item={item} />)}
               </nav>
             </SheetContent>
           </Sheet>

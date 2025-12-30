@@ -7,6 +7,20 @@
       "fields": [
         {
           "fieldPath": "data",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "notaFiscal.id",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "salesOrders",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "data",
           "order": "DESCENDING"
         }
       ]

@@ -764,18 +764,44 @@ export type ProductStock = {
   saldoVirtualTotal: number;
 };
 
+// Cache de estoque com TTL de 5 minutos
+const stockCache: {
+    data: ProductStock[] | null;
+    timestamp: number;
+    TTL: number;
+} = {
+    data: null,
+    timestamp: 0,
+    TTL: 5 * 60 * 1000 // 5 minutos
+};
+
+// Função para invalidar o cache (chamada pelo webhook quando há atualização)
+export async function invalidateStockCache(): Promise<void> {
+    console.log('🗑️ [CACHE] Invalidando cache de estoque');
+    stockCache.data = null;
+    stockCache.timestamp = 0;
+}
+
 export async function getProductsStock(): Promise<{ data: ProductStock[], isSimulated?: boolean }> {
-    console.log('🚀 INICIANDO BUSCA DE ESTOQUE');
+    // Verifica se há dados em cache válidos
+    const now = Date.now();
+    if (stockCache.data && (now - stockCache.timestamp) < stockCache.TTL) {
+        const cacheAge = Math.round((now - stockCache.timestamp) / 1000);
+        console.log(`📦 [CACHE] Retornando estoque do cache (idade: ${cacheAge}s)`);
+        return { data: stockCache.data, isSimulated: false };
+    }
+
+    console.log('🚀 INICIANDO BUSCA DE ESTOQUE (cache expirado ou vazio)');
     try {
         const stockUrl = 'https://api.bling.com.br/Api/v3/produtos';
         console.log('🔍 Tentando endpoint:', stockUrl);
-        
+
         const stockData = await blingGetPaged(stockUrl);
         console.log('📦 Dados recebidos do estoque:', stockData?.length || 0, 'itens');
-        
+
         if (stockData && stockData.length > 0) {
             console.log('✅ SUCESSO: DADOS REAIS DE ESTOQUE');
-            
+
             const formattedData: ProductStock[] = stockData.map((item: any) => ({
                 produto: {
                     id: item.id || 0,
@@ -791,18 +817,23 @@ export async function getProductsStock(): Promise<{ data: ProductStock[], isSimu
                 saldoFisicoTotal: item.estoque?.saldoFisicoTotal || item.estoque?.saldoFisico || 0,
                 saldoVirtualTotal: item.estoque?.saldoVirtualTotal || item.estoque?.saldoVirtual || 0,
             }));
-            
+
+            // Atualiza o cache
+            stockCache.data = formattedData;
+            stockCache.timestamp = now;
+            console.log('💾 [CACHE] Estoque salvo no cache');
+
             return { data: formattedData, isSimulated: false };
         }
     } catch (error: any) {
         console.log('❌ Erro no endpoint de estoque:', error.message);
     }
-    
+
     console.log('🔄 Usando fallback - buscando produtos...');
     const productsData = await blingGetPaged('https://api.bling.com.br/Api/v3/produtos');
     if (productsData && productsData.length > 0) {
         console.log('⚠️ GERANDO DADOS SIMULADOS');
-        
+
         const simulatedData: ProductStock[] = productsData.slice(0, 20).map((product: any) => ({
             produto: {
                 id: product.id,
@@ -815,7 +846,7 @@ export async function getProductsStock(): Promise<{ data: ProductStock[], isSimu
             saldoFisicoTotal: Math.floor(Math.random() * 100),
             saldoVirtualTotal: Math.floor(Math.random() * 100),
         }));
-        
+
         return { data: simulatedData, isSimulated: true };
     }
 
@@ -965,12 +996,27 @@ export async function getProductionDemand(
         return [];
     }
 
+    const fromDateStr = format(from, 'yyyy-MM-dd');
+    const toDateStr = format(to, 'yyyy-MM-dd');
+
+    console.log('═══════════════════════════════════════════════════════════');
+    console.log(`📊 [PRODUÇÃO] Análise de demanda: ${fromDateStr} a ${toDateStr}`);
+    console.log('═══════════════════════════════════════════════════════════');
+
+    // Busca otimizada: filtra por data E notaFiscal.id no Firestore (server-side)
+    // Isso reduz drasticamente a quantidade de dados transferidos
     const [salesSnapshot, stockDataResult, suppliesSnapshot] = await Promise.all([
-        getDocs(query(collection(db, 'salesOrders'), where('notaFiscal.id', '!=', null))),
+        getDocs(query(
+            collection(db, 'salesOrders'),
+            where('data', '>=', fromDateStr),
+            where('data', '<=', toDateStr)
+        )),
         getProductsStock(),
         getDocs(query(collection(db, "supplies")))
     ]);
-    
+
+    console.log(`📊 [PRODUÇÃO] Pedidos no período (server-side): ${salesSnapshot.size}`);
+
     const stockMap = new Map<string, number>();
     stockDataResult.data.forEach(stockItem => {
         stockMap.set(stockItem.produto.codigo, stockItem.saldoVirtualTotal);
@@ -979,7 +1025,7 @@ export async function getProductionDemand(
     const supplyInfoMap = new Map<string, { stockMin?: number; stockMax?: number }>();
     suppliesSnapshot.forEach(d => {
         const s = d.data() as Supply;
-        const key = (s?.codigo as string) || d.id; // fallback para doc.id
+        const key = (s?.codigo as string) || d.id;
         if (key) {
             supplyInfoMap.set(key, {
             stockMin: s?.estoqueMinimo,
@@ -988,16 +1034,8 @@ export async function getProductionDemand(
         }
     });
 
-    const fromDateStr = format(from, 'yyyy-MM-dd');
-    const toDateStr = format(to, 'yyyy-MM-dd');
-
     const days = differenceInDays(to, from) + 1;
     const weeks = Math.max(1, days / 7);
-
-    console.log('═══════════════════════════════════════════════════════════');
-    console.log(`📊 [PRODUÇÃO] Análise de demanda: ${fromDateStr} a ${toDateStr}`);
-    console.log(`📊 [PRODUÇÃO] Total de pedidos no Firebase: ${salesSnapshot.size}`);
-    console.log('═══════════════════════════════════════════════════════════');
 
     const productDemand = new Map<string, {
         description: string,
@@ -1005,78 +1043,34 @@ export async function getProductionDemand(
         totalQuantity: number
     }>();
 
-    // Debug counters
-    let totalOrders = 0;
+    // Contadores para log
     let ordersWithNF = 0;
-    let ordersInDateRange = 0;
-    let ordersMatchingBoth = 0;
-
-    // Debug específico para SKU de teste
-    const DEBUG_SKU = 'CNUL440205140IN';
-    const debugSkuOrders: { orderId: number, orderDate: string, nfId: number | null, qty: number }[] = [];
 
     salesSnapshot.forEach(doc => {
         const order = doc.data() as SaleOrder;
-        totalOrders++;
 
+        // Filtra apenas pedidos com nota fiscal (o filtro de data já foi feito no Firestore)
         const hasNF = order.notaFiscal && order.notaFiscal.id;
-        const isDateInRange = order.data >= fromDateStr && order.data <= toDateStr;
+        if (!hasNF) return;
 
-        if (hasNF) ordersWithNF++;
-        if (isDateInRange) ordersInDateRange++;
+        ordersWithNF++;
 
-        if (isDateInRange && hasNF) {
-            ordersMatchingBoth++;
-            order.itens?.forEach(item => {
-                const sku = item.codigo || 'SKU_INDEFINIDO';
-                const currentData = productDemand.get(sku) || {
-                    description: item.descricao,
-                    orderIds: new Set(),
-                    totalQuantity: 0
-                };
+        // Processa itens do pedido
+        order.itens?.forEach(item => {
+            const sku = item.codigo || 'SKU_INDEFINIDO';
+            const currentData = productDemand.get(sku) || {
+                description: item.descricao,
+                orderIds: new Set(),
+                totalQuantity: 0
+            };
 
-                currentData.orderIds.add(order.id);
-                currentData.totalQuantity += item.quantidade;
-                productDemand.set(sku, currentData);
-
-                // Debug para SKU específico
-                if (sku === DEBUG_SKU) {
-                    debugSkuOrders.push({
-                        orderId: order.id,
-                        orderDate: order.data,
-                        nfId: order.notaFiscal?.id || null,
-                        qty: item.quantidade
-                    });
-                }
-            });
-        }
+            currentData.orderIds.add(order.id);
+            currentData.totalQuantity += item.quantidade;
+            productDemand.set(sku, currentData);
+        });
     });
 
-    console.log('───────────────────────────────────────────────────────────');
-    console.log(`📊 [PRODUÇÃO] Total pedidos no banco: ${totalOrders}`);
-    console.log(`📊 [PRODUÇÃO] Pedidos COM nota fiscal: ${ordersWithNF}`);
-    console.log(`📊 [PRODUÇÃO] Pedidos NO período (${fromDateStr} a ${toDateStr}): ${ordersInDateRange}`);
-    console.log(`📊 [PRODUÇÃO] Pedidos COM NF E no período: ${ordersMatchingBoth}`);
-    console.log('───────────────────────────────────────────────────────────');
-
-    // Log específico do SKU de debug
-    if (debugSkuOrders.length > 0) {
-        const totalQty = debugSkuOrders.reduce((sum, o) => sum + o.qty, 0);
-        const uniqueOrders = new Set(debugSkuOrders.map(o => o.orderId)).size;
-        console.log(`🔍 [DEBUG SKU: ${DEBUG_SKU}]`);
-        console.log(`   - Pedidos únicos: ${uniqueOrders}`);
-        console.log(`   - Quantidade total: ${totalQty}`);
-        console.log(`   - Detalhes dos pedidos:`);
-        debugSkuOrders.slice(0, 10).forEach(o => {
-            console.log(`     * Pedido ${o.orderId} | Data: ${o.orderDate} | NF: ${o.nfId} | Qty: ${o.qty}`);
-        });
-        if (debugSkuOrders.length > 10) {
-            console.log(`     ... e mais ${debugSkuOrders.length - 10} pedidos`);
-        }
-    } else {
-        console.log(`🔍 [DEBUG SKU: ${DEBUG_SKU}] Nenhum pedido encontrado para este SKU no período!`);
-    }
-    console.log('───────────────────────────────────────────────────────────');
+    console.log(`📊 [PRODUÇÃO] Pedidos com NF no período: ${ordersWithNF}`);
 
     const result = Array.from(productDemand.entries())
         .map(([sku, data]) => {
@@ -1104,6 +1098,51 @@ export async function getProductionDemand(
     return result;
 }
 
+/**
+ * Função de diagnóstico para verificar datas dos pedidos no Firebase
+ */
+export async function debugOrderDates(): Promise<{
+    total: number;
+    withNF: number;
+    dateDistribution: Record<string, number>;
+    sampleDates: string[];
+}> {
+    const salesSnapshot = await getDocs(query(collection(db, 'salesOrders')));
+
+    const dateDistribution: Record<string, number> = {};
+    const sampleDates: string[] = [];
+    let withNF = 0;
+
+    salesSnapshot.forEach(doc => {
+        const order = doc.data() as SaleOrder;
+        const dateStr = order.data || 'undefined';
+        const yearMonth = dateStr.substring(0, 7); // yyyy-MM
+
+        dateDistribution[yearMonth] = (dateDistribution[yearMonth] || 0) + 1;
+
+        if (order.notaFiscal?.id) withNF++;
+
+        if (sampleDates.length < 10) {
+            sampleDates.push(dateStr);
+        }
+    });
+
+    console.log('═══════════════════════════════════════════════════════════');
+    console.log('📊 [DEBUG] Distribuição de datas dos pedidos:');
+    Object.entries(dateDistribution)
+        .sort(([a], [b]) => b.localeCompare(a))
+        .forEach(([month, count]) => {
+            console.log(`   ${month}: ${count} pedidos`);
+        });
+    console.log('═══════════════════════════════════════════════════════════');
+
+    return {
+        total: salesSnapshot.size,
+        withNF,
+        dateDistribution,
+        sampleDates,
+    };
+}
 
 /**
  * Busca dados de demanda de produção DIRETAMENTE do Bling
