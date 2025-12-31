@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createHmac } from 'crypto';
-import { doc, setDoc, getDoc } from 'firebase/firestore';
+import { doc, setDoc, getDoc, collection, addDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { saveSalesOrders } from '@/services/order-service';
 import { invalidateStockCache } from '@/app/actions';
@@ -11,6 +11,18 @@ const BLING_API_BASE = 'https://api.bling.com.br/Api/v3';
 // Firestore document references
 const credentialsDocRef = doc(db, "appConfig", "blingCredentials");
 const webhookStatusDocRef = doc(db, "appConfig", "webhookStatus");
+
+// Debug: salva todos os webhooks recebidos para análise
+async function logWebhookDebug(data: any) {
+  try {
+    await addDoc(collection(db, 'webhookDebugLogs'), {
+      ...data,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (e) {
+    console.error('Erro ao salvar log de debug:', e);
+  }
+}
 
 // Types
 type BlingCredentials = {
@@ -317,6 +329,24 @@ export async function POST(request: Request) {
     console.log('═══════════════════════════════════════════════════════════');
     console.log('📨 [WEBHOOK] Evento recebido do Bling');
     console.log('═══════════════════════════════════════════════════════════');
+
+    // DEBUG: Salva TODOS os webhooks recebidos para análise
+    let parsedForDebug: any = null;
+    try {
+      parsedForDebug = JSON.parse(rawBody);
+    } catch {
+      parsedForDebug = { rawBody: rawBody.substring(0, 1000) };
+    }
+    await logWebhookDebug({
+      source: 'bling-webhook',
+      event: parsedForDebug?.event || 'unknown',
+      hasSignature: !!signature,
+      payload: parsedForDebug,
+      headers: {
+        contentType: request.headers.get('content-type'),
+        userAgent: request.headers.get('user-agent'),
+      },
+    });
 
     // Verify signature if secret is configured
     const webhookSecret = process.env.BLING_WEBHOOK_SECRET;
