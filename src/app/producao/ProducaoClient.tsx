@@ -91,10 +91,14 @@ export default function ProducaoClient() {
   const [currentPage, setCurrentPage] = React.useState(1);
   const [rowsPerPage, setRowsPerPage] = React.useState(10);
 
-  // Real-time webhook state
+  // Real-time webhook state (pedidos)
   const [lastWebhookUpdate, setLastWebhookUpdate] = React.useState<string | null>(null);
   const [isWebhookConnected, setIsWebhookConnected] = React.useState(false);
   const [webhookTotalReceived, setWebhookTotalReceived] = React.useState(0);
+
+  // Real-time webhook state (estoque)
+  const [lastStockWebhookUpdate, setLastStockWebhookUpdate] = React.useState<string | null>(null);
+  const [stockWebhookTotalReceived, setStockWebhookTotalReceived] = React.useState(0);
 
   const fetchData = React.useCallback(async (currentDate: DateRange | undefined) => {
     setIsLoading(true);
@@ -201,6 +205,42 @@ export default function ProducaoClient() {
       (error) => {
         console.error('❌ [WEBHOOK] Erro ao escutar webhookStatus:', error);
         setIsWebhookConnected(false);
+      }
+    );
+
+    return () => unsubscribe();
+  }, [date, fetchData, toast]);
+
+  // Real-time listener for STOCK webhook updates
+  React.useEffect(() => {
+    const stockWebhookStatusRef = doc(db, 'appConfig', 'stockWebhookStatus');
+    let lastKnownStockTotal = 0;
+
+    const unsubscribe = onSnapshot(
+      stockWebhookStatusRef,
+      (snapshot) => {
+        if (snapshot.exists()) {
+          const data = snapshot.data();
+          const newTotal = data.totalReceived || 0;
+
+          setLastStockWebhookUpdate(data.lastUpdate || null);
+          setStockWebhookTotalReceived(newTotal);
+
+          // If we received a new stock webhook and we have a date range, refresh data
+          if (newTotal > lastKnownStockTotal && lastKnownStockTotal > 0 && date?.from && date?.to) {
+            console.log('📦 [WEBHOOK-ESTOQUE] Atualização de estoque recebida! Atualizando dados...');
+            toast({
+              title: "Estoque Atualizado!",
+              description: `${data.lastProcessed || 1} item(s) de estoque atualizado(s) via webhook.`,
+            });
+            fetchData(date);
+          }
+
+          lastKnownStockTotal = newTotal;
+        }
+      },
+      (error) => {
+        console.error('❌ [WEBHOOK-ESTOQUE] Erro ao escutar stockWebhookStatus:', error);
       }
     );
 
@@ -381,7 +421,12 @@ export default function ProducaoClient() {
                   )}
                   {webhookTotalReceived > 0 && (
                     <Badge variant="secondary" className="text-xs">
-                      {webhookTotalReceived} webhooks recebidos
+                      {webhookTotalReceived} pedidos
+                    </Badge>
+                  )}
+                  {stockWebhookTotalReceived > 0 && (
+                    <Badge variant="secondary" className="text-xs bg-blue-100 text-blue-700">
+                      {stockWebhookTotalReceived} estoques
                     </Badge>
                   )}
                 </div>

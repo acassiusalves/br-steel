@@ -2,17 +2,14 @@
 "use client";
 
 import {
-  ArrowDownToLine,
-  ArrowUpFromLine,
   Calendar as CalendarIcon,
   DollarSign,
   Filter,
   ShoppingCart,
   Users,
   Loader2,
-  RefreshCw,
 } from "lucide-react";
-import { Bar, BarChart, ResponsiveContainer, XAxis, YAxis, Tooltip, CartesianGrid, TooltipProps, PieChart, Pie, Cell, Legend, LegendProps } from "recharts";
+import { Bar, BarChart, ResponsiveContainer, XAxis, YAxis, Tooltip, CartesianGrid, TooltipProps, PieChart, Pie, Cell } from "recharts";
 import { format, subDays, startOfMonth, endOfMonth, subMonths } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import type { DateRange } from "react-day-picker";
@@ -40,12 +37,11 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
-import { getSalesDashboardData, getBlingCredentials, smartSyncOrders } from "@/app/actions";
+import { getSalesDashboardData } from "@/app/actions";
 import { Skeleton } from "./ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { ScrollArea } from "./ui/scroll-area";
 import { Separator } from "./ui/separator";
-import { Badge } from "./ui/badge";
 
 
 // Helper to format currency
@@ -167,8 +163,6 @@ const CustomLegend = React.memo(({ payload, totalRevenue }: { payload: any[], to
 });
 CustomLegend.displayName = 'CustomLegend';
 
-const SYNC_INTERVAL = 15 * 60 * 1000; // 15 minutes
-
 export default function SalesDashboard() {
   const [date, setDate] = React.useState<DateRange | undefined>(() => {
     const today = new Date();
@@ -177,22 +171,17 @@ export default function SalesDashboard() {
       to: endOfMonth(today),
     };
   });
-  
+
   const [isLoading, setIsLoading] = React.useState(true);
   const [data, setData] = React.useState<Awaited<ReturnType<typeof getSalesDashboardData>> | null>(null);
-  const [isSyncing, setIsSyncing] = React.useState(false);
-  const [initialSyncDone, setInitialSyncDone] = React.useState(false);
-  const [lastSyncTime, setLastSyncTime] = React.useState<Date | null>(null);
 
   const { toast } = useToast();
 
-  const fetchData = React.useCallback(async (currentDate: DateRange | undefined, showLoadingState: boolean = true) => {
+  const fetchData = React.useCallback(async (currentDate: DateRange | undefined) => {
       if (!currentDate?.from || !currentDate?.to) {
         return;
       }
-      if (showLoadingState) {
-        setIsLoading(true);
-      }
+      setIsLoading(true);
       try {
         const result = await getSalesDashboardData({ from: currentDate.from, to: currentDate.to });
         setData(result);
@@ -205,91 +194,17 @@ export default function SalesDashboard() {
         });
         setData(null);
       } finally {
-        if (showLoadingState) {
-          setIsLoading(false);
-        }
+        setIsLoading(false);
       }
   }, [toast]);
-  
-  const autoSyncBling = React.useCallback(async (isManual: boolean = false) => {
-    if (isSyncing) return;
-
-    const credentials = await getBlingCredentials();
-    if (!credentials.connected) {
-        if(isManual) {
-            toast({
-                variant: 'destructive',
-                title: 'Não Conectado',
-                description: 'A conexão com o Bling não foi configurada. Vá para a página de API.'
-            });
-        }
-        return;
-    }
-
-    setIsSyncing(true);
-    if(isManual) {
-        toast({ title: "Sincronizando...", description: "Buscando novos pedidos do Bling." });
-    }
-
-    try {
-        const result = await smartSyncOrders();
-        if (result.summary.created > 0) {
-            toast({
-              title: "Painel Atualizado!",
-              description: `${result.summary.created} novo(s) pedido(s) foram importados.`,
-            });
-            // Não mostra loading state em syncs automáticos
-            fetchData(date, isManual);
-        } else {
-             if(isManual) {
-                toast({ title: "Tudo certo!", description: "Seu painel já está atualizado com os últimos pedidos." });
-            }
-        }
-        setLastSyncTime(new Date());
-    } catch (error: any) {
-        console.error("Auto-sync failed:", error);
-        if (isManual) {
-            toast({ variant: 'destructive', title: 'Erro na Sincronização', description: error.message });
-        }
-    } finally {
-        setIsSyncing(false);
-    }
-  }, [isSyncing, date, fetchData, toast]);
 
   // Carrega dados ao montar o componente ou quando a data muda
   React.useEffect(() => {
     fetchData(date);
   }, [date, fetchData]);
 
-  // Sincronização inicial em background (não bloqueia o carregamento da página)
-  React.useEffect(() => {
-    if (!initialSyncDone) {
-        // Adiciona um pequeno delay para não competir com o carregamento inicial
-        const timer = setTimeout(() => {
-          autoSyncBling(false);
-        }, 2000);
-        setInitialSyncDone(true);
-        return () => clearTimeout(timer);
-    }
-  }, [initialSyncDone, autoSyncBling]);
-
-  // Sincronização periódica em background
-  React.useEffect(() => {
-    const intervalId = setInterval(() => {
-      console.log('Iniciando rotina de sincronização automática...');
-      autoSyncBling(false);
-    }, SYNC_INTERVAL);
-
-    return () => clearInterval(intervalId);
-  }, [autoSyncBling]);
-
   const handleFilter = () => {
     fetchData(date);
-  };
-  
-  const formatLastSyncTime = (syncTime: Date | null): string => {
-    if (!syncTime) return 'Sincronizando...';
-    return `Última sincronização: ${syncTime.toLocaleDateString('pt-BR')} às ${syncTime.toLocaleTimeString('pt-BR')}`;
   };
 
   const setDatePreset = (preset: 'today' | 'yesterday' | 'last7' | 'last30' | 'last3Months' | 'thisMonth' | 'lastMonth') => {
@@ -401,19 +316,6 @@ export default function SalesDashboard() {
           </Button>
         </div>
       </div>
-      
-       {isSyncing ? (
-          <Badge variant="secondary" className="animate-pulse w-fit">
-            <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
-            Sincronizando pedidos em segundo plano...
-          </Badge>
-        ) : (
-          lastSyncTime && (
-            <Badge variant="outline" className="text-muted-foreground font-normal w-fit">
-              {formatLastSyncTime(lastSyncTime)}
-            </Badge>
-          )
-        )}
 
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         <StatCard 

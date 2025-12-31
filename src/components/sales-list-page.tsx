@@ -176,9 +176,6 @@ const SalesListPage = () => {
         setIsLoading(false);
     });
     
-    // Garante que novos pedidos já venham com itens
-    smartSyncOrders().catch(console.error);
-
     // Limpa o listener quando o componente é desmontado
     return () => unsubscribe();
   }, []); 

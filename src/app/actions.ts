@@ -775,6 +775,32 @@ const stockCache: {
     TTL: 5 * 60 * 1000 // 5 minutos
 };
 
+// Busca dados de estoque que vieram via webhook (Firebase)
+async function getStockFromWebhook(): Promise<Map<string, { estoqueAtual: number; updatedAt: string }>> {
+    const stockMap = new Map<string, { estoqueAtual: number; updatedAt: string }>();
+
+    try {
+        const stockUpdatesSnapshot = await getDocs(collection(db, 'stockUpdates'));
+
+        stockUpdatesSnapshot.forEach(doc => {
+            const data = doc.data();
+            const sku = data.sku || doc.id;
+            stockMap.set(sku, {
+                estoqueAtual: data.estoqueAtual ?? 0,
+                updatedAt: data.webhookReceivedAt || '',
+            });
+        });
+
+        if (stockMap.size > 0) {
+            console.log(`📦 [WEBHOOK-ESTOQUE] ${stockMap.size} SKUs com estoque via webhook`);
+        }
+    } catch (error) {
+        console.error('❌ [WEBHOOK-ESTOQUE] Erro ao buscar estoque do Firebase:', error);
+    }
+
+    return stockMap;
+}
+
 // Função para invalidar o cache (chamada pelo webhook quando há atualização)
 export async function invalidateStockCache(): Promise<void> {
     console.log('🗑️ [CACHE] Invalidando cache de estoque');
@@ -788,24 +814,67 @@ export async function getProductsStock(): Promise<{ data: ProductStock[], isSimu
     if (stockCache.data && (now - stockCache.timestamp) < stockCache.TTL) {
         const cacheAge = Math.round((now - stockCache.timestamp) / 1000);
         console.log(`📦 [CACHE] Retornando estoque do cache (idade: ${cacheAge}s)`);
+
+        // Mesmo usando cache, verifica se há atualizações via webhook
+        const webhookStock = await getStockFromWebhook();
+        if (webhookStock.size > 0) {
+            // Mescla dados do webhook com o cache
+            const mergedData = stockCache.data.map(item => {
+                const webhookData = webhookStock.get(item.produto.codigo);
+                if (webhookData) {
+                    return {
+                        ...item,
+                        saldoVirtualTotal: webhookData.estoqueAtual,
+                        saldoVirtual: webhookData.estoqueAtual,
+                    };
+                }
+                return item;
+            });
+            return { data: mergedData, isSimulated: false };
+        }
+
         return { data: stockCache.data, isSimulated: false };
     }
 
     console.log('🚀 INICIANDO BUSCA DE ESTOQUE (cache expirado ou vazio)');
-    try {
-        const stockUrl = 'https://api.bling.com.br/Api/v3/produtos';
-        console.log('🔍 Tentando endpoint:', stockUrl);
 
-        const stockData = await blingGetPaged(stockUrl);
-        console.log('📦 Dados recebidos do estoque:', stockData?.length || 0, 'itens');
+    // Busca dados do webhook em paralelo com a API
+    const [webhookStock, apiResult] = await Promise.all([
+        getStockFromWebhook(),
+        (async () => {
+            try {
+                const stockUrl = 'https://api.bling.com.br/Api/v3/produtos';
+                console.log('🔍 Tentando endpoint:', stockUrl);
 
-        if (stockData && stockData.length > 0) {
-            console.log('✅ SUCESSO: DADOS REAIS DE ESTOQUE');
+                const stockData = await blingGetPaged(stockUrl);
+                console.log('📦 Dados recebidos do estoque:', stockData?.length || 0, 'itens');
 
-            const formattedData: ProductStock[] = stockData.map((item: any) => ({
+                if (stockData && stockData.length > 0) {
+                    return stockData;
+                }
+            } catch (error: any) {
+                console.log('❌ Erro no endpoint de estoque:', error.message);
+            }
+            return null;
+        })()
+    ]);
+
+    if (apiResult && apiResult.length > 0) {
+        console.log('✅ SUCESSO: DADOS REAIS DE ESTOQUE');
+
+        const formattedData: ProductStock[] = apiResult.map((item: any) => {
+            const sku = item.codigo || `PROD-${item.id}`;
+            const webhookData = webhookStock.get(sku);
+
+            // Se temos dados mais recentes do webhook, usa eles
+            const saldoVirtualTotal = webhookData
+                ? webhookData.estoqueAtual
+                : (item.estoque?.saldoVirtualTotal || item.estoque?.saldoVirtual || 0);
+
+            return {
                 produto: {
                     id: item.id || 0,
-                    codigo: item.codigo || `PROD-${item.id}`,
+                    codigo: sku,
                     nome: item.nome || 'Produto sem nome',
                 },
                 deposito: {
@@ -813,20 +882,22 @@ export async function getProductsStock(): Promise<{ data: ProductStock[], isSimu
                     nome: item.deposito?.nome || 'Depósito padrão',
                 },
                 saldoFisico: item.estoque?.saldoFisico || 0,
-                saldoVirtual: item.estoque?.saldoVirtualTotal || 0,
+                saldoVirtual: saldoVirtualTotal,
                 saldoFisicoTotal: item.estoque?.saldoFisicoTotal || item.estoque?.saldoFisico || 0,
-                saldoVirtualTotal: item.estoque?.saldoVirtualTotal || item.estoque?.saldoVirtual || 0,
-            }));
+                saldoVirtualTotal: saldoVirtualTotal,
+            };
+        });
 
-            // Atualiza o cache
-            stockCache.data = formattedData;
-            stockCache.timestamp = now;
-            console.log('💾 [CACHE] Estoque salvo no cache');
+        // Atualiza o cache
+        stockCache.data = formattedData;
+        stockCache.timestamp = now;
+        console.log('💾 [CACHE] Estoque salvo no cache');
 
-            return { data: formattedData, isSimulated: false };
+        if (webhookStock.size > 0) {
+            console.log(`📦 [WEBHOOK] ${webhookStock.size} SKUs atualizados via webhook`);
         }
-    } catch (error: any) {
-        console.log('❌ Erro no endpoint de estoque:', error.message);
+
+        return { data: formattedData, isSimulated: false };
     }
 
     console.log('🔄 Usando fallback - buscando produtos...');

@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createHmac } from 'crypto';
-import { doc, setDoc, getDoc, deleteDoc } from 'firebase/firestore';
+import { doc, setDoc, getDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { saveSalesOrders } from '@/services/order-service';
 import { invalidateStockCache } from '@/app/actions';
@@ -51,6 +51,15 @@ function isOrderEvent(event: string): boolean {
     event.startsWith('pedido_venda.') ||  // Bling v1 - formato correto
     event.startsWith('pedidos.vendas.') ||
     event.startsWith('order.')
+  );
+}
+
+// Check if event is a stock event
+// Bling v1 usa: estoque.created, estoque.updated, estoque.deleted
+function isStockEvent(event: string): boolean {
+  return (
+    event.startsWith('estoque.') ||  // Bling v1 - formato correto
+    event.startsWith('stock.')
   );
 }
 
@@ -186,6 +195,74 @@ async function updateWebhookStatus(orderId: number, event: string): Promise<void
   });
 }
 
+// Firestore reference for stock updates
+const stockStatusDocRef = doc(db, "appConfig", "stockWebhookStatus");
+
+// Handle stock webhook event
+async function handleStockWebhook(payload: any, event: string): Promise<{ processed: number }> {
+  const action = getEventAction(event);
+  console.log(`📦 [WEBHOOK-ESTOQUE] Processando evento de estoque (ação: ${action})`);
+
+  // O payload do Bling v1 pode vir em diferentes formatos
+  // Formato 1: { retorno: { estoques: [...] } }
+  // Formato 2: { data: { ... } } (formato novo)
+  let estoques: any[] = [];
+
+  if (payload.retorno?.estoques) {
+    estoques = payload.retorno.estoques;
+  } else if (payload.data?.estoques) {
+    estoques = payload.data.estoques;
+  } else if (payload.data) {
+    // Pode ser um único item
+    estoques = [{ estoque: payload.data }];
+  }
+
+  console.log(`📦 [WEBHOOK-ESTOQUE] ${estoques.length} item(s) de estoque recebido(s)`);
+
+  let processed = 0;
+  for (const item of estoques) {
+    const estoque = item.estoque || item;
+    const sku = estoque.codigo || estoque.sku || estoque.id;
+
+    if (!sku) {
+      console.warn('⚠️ [WEBHOOK-ESTOQUE] Item sem SKU/código, ignorando');
+      continue;
+    }
+
+    const stockData = {
+      sku,
+      nome: estoque.nome || '',
+      estoqueAtual: estoque.estoqueAtual ?? estoque.quantidade ?? 0,
+      depositos: estoque.depositos || [],
+      webhookReceivedAt: new Date().toISOString(),
+      lastEvent: event,
+    };
+
+    // Salvar no Firebase - collection stockUpdates
+    const stockDocRef = doc(db, 'stockUpdates', sku);
+    await setDoc(stockDocRef, stockData, { merge: true });
+
+    console.log(`✅ [WEBHOOK-ESTOQUE] SKU ${sku}: estoque = ${stockData.estoqueAtual}`);
+    processed++;
+  }
+
+  // Atualizar status do webhook de estoque
+  const statusSnap = await getDoc(stockStatusDocRef);
+  const currentStatus = statusSnap.exists() ? statusSnap.data() : { totalReceived: 0 };
+
+  await setDoc(stockStatusDocRef, {
+    lastUpdate: new Date().toISOString(),
+    lastEvent: event,
+    lastProcessed: processed,
+    totalReceived: (currentStatus.totalReceived || 0) + 1,
+  });
+
+  // Invalidar cache de estoque
+  invalidateStockCache();
+
+  return { processed };
+}
+
 // Handle order deleted event
 async function handleOrderDeleted(orderId: number): Promise<void> {
   console.log(`🗑️ [WEBHOOK] Marcando pedido ${orderId} como excluído...`);
@@ -308,6 +385,24 @@ export async function POST(request: Request) {
       });
     }
 
+    // Process stock events
+    if (isStockEvent(event)) {
+      console.log(`📦 [WEBHOOK] Processando evento de estoque: ${event}`);
+
+      const result = await handleStockWebhook(payload, event);
+
+      console.log(`✅ [WEBHOOK] Estoque processado: ${result.processed} item(s)`);
+      console.log(`⏱️ [WEBHOOK] Processado em ${Date.now() - startTime}ms`);
+
+      return NextResponse.json({
+        success: true,
+        message: `Estoque processado: ${result.processed} item(s)`,
+        event,
+        processed: result.processed,
+        processedIn: `${Date.now() - startTime}ms`,
+      });
+    }
+
     // Event not supported
     console.log(`ℹ️ [WEBHOOK] Evento ${event} não suportado, ignorando`);
     return NextResponse.json({
@@ -346,6 +441,9 @@ export async function GET() {
       'pedido_venda.created',
       'pedido_venda.updated',
       'pedido_venda.deleted',
+      'estoque.created',
+      'estoque.updated',
+      'estoque.deleted',
     ],
     signatureVerification: !!process.env.BLING_WEBHOOK_SECRET,
     lastWebhook: statusData ? {
