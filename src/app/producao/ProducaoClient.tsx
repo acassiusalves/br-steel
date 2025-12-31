@@ -172,21 +172,10 @@ export default function ProducaoClient() {
     fetchData(initialDate);
   }, [fetchData]);
 
-  // Debug logs state
-  const [debugLogs, setDebugLogs] = React.useState<string[]>([]);
-  const addDebugLog = React.useCallback((message: string) => {
-    const timestamp = new Date().toLocaleTimeString('pt-BR');
-    const logEntry = `[${timestamp}] ${message}`;
-    console.log(logEntry);
-    setDebugLogs(prev => [...prev.slice(-50), logEntry]); // Keep last 50 logs
-  }, []);
-
   // Real-time listener for webhook updates
   React.useEffect(() => {
     const webhookStatusRef = doc(db, 'appConfig', 'webhookStatus');
     let lastKnownTotal = 0;
-
-    addDebugLog('🔌 Iniciando listener de PEDIDOS (webhookStatus)');
 
     const unsubscribe = onSnapshot(
       webhookStatusRef,
@@ -197,46 +186,34 @@ export default function ProducaoClient() {
           const data = snapshot.data();
           const newTotal = data.totalReceived || 0;
 
-          addDebugLog(`📨 [PEDIDOS] Snapshot recebido: lastEvent=${data.lastEvent}, total=${newTotal}, lastOrderId=${data.lastOrderId}`);
-
           setLastWebhookUpdate(data.lastUpdate || null);
           setWebhookTotalReceived(newTotal);
 
           // If we received a new webhook and we have a date range, refresh data
           if (newTotal > lastKnownTotal && lastKnownTotal > 0 && date?.from && date?.to) {
-            addDebugLog(`🔔 [PEDIDOS] NOVO WEBHOOK! ${lastKnownTotal} -> ${newTotal}. Evento: ${data.lastEvent}`);
             toast({
               title: "Novo Pedido Recebido!",
               description: `Pedido ${data.lastOrderId} foi sincronizado via webhook.`,
             });
             fetchData(date);
-          } else if (lastKnownTotal === 0) {
-            addDebugLog(`📊 [PEDIDOS] Primeira leitura: total=${newTotal}`);
           }
 
           lastKnownTotal = newTotal;
-        } else {
-          addDebugLog('⚠️ [PEDIDOS] Documento webhookStatus não existe');
         }
       },
       (error) => {
-        addDebugLog(`❌ [PEDIDOS] Erro no listener: ${error.message}`);
+        console.error('Erro no listener de pedidos:', error);
         setIsWebhookConnected(false);
       }
     );
 
-    return () => {
-      addDebugLog('🔌 Desconectando listener de PEDIDOS');
-      unsubscribe();
-    };
-  }, [date, fetchData, toast, addDebugLog]);
+    return () => unsubscribe();
+  }, [date, fetchData, toast]);
 
   // Real-time listener for STOCK webhook updates
   React.useEffect(() => {
     const stockWebhookStatusRef = doc(db, 'appConfig', 'stockWebhookStatus');
     let lastKnownStockTotal = 0;
-
-    addDebugLog('🔌 Iniciando listener de ESTOQUE (stockWebhookStatus)');
 
     const unsubscribe = onSnapshot(
       stockWebhookStatusRef,
@@ -245,38 +222,28 @@ export default function ProducaoClient() {
           const data = snapshot.data();
           const newTotal = data.totalReceived || 0;
 
-          addDebugLog(`📦 [ESTOQUE] Snapshot recebido: lastEvent=${data.lastEvent}, total=${newTotal}, lastProcessed=${data.lastProcessed}`);
-
           setLastStockWebhookUpdate(data.lastUpdate || null);
           setStockWebhookTotalReceived(newTotal);
 
           // If we received a new stock webhook and we have a date range, refresh data
           if (newTotal > lastKnownStockTotal && lastKnownStockTotal > 0 && date?.from && date?.to) {
-            addDebugLog(`🚨 [ESTOQUE] NOVO WEBHOOK! ${lastKnownStockTotal} -> ${newTotal}. Evento: ${data.lastEvent}`);
             toast({
               title: "Estoque Atualizado!",
               description: `${data.lastProcessed || 1} item(s) de estoque atualizado(s) via webhook.`,
             });
             fetchData(date);
-          } else if (lastKnownStockTotal === 0) {
-            addDebugLog(`📊 [ESTOQUE] Primeira leitura: total=${newTotal}`);
           }
 
           lastKnownStockTotal = newTotal;
-        } else {
-          addDebugLog('⚠️ [ESTOQUE] Documento stockWebhookStatus não existe ainda');
         }
       },
       (error) => {
-        addDebugLog(`❌ [ESTOQUE] Erro no listener: ${error.message}`);
+        console.error('Erro no listener de estoque:', error);
       }
     );
 
-    return () => {
-      addDebugLog('🔌 Desconectando listener de ESTOQUE');
-      unsubscribe();
-    };
-  }, [date, fetchData, toast, addDebugLog]);
+    return () => unsubscribe();
+  }, [date, fetchData, toast]);
 
   // Memoized display demand - evita recálculos desnecessários
   const displayDemand = React.useMemo(() => {
@@ -461,31 +428,6 @@ export default function ProducaoClient() {
                     </Badge>
                   )}
                 </div>
-                {/* DEBUG PANEL - Copie os logs abaixo */}
-                <details className="mt-4 p-3 bg-gray-100 dark:bg-gray-800 rounded-lg border text-xs">
-                  <summary className="cursor-pointer font-semibold text-gray-700 dark:text-gray-300">
-                    🔍 DEBUG LOGS (clique para expandir) - {debugLogs.length} entradas
-                  </summary>
-                  <div className="mt-2 max-h-64 overflow-y-auto">
-                    <pre className="whitespace-pre-wrap font-mono text-[10px] leading-relaxed">
-{debugLogs.length > 0 ? debugLogs.join('\n') : 'Nenhum log ainda...'}
-                    </pre>
-                    <div className="mt-2 flex gap-2">
-                      <button
-                        onClick={() => navigator.clipboard.writeText(debugLogs.join('\n'))}
-                        className="px-2 py-1 bg-blue-500 text-white rounded text-xs hover:bg-blue-600"
-                      >
-                        📋 Copiar Logs
-                      </button>
-                      <button
-                        onClick={() => setDebugLogs([])}
-                        className="px-2 py-1 bg-gray-500 text-white rounded text-xs hover:bg-gray-600"
-                      >
-                        🗑️ Limpar
-                      </button>
-                    </div>
-                  </div>
-                </details>
             </div>
              <div className="flex flex-wrap items-center gap-2">
                 <Popover>
