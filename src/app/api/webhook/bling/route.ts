@@ -202,22 +202,45 @@ const stockStatusDocRef = doc(db, "appConfig", "stockWebhookStatus");
 async function handleStockWebhook(payload: any, event: string): Promise<{ processed: number }> {
   const action = getEventAction(event);
   console.log(`📦 [WEBHOOK-ESTOQUE] Processando evento de estoque (ação: ${action})`);
+  console.log(`📦 [WEBHOOK-ESTOQUE] Payload completo:`, JSON.stringify(payload, null, 2));
 
-  // O payload do Bling v1 pode vir em diferentes formatos
-  // Formato 1: { retorno: { estoques: [...] } }
-  // Formato 2: { data: { ... } } (formato novo)
+  // O payload do Bling pode vir em diferentes formatos
+  // Formato v1: { retorno: { estoques: [...] } }
+  // Formato v3: { event: "stock.created", data: { id, produto: {...}, deposito: {...}, ... } }
   let estoques: any[] = [];
 
   if (payload.retorno?.estoques) {
+    // Formato v1
+    console.log('📦 [WEBHOOK-ESTOQUE] Detectado formato v1 (retorno.estoques)');
     estoques = payload.retorno.estoques;
   } else if (payload.data?.estoques) {
+    // Formato híbrido
+    console.log('📦 [WEBHOOK-ESTOQUE] Detectado formato híbrido (data.estoques)');
     estoques = payload.data.estoques;
+  } else if (payload.data?.produto) {
+    // Formato v3 - stock webhook com dados do produto
+    console.log('📦 [WEBHOOK-ESTOQUE] Detectado formato v3 (data.produto)');
+    const produto = payload.data.produto;
+    const deposito = payload.data.deposito;
+    estoques = [{
+      estoque: {
+        codigo: produto.codigo || produto.sku,
+        nome: produto.nome || produto.descricao,
+        estoqueAtual: payload.data.quantidade ?? payload.data.saldoVirtual ?? 0,
+        id: produto.id,
+        depositos: deposito ? [{ deposito }] : [],
+      }
+    }];
   } else if (payload.data) {
-    // Pode ser um único item
+    // Formato v3 genérico - pode ser um único item
+    console.log('📦 [WEBHOOK-ESTOQUE] Detectado formato v3 genérico (data)');
+    console.log('📦 [WEBHOOK-ESTOQUE] Chaves do data:', Object.keys(payload.data));
     estoques = [{ estoque: payload.data }];
+  } else {
+    console.log('📦 [WEBHOOK-ESTOQUE] Formato desconhecido. Chaves do payload:', Object.keys(payload));
   }
 
-  console.log(`📦 [WEBHOOK-ESTOQUE] ${estoques.length} item(s) de estoque recebido(s)`);
+  console.log(`📦 [WEBHOOK-ESTOQUE] ${estoques.length} item(s) de estoque para processar`);
 
   let processed = 0;
   for (const item of estoques) {

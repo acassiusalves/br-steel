@@ -776,15 +776,23 @@ const stockCache: {
 };
 
 // Busca dados de estoque que vieram via webhook (Firebase)
+// NOTA: Só retorna dados de webhooks REAIS do Bling (ignora testes)
 async function getStockFromWebhook(): Promise<Map<string, { estoqueAtual: number; updatedAt: string }>> {
     const stockMap = new Map<string, { estoqueAtual: number; updatedAt: string }>();
 
     try {
         const stockUpdatesSnapshot = await getDocs(collection(db, 'stockUpdates'));
 
-        stockUpdatesSnapshot.forEach(doc => {
-            const data = doc.data();
-            const sku = data.sku || doc.id;
+        stockUpdatesSnapshot.forEach(docSnapshot => {
+            const data = docSnapshot.data();
+            const sku = data.sku || docSnapshot.id;
+            const lastEvent = data.lastEvent || '';
+
+            // Ignora dados de teste - só usa webhooks reais do Bling
+            if (lastEvent.includes('(test)')) {
+                return; // skip this item
+            }
+
             stockMap.set(sku, {
                 estoqueAtual: data.estoqueAtual ?? 0,
                 updatedAt: data.webhookReceivedAt || '',
@@ -792,13 +800,37 @@ async function getStockFromWebhook(): Promise<Map<string, { estoqueAtual: number
         });
 
         if (stockMap.size > 0) {
-            console.log(`📦 [WEBHOOK-ESTOQUE] ${stockMap.size} SKUs com estoque via webhook`);
+            console.log(`📦 [WEBHOOK-ESTOQUE] ${stockMap.size} SKUs com estoque via webhook real`);
         }
     } catch (error) {
         console.error('❌ [WEBHOOK-ESTOQUE] Erro ao buscar estoque do Firebase:', error);
     }
 
     return stockMap;
+}
+
+// Limpa todos os dados de estoque da collection stockUpdates (para testes)
+export async function clearStockUpdates(): Promise<{ deleted: number }> {
+    try {
+        const stockUpdatesSnapshot = await getDocs(collection(db, 'stockUpdates'));
+        const batch = writeBatch(db);
+        let count = 0;
+
+        stockUpdatesSnapshot.forEach(docSnapshot => {
+            batch.delete(docSnapshot.ref);
+            count++;
+        });
+
+        if (count > 0) {
+            await batch.commit();
+            console.log(`🗑️ [STOCK-UPDATES] Removidos ${count} documentos`);
+        }
+
+        return { deleted: count };
+    } catch (error) {
+        console.error('❌ [STOCK-UPDATES] Erro ao limpar:', error);
+        return { deleted: 0 };
+    }
 }
 
 // Função para invalidar o cache (chamada pelo webhook quando há atualização)
