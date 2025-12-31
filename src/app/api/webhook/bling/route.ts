@@ -210,76 +210,84 @@ async function updateWebhookStatus(orderId: number, event: string): Promise<void
 // Firestore reference for stock updates
 const stockStatusDocRef = doc(db, "appConfig", "stockWebhookStatus");
 
+// Fetch product details from Bling API to get SKU
+async function fetchProductDetails(productId: number): Promise<{ codigo: string; nome: string } | null> {
+  try {
+    const url = `${BLING_API_BASE}/produtos/${productId}`;
+    console.log(`🔍 [WEBHOOK-ESTOQUE] Buscando detalhes do produto ${productId}...`);
+    const response = await blingFetch(url);
+    const produto = response?.data;
+    if (produto) {
+      console.log(`✅ [WEBHOOK-ESTOQUE] Produto encontrado: ${produto.codigo} - ${produto.nome}`);
+      return { codigo: produto.codigo, nome: produto.nome };
+    }
+    return null;
+  } catch (error: any) {
+    console.error(`❌ [WEBHOOK-ESTOQUE] Erro ao buscar produto ${productId}:`, error.message);
+    return null;
+  }
+}
+
 // Handle stock webhook event
 async function handleStockWebhook(payload: any, event: string): Promise<{ processed: number }> {
   const action = getEventAction(event);
   console.log(`📦 [WEBHOOK-ESTOQUE] Processando evento de estoque (ação: ${action})`);
-  console.log(`📦 [WEBHOOK-ESTOQUE] Payload completo:`, JSON.stringify(payload, null, 2));
 
-  // O payload do Bling pode vir em diferentes formatos
-  // Formato v1: { retorno: { estoques: [...] } }
-  // Formato v3: { event: "stock.created", data: { id, produto: {...}, deposito: {...}, ... } }
-  let estoques: any[] = [];
+  // Formato v3 do Bling: { event, data: { produto: { id }, quantidade, saldoVirtualTotal, ... } }
+  const data = payload.data;
 
-  if (payload.retorno?.estoques) {
-    // Formato v1
-    console.log('📦 [WEBHOOK-ESTOQUE] Detectado formato v1 (retorno.estoques)');
-    estoques = payload.retorno.estoques;
-  } else if (payload.data?.estoques) {
-    // Formato híbrido
-    console.log('📦 [WEBHOOK-ESTOQUE] Detectado formato híbrido (data.estoques)');
-    estoques = payload.data.estoques;
-  } else if (payload.data?.produto) {
-    // Formato v3 - stock webhook com dados do produto
-    console.log('📦 [WEBHOOK-ESTOQUE] Detectado formato v3 (data.produto)');
-    const produto = payload.data.produto;
-    const deposito = payload.data.deposito;
-    estoques = [{
-      estoque: {
-        codigo: produto.codigo || produto.sku,
-        nome: produto.nome || produto.descricao,
-        estoqueAtual: payload.data.quantidade ?? payload.data.saldoVirtual ?? 0,
-        id: produto.id,
-        depositos: deposito ? [{ deposito }] : [],
-      }
-    }];
-  } else if (payload.data) {
-    // Formato v3 genérico - pode ser um único item
-    console.log('📦 [WEBHOOK-ESTOQUE] Detectado formato v3 genérico (data)');
-    console.log('📦 [WEBHOOK-ESTOQUE] Chaves do data:', Object.keys(payload.data));
-    estoques = [{ estoque: payload.data }];
-  } else {
-    console.log('📦 [WEBHOOK-ESTOQUE] Formato desconhecido. Chaves do payload:', Object.keys(payload));
+  if (!data) {
+    console.warn('⚠️ [WEBHOOK-ESTOQUE] Payload sem campo data');
+    return { processed: 0 };
   }
 
-  console.log(`📦 [WEBHOOK-ESTOQUE] ${estoques.length} item(s) de estoque para processar`);
+  // Extrair dados do payload v3
+  const produtoId = data.produto?.id;
+  const saldoVirtual = data.saldoVirtualTotal ?? data.deposito?.saldoVirtual ?? 0;
 
-  let processed = 0;
-  for (const item of estoques) {
-    const estoque = item.estoque || item;
-    const sku = estoque.codigo || estoque.sku || estoque.id;
+  if (!produtoId) {
+    console.warn('⚠️ [WEBHOOK-ESTOQUE] Payload sem ID do produto');
+    return { processed: 0 };
+  }
 
-    if (!sku) {
-      console.warn('⚠️ [WEBHOOK-ESTOQUE] Item sem SKU/código, ignorando');
-      continue;
-    }
+  console.log(`📦 [WEBHOOK-ESTOQUE] Produto ID: ${produtoId}, Saldo Virtual: ${saldoVirtual}`);
 
-    const stockData = {
-      sku,
-      nome: estoque.nome || '',
-      estoqueAtual: estoque.estoqueAtual ?? estoque.quantidade ?? 0,
-      depositos: estoque.depositos || [],
-      webhookReceivedAt: new Date().toISOString(),
+  // Buscar detalhes do produto (SKU e nome) na API do Bling
+  const produtoDetails = await fetchProductDetails(produtoId);
+
+  if (!produtoDetails || !produtoDetails.codigo) {
+    console.warn(`⚠️ [WEBHOOK-ESTOQUE] Não foi possível obter SKU para produto ${produtoId}`);
+
+    // Salvar com ID como fallback temporário
+    await setDoc(stockStatusDocRef, {
+      lastUpdate: new Date().toISOString(),
       lastEvent: event,
-    };
+      lastProcessed: 0,
+      lastError: `Produto ${produtoId} não encontrado na API`,
+      totalReceived: ((await getDoc(stockStatusDocRef)).data()?.totalReceived || 0) + 1,
+    });
 
-    // Salvar no Firebase - collection stockUpdates
-    const stockDocRef = doc(db, 'stockUpdates', sku);
-    await setDoc(stockDocRef, stockData, { merge: true });
-
-    console.log(`✅ [WEBHOOK-ESTOQUE] SKU ${sku}: estoque = ${stockData.estoqueAtual}`);
-    processed++;
+    return { processed: 0 };
   }
+
+  const sku = produtoDetails.codigo;
+  const nome = produtoDetails.nome;
+
+  const stockData = {
+    sku,
+    nome,
+    estoqueAtual: saldoVirtual,
+    produtoId,
+    depositos: data.deposito ? [data.deposito] : [],
+    webhookReceivedAt: new Date().toISOString(),
+    lastEvent: event,
+  };
+
+  // Salvar no Firebase - collection stockUpdates
+  const stockDocRef = doc(db, 'stockUpdates', sku);
+  await setDoc(stockDocRef, stockData, { merge: true });
+
+  console.log(`✅ [WEBHOOK-ESTOQUE] SKU ${sku}: estoque = ${saldoVirtual}`);
 
   // Atualizar status do webhook de estoque
   const statusSnap = await getDoc(stockStatusDocRef);
@@ -288,14 +296,16 @@ async function handleStockWebhook(payload: any, event: string): Promise<{ proces
   await setDoc(stockStatusDocRef, {
     lastUpdate: new Date().toISOString(),
     lastEvent: event,
-    lastProcessed: processed,
+    lastProcessed: 1,
+    lastSku: sku,
+    lastStock: saldoVirtual,
     totalReceived: (currentStatus.totalReceived || 0) + 1,
   });
 
   // Invalidar cache de estoque
   invalidateStockCache();
 
-  return { processed };
+  return { processed: 1 };
 }
 
 // Handle order deleted event
