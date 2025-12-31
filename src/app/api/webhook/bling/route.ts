@@ -25,26 +25,32 @@ type BlingCredentials = {
 function verifySignature(rawBody: string, signature: string | null, secret: string): boolean {
   if (!signature || !secret) return false;
 
+  // Bling envia no formato "sha256=<hash>" - precisamos extrair apenas o hash
+  const actualSignature = signature.startsWith('sha256=')
+    ? signature.slice(7)
+    : signature;
+
   const expectedSignature = createHmac('sha256', secret)
-    .update(rawBody)
+    .update(rawBody, 'utf8')
     .digest('hex');
 
   // Timing-safe comparison
-  if (signature.length !== expectedSignature.length) return false;
+  if (actualSignature.length !== expectedSignature.length) return false;
 
   let result = 0;
-  for (let i = 0; i < signature.length; i++) {
-    result |= signature.charCodeAt(i) ^ expectedSignature.charCodeAt(i);
+  for (let i = 0; i < actualSignature.length; i++) {
+    result |= actualSignature.charCodeAt(i) ^ expectedSignature.charCodeAt(i);
   }
   return result === 0;
 }
 
 // Check if event is an order event
+// Bling v1 usa: pedido_venda.created, pedido_venda.updated, pedido_venda.deleted
 function isOrderEvent(event: string): boolean {
   return (
-    event.startsWith('order.') ||
+    event.startsWith('pedido_venda.') ||  // Bling v1 - formato correto
     event.startsWith('pedidos.vendas.') ||
-    event.startsWith('pedido_venda.')
+    event.startsWith('order.')
   );
 }
 
@@ -337,12 +343,9 @@ export async function GET() {
     message: 'Webhook do Bling está ativo',
     timestamp: new Date().toISOString(),
     supportedEvents: [
-      'order.created',
-      'order.updated',
-      'order.deleted',
-      'pedidos.vendas.created',
-      'pedidos.vendas.updated',
-      'pedidos.vendas.deleted',
+      'pedido_venda.created',
+      'pedido_venda.updated',
+      'pedido_venda.deleted',
     ],
     signatureVerification: !!process.env.BLING_WEBHOOK_SECRET,
     lastWebhook: statusData ? {
