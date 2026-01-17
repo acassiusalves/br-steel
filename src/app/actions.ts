@@ -1506,6 +1506,99 @@ export async function backfillOrdersMissingItems() {
 }
 
 /**
+ * Busca as situações de pedidos de venda do Bling
+ * Retorna um mapa de id -> nome
+ */
+async function fetchSituacoesFromBling(): Promise<Map<number, string>> {
+  const url = `https://api.bling.com.br/Api/v3/situacoes/modulos/98310`;  // 98310 = módulo de pedidos de venda
+  console.log('📋 [REPAIR] Buscando situações de pedidos de venda...');
+
+  const response = await blingFetchWithRefresh(url);
+  const mapa = new Map<number, string>();
+
+  if (response?.data && Array.isArray(response.data)) {
+    for (const sit of response.data) {
+      if (sit.id && sit.nome) {
+        mapa.set(sit.id, sit.nome);
+      }
+    }
+    console.log(`✅ [REPAIR] ${mapa.size} situações carregadas`);
+  }
+
+  return mapa;
+}
+
+/**
+ * Repara pedidos que não possuem o campo situacao.nome
+ * A API v3 do Bling não retorna o nome da situação, apenas id e valor
+ */
+export async function repairOrdersSituacaoNome(): Promise<{ examined: number; missing: number; fixed: number }> {
+  console.log('═══════════════════════════════════════════════════════════');
+  console.log('🔧 [REPAIR] Iniciando reparo de situação dos pedidos...');
+  console.log('═══════════════════════════════════════════════════════════');
+
+  // 1. Buscar mapeamento de situações do Bling
+  const situacoes = await fetchSituacoesFromBling();
+
+  if (situacoes.size === 0) {
+    console.error('❌ [REPAIR] Nenhuma situação encontrada no Bling');
+    return { examined: 0, missing: 0, fixed: 0 };
+  }
+
+  // 2. Buscar todos os pedidos do Firebase
+  const col = collection(db, 'salesOrders');
+  const snap = await getDocs(query(col));
+
+  console.log(`📊 [REPAIR] Total de pedidos no Firebase: ${snap.size}`);
+
+  // 3. Identificar pedidos sem situacao.nome
+  const ordersToFix: { docId: string; situacaoId: number }[] = [];
+
+  snap.forEach(docSnap => {
+    const data = docSnap.data();
+    if (data.situacao?.id && !data.situacao?.nome) {
+      ordersToFix.push({
+        docId: docSnap.id,
+        situacaoId: data.situacao.id,
+      });
+    }
+  });
+
+  console.log(`📋 [REPAIR] Pedidos sem situacao.nome: ${ordersToFix.length}`);
+
+  if (ordersToFix.length === 0) {
+    return { examined: snap.size, missing: 0, fixed: 0 };
+  }
+
+  // 4. Atualizar em lotes
+  const BATCH_SIZE = 100;
+  let fixed = 0;
+
+  for (let i = 0; i < ordersToFix.length; i += BATCH_SIZE) {
+    const batch = writeBatch(db);
+    const chunk = ordersToFix.slice(i, i + BATCH_SIZE);
+
+    for (const order of chunk) {
+      const nome = situacoes.get(order.situacaoId);
+      if (nome) {
+        const docRef = doc(db, 'salesOrders', order.docId);
+        batch.update(docRef, { 'situacao.nome': nome });
+        fixed++;
+      }
+    }
+
+    await batch.commit();
+    console.log(`   📦 Lote ${Math.floor(i / BATCH_SIZE) + 1}: ${chunk.length} pedidos processados`);
+  }
+
+  console.log('═══════════════════════════════════════════════════════════');
+  console.log(`✅ [REPAIR] Concluído: ${fixed} pedidos atualizados`);
+  console.log('═══════════════════════════════════════════════════════════');
+
+  return { examined: snap.size, missing: ordersToFix.length, fixed };
+}
+
+/**
  * Funçao para limpar as credenciais do Bling.
  * Útil para forçar uma nova autenticação.
  */

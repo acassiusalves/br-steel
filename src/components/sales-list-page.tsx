@@ -19,7 +19,7 @@ import SaleOrderDetailModal from '@/components/sale-order-detail-modal';
 import type { SaleOrder } from '@/types/sale-order';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { ChevronsLeft, ChevronLeft, ChevronRight, ChevronsRight, Loader2, Calendar as CalendarIcon, Filter, DollarSign, ShoppingCart, Users, Search, FileDown } from 'lucide-react';
+import { ChevronsLeft, ChevronLeft, ChevronRight, ChevronsRight, Loader2, Calendar as CalendarIcon, DollarSign, ShoppingCart, Search, FileDown } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Calendar } from '@/components/ui/calendar';
 import { cn } from '@/lib/utils';
@@ -31,7 +31,6 @@ import { Separator } from '@/components/ui/separator';
 import { Input } from '@/components/ui/input';
 import { useToast } from '@/hooks/use-toast';
 import * as XLSX from 'xlsx';
-import { backfillOrdersMissingItems, smartSyncOrders } from '@/app/actions';
 
 // Função para formatar a data
 const formatDate = (dateString: string) => {
@@ -101,13 +100,12 @@ const SalesListPage = () => {
   const [isFiltering, setIsFiltering] = React.useState(false);
   const [selectedOrder, setSelectedOrder] = React.useState<SaleOrder | null>(null);
   const [searchTerm, setSearchTerm] = React.useState('');
-  const [repairLoading, setRepairLoading] = React.useState(false);
   const { toast } = useToast();
 
   // Pagination State
   const [currentPage, setCurrentPage] = React.useState(1);
   const [rowsPerPage, setRowsPerPage] = React.useState(10);
-  
+
   // Date filter state
   const [date, setDate] = React.useState<DateRange | undefined>(() => {
     const today = new Date();
@@ -123,31 +121,6 @@ const SalesListPage = () => {
     totalSales: 0,
     averageTicket: 0,
   });
-  
-  async function handleRepair() {
-    setRepairLoading(true);
-    toast({
-      title: "Reparando Pedidos...",
-      description: "Isso pode levar alguns minutos. Estamos buscando os dados que faltam no Bling.",
-    });
-    try {
-      await smartSyncOrders();
-      const res = await backfillOrdersMissingItems();
-      toast({
-        title: "Reparo Concluído!",
-        description: `Pedidos verificados: ${res.examined}. Faltando itens: ${res.missing}. Corrigidos agora: ${res.fixed}.`,
-        duration: 10000,
-      });
-    } catch (error: any) {
-        toast({
-            variant: "destructive",
-            title: "Erro ao Reparar",
-            description: `Ocorreu um erro: ${error.message}`,
-        });
-    } finally {
-      setRepairLoading(false);
-    }
-  }
 
   React.useEffect(() => {
     setIsLoading(true);
@@ -246,7 +219,7 @@ const SalesListPage = () => {
     const headers = [
       "ID Pedido", "Numero Pedido", "Numero Loja", "Data", "Cliente",
       "Marketplace", "Qtd Itens", "Itens (SKUs)", "Itens (Descricoes)",
-      "Status", "Vendedor", "Total Pedido (R$)"
+      "Status", "Total Pedido (R$)"
     ];
 
     const dataToExport = filteredSales.map(sale => ({
@@ -260,7 +233,6 @@ const SalesListPage = () => {
       "Itens (SKUs)": sale.itens?.map(i => i.codigo).join(' | ') || '',
       "Itens (Descricoes)": sale.itens?.map(i => i.descricao).join(' | ') || '',
       "Status": sale.situacao?.nome || 'Desconhecido',
-      "Vendedor": sale.vendedor?.nome || 'N/A',
       "Total Pedido (R$)": sale.total || 0,
     }));
 
@@ -317,7 +289,7 @@ const SalesListPage = () => {
     }
     return sale.loja?.nome || 'N/A';
   }
-  
+
   const setDatePreset = (preset: 'today' | 'yesterday' | 'last7' | 'last30' | 'last3Months' | 'thisMonth' | 'lastMonth') => {
       const today = new Date();
       switch (preset) {
@@ -445,10 +417,6 @@ const SalesListPage = () => {
               </CardDescription>
             </div>
             <div className="flex items-center gap-2">
-                <Button onClick={handleRepair} disabled={repairLoading} variant="outline">
-                    {repairLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                    Reparar Pedidos
-                </Button>
                 <div className="relative w-full sm:w-auto">
                     <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
                     <Input 
@@ -475,14 +443,13 @@ const SalesListPage = () => {
                   <TableHead>Qtd. Itens</TableHead>
                   <TableHead>Itens</TableHead>
                   <TableHead>Status</TableHead>
-                  <TableHead>Vendedor</TableHead>
                   <TableHead className="text-right">Total Pedido</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {isLoading || isFiltering ? (
                    <TableRow>
-                      <TableCell colSpan={11} className="text-center h-24">
+                      <TableCell colSpan={10} className="text-center h-24">
                          <Loader2 className="mx-auto h-6 w-6 animate-spin" />
                       </TableCell>
                   </TableRow>
@@ -511,13 +478,12 @@ const SalesListPage = () => {
                             <TableCell>
                                 <StatusBadge statusName={sale.situacao?.nome || 'Desconhecido'} />
                             </TableCell>
-                            <TableCell>{sale.vendedor?.nome || 'N/A'}</TableCell>
                             <TableCell className="text-right whitespace-nowrap">{formatCurrency(sale.total)}</TableCell>
                         </TableRow>
                     ))
                 ) : (
                     <TableRow>
-                        <TableCell colSpan={11} className="text-center h-24">
+                        <TableCell colSpan={10} className="text-center h-24">
                            Nenhum pedido encontrado. <a href="/api" className="text-primary underline">Importe seus pedidos aqui.</a>
                         </TableCell>
                     </TableRow>

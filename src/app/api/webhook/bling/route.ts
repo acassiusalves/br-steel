@@ -210,6 +210,73 @@ async function updateWebhookStatus(orderId: number, event: string): Promise<void
 // Firestore reference for stock updates
 const stockStatusDocRef = doc(db, "appConfig", "stockWebhookStatus");
 
+// Cache para situações do Bling (mapeamento id -> nome)
+let situacoesCache: Map<number, string> | null = null;
+let situacoesCacheTime: number = 0;
+const SITUACOES_CACHE_TTL = 1000 * 60 * 60; // 1 hora
+
+// Busca todas as situações de pedidos de venda do Bling
+async function fetchSituacoes(): Promise<Map<number, string>> {
+  // Retornar cache se válido
+  if (situacoesCache && Date.now() - situacoesCacheTime < SITUACOES_CACHE_TTL) {
+    return situacoesCache;
+  }
+
+  try {
+    const url = `${BLING_API_BASE}/situacoes/modulos/98310`;  // 98310 = módulo de pedidos de venda
+    console.log('📋 [WEBHOOK] Buscando situações de pedidos de venda...');
+    const response = await blingFetch(url);
+
+    const mapa = new Map<number, string>();
+
+    if (response?.data && Array.isArray(response.data)) {
+      for (const sit of response.data) {
+        if (sit.id && sit.nome) {
+          mapa.set(sit.id, sit.nome);
+        }
+      }
+      console.log(`✅ [WEBHOOK] ${mapa.size} situações carregadas`);
+    }
+
+    situacoesCache = mapa;
+    situacoesCacheTime = Date.now();
+    return mapa;
+  } catch (error: any) {
+    console.error('❌ [WEBHOOK] Erro ao buscar situações:', error.message);
+    // Retornar cache antigo se existir, ou mapa vazio
+    return situacoesCache || new Map();
+  }
+}
+
+// Adiciona o nome da situação ao pedido se não existir
+async function enrichOrderWithSituacaoNome(order: any): Promise<any> {
+  if (!order?.situacao?.id) {
+    return order;
+  }
+
+  // Se já tem nome, não precisa buscar
+  if (order.situacao.nome) {
+    return order;
+  }
+
+  const situacoes = await fetchSituacoes();
+  const nome = situacoes.get(order.situacao.id);
+
+  if (nome) {
+    console.log(`📋 [WEBHOOK] Situação ${order.situacao.id} = "${nome}"`);
+    return {
+      ...order,
+      situacao: {
+        ...order.situacao,
+        nome,
+      },
+    };
+  }
+
+  console.warn(`⚠️ [WEBHOOK] Situação ${order.situacao.id} não encontrada no mapeamento`);
+  return order;
+}
+
 // Fetch product details from Bling API to get SKU
 async function fetchProductDetails(productId: number): Promise<{ codigo: string; nome: string } | null> {
   try {
@@ -411,7 +478,7 @@ export async function POST(request: Request) {
       }
 
       // Fetch complete order details
-      const orderDetails = await fetchOrderDetails(orderId);
+      let orderDetails = await fetchOrderDetails(orderId);
 
       if (!orderDetails) {
         console.warn(`⚠️ [WEBHOOK] Pedido ${orderId} não encontrado na API`);
@@ -422,6 +489,9 @@ export async function POST(request: Request) {
           processedIn: `${Date.now() - startTime}ms`,
         });
       }
+
+      // Enriquecer com nome da situação (API v3 não retorna o nome)
+      orderDetails = await enrichOrderWithSituacaoNome(orderDetails);
 
       // Save order to Firestore with webhook source flag
       const orderWithSource = {
