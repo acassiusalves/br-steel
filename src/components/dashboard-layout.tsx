@@ -19,6 +19,8 @@ import {
   User,
   Loader2,
   Plug,
+  Kanban,
+  BarChart3,
 } from "lucide-react";
 import * as React from "react";
 
@@ -55,7 +57,15 @@ const allNavItems = [
             { href: "/vendas?tab=listagem", icon: ShoppingCart, label: "Listagem" },
         ]
     },
-    { href: "/producao", icon: Factory, label: "Produção" },
+    {
+        href: "/producao",
+        icon: Factory,
+        label: "Produção",
+        subItems: [
+            { href: "/producao", icon: BarChart3, label: "Análise" },
+            { href: "/producao/kanban", icon: Kanban, label: "Kanban" },
+        ]
+    },
     {
         href: "/insumos",
         icon: ClipboardList,
