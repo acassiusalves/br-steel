@@ -600,25 +600,6 @@ export async function fullSyncOrders(from?: Date, to?: Date) {
 }
 
 
-export async function checkOrderNeedsUpdate(orderId: string): Promise<boolean> {
-    try {
-        const exists = await orderExists(orderId);
-        if (!exists) {
-            return true;
-        }
-        return false; 
-    } catch (error) {
-        console.error(`Erro ao verificar pedido ${orderId}:`, error);
-        return true;
-    }
-}
-
-export async function getBlingSalesOrders({ from, to }: { from?: Date, to?: Date } = {}) {
-    const result = await getBlingSalesOrdersOptimized({ from, to, forceFullSync: true });
-    return result;
-}
-
-
 export async function getBlingOrderDetails(orderId: string): Promise<any> {
     if (!orderId) {
         throw new Error('O ID do pedido é obrigatório.');
@@ -709,42 +690,6 @@ export async function getBlingProductBySku(sku: string): Promise<any> {
     } catch (error: any) {
         console.error(`Falha ao buscar produto com SKU ${sku}:`, error);
         throw new Error(`Falha na comunicação com a API do Bling: ${error.message}`);
-    }
-}
-
-export async function getLogisticsBySalesOrder(orderId: string): Promise<any> {
-    if (!orderId) {
-        throw new Error('O ID do pedido de venda é obrigatório.');
-    }
-    
-    try {
-        const orderDetails = await blingFetchWithRefresh(`https://api.bling.com.br/Api/v3/pedidos/vendas/${orderId}`);
-        const invoiceId = orderDetails?.data?.notaFiscal?.id;
-
-        if (!invoiceId) {
-            throw new Error('Nota Fiscal não encontrada para este pedido. Não é possível rastrear.');
-        }
-
-        const shippingManifests = await blingFetchWithRefresh(`https://api.bling.com.br/Api/v3/logisticas/remessas?idsDocumentos[]=${invoiceId}`);
-        const shippingObjects = shippingManifests?.data?.[0]?.objetos;
-
-        if (!shippingObjects || shippingObjects.length === 0) {
-            throw new Error('Nenhum objeto de logística encontrado para a nota fiscal deste pedido.');
-        }
-        
-        const logisticsObjectId = shippingObjects[0]?.id;
-
-        if (!logisticsObjectId) {
-            throw new Error('ID do objeto de logística não encontrado na remessa.');
-        }
-
-        const logisticsDetails = await blingFetchWithRefresh(`https://api.bling.com.br/Api/v3/logisticas/objetos/${logisticsObjectId}`);
-        
-        return logisticsDetails;
-
-    } catch (error: any) {
-        console.error(`Falha na cadeia de busca de logística para o pedido ${orderId}:`, error);
-        throw new Error(error.message);
     }
 }
 
@@ -968,23 +913,6 @@ export async function countImportedOrders(): Promise<number> {
     }
 }
 
-export async function getImportedOrderIds(): Promise<Set<string>> {
-  try {
-    const ordersCollection = collection(db, 'salesOrders');
-    const q = query(ordersCollection);
-    const snapshot = await getDocs(q);
-    const ids = new Set<string>();
-    snapshot.forEach(doc => {
-      // Este método retorna todos os IDs, independentemente de terem detalhes ou não.
-      ids.add(doc.id);
-    });
-    return ids;
-  } catch (error) {
-    console.error("Failed to get all imported order IDs:", error);
-    return new Set();
-  }
-}
-
 export async function getSalesDashboardData(
   { from, to }: { from?: Date, to?: Date }
 ): Promise<{
@@ -1199,52 +1127,6 @@ export async function getProductionDemand(
         .sort((a, b) => b.weeklyAverage - a.weeklyAverage);
 
     return result;
-}
-
-/**
- * Função de diagnóstico para verificar datas dos pedidos no Firebase
- */
-export async function debugOrderDates(): Promise<{
-    total: number;
-    withNF: number;
-    dateDistribution: Record<string, number>;
-    sampleDates: string[];
-}> {
-    const salesSnapshot = await getDocs(query(collection(db, 'salesOrders')));
-
-    const dateDistribution: Record<string, number> = {};
-    const sampleDates: string[] = [];
-    let withNF = 0;
-
-    salesSnapshot.forEach(doc => {
-        const order = doc.data() as SaleOrder;
-        const dateStr = order.data || 'undefined';
-        const yearMonth = dateStr.substring(0, 7); // yyyy-MM
-
-        dateDistribution[yearMonth] = (dateDistribution[yearMonth] || 0) + 1;
-
-        if (order.notaFiscal?.id) withNF++;
-
-        if (sampleDates.length < 10) {
-            sampleDates.push(dateStr);
-        }
-    });
-
-    console.log('═══════════════════════════════════════════════════════════');
-    console.log('📊 [DEBUG] Distribuição de datas dos pedidos:');
-    Object.entries(dateDistribution)
-        .sort(([a], [b]) => b.localeCompare(a))
-        .forEach(([month, count]) => {
-            console.log(`   ${month}: ${count} pedidos`);
-        });
-    console.log('═══════════════════════════════════════════════════════════');
-
-    return {
-        total: salesSnapshot.size,
-        withNF,
-        dateDistribution,
-        sampleDates,
-    };
 }
 
 /**
@@ -1480,343 +1362,59 @@ export async function deleteAllSalesOrders(): Promise<{ deletedCount: number }> 
     return { deletedCount };
 }
 
-export async function backfillOrdersMissingItems() {
-  const col = collection(db, 'salesOrders');
-  const snap = await getDocs(query(col));
+// ============================================================================
+// MERCADO LIVRE INTEGRATION
+// ============================================================================
 
-  const missing: string[] = [];
-  snap.forEach(doc => {
-    const d = doc.data() as any;
-    if (!d.itens || !Array.isArray(d.itens) || d.itens.length === 0) {
-      missing.push(String(d.id ?? doc.id));
-    }
-  });
-
-  let fixed = 0;
-  for (const id of missing) {
-    try {
-      // Usa o mesmo fetch com refresh já existente
-      const data = await getBlingOrderDetails(id);
-      if (data?.data?.itens?.length) fixed++;
-    } catch (e) {
-      console.warn('Falha ao backfill do pedido', id, e);
-    }
-  }
-  return { examined: snap.size, missing: missing.length, fixed };
+export interface MercadoLivreCredentials {
+    appId?: string;
+    clientSecret?: string;
+    accessToken?: string;
+    refreshToken?: string;
+    expiresAt?: number;
+    userId?: string;
 }
 
-/**
- * Busca as situações de pedidos de venda do Bling
- * Retorna um mapa de id -> nome
- */
-async function fetchSituacoesFromBling(): Promise<Map<number, string>> {
-  const url = `https://api.bling.com.br/Api/v3/situacoes/modulos/98310`;  // 98310 = módulo de pedidos de venda
-  console.log('📋 [REPAIR] Buscando situações de pedidos de venda...');
-
-  const response = await blingFetchWithRefresh(url);
-  const mapa = new Map<number, string>();
-
-  if (response?.data && Array.isArray(response.data)) {
-    for (const sit of response.data) {
-      if (sit.id && sit.nome) {
-        mapa.set(sit.id, sit.nome);
-      }
-    }
-    console.log(`✅ [REPAIR] ${mapa.size} situações carregadas`);
-  }
-
-  return mapa;
+export async function saveMercadoLivreCredentials(partial: Partial<MercadoLivreCredentials>): Promise<void> {
+    const credentialsDocRef = doc(db, 'appConfig', 'mercadoLivreCredentials');
+    await setDoc(credentialsDocRef, partial, { merge: true });
+    console.log('Mercado Livre credentials saved successfully.');
 }
 
-/**
- * Repara pedidos que não possuem o campo situacao.nome
- * A API v3 do Bling não retorna o nome da situação, apenas id e valor
- */
-export async function repairOrdersSituacaoNome(): Promise<{ examined: number; missing: number; fixed: number }> {
-  console.log('═══════════════════════════════════════════════════════════');
-  console.log('🔧 [REPAIR] Iniciando reparo de situação dos pedidos...');
-  console.log('═══════════════════════════════════════════════════════════');
+export async function getMercadoLivreCredentials(): Promise<{
+    appId: string;
+    clientSecret: string;
+    connected: boolean;
+    userId?: string;
+}> {
+    const credentialsDocRef = doc(db, 'appConfig', 'mercadoLivreCredentials');
+    const docSnap = await getDoc(credentialsDocRef);
 
-  // 1. Buscar mapeamento de situações do Bling
-  const situacoes = await fetchSituacoesFromBling();
-
-  if (situacoes.size === 0) {
-    console.error('❌ [REPAIR] Nenhuma situação encontrada no Bling');
-    return { examined: 0, missing: 0, fixed: 0 };
-  }
-
-  // 2. Buscar todos os pedidos do Firebase
-  const col = collection(db, 'salesOrders');
-  const snap = await getDocs(query(col));
-
-  console.log(`📊 [REPAIR] Total de pedidos no Firebase: ${snap.size}`);
-
-  // 3. Identificar pedidos sem situacao.nome
-  const ordersToFix: { docId: string; situacaoId: number }[] = [];
-
-  snap.forEach(docSnap => {
-    const data = docSnap.data();
-    if (data.situacao?.id && !data.situacao?.nome) {
-      ordersToFix.push({
-        docId: docSnap.id,
-        situacaoId: data.situacao.id,
-      });
-    }
-  });
-
-  console.log(`📋 [REPAIR] Pedidos sem situacao.nome: ${ordersToFix.length}`);
-
-  if (ordersToFix.length === 0) {
-    return { examined: snap.size, missing: 0, fixed: 0 };
-  }
-
-  // 4. Atualizar em lotes
-  const BATCH_SIZE = 100;
-  let fixed = 0;
-
-  for (let i = 0; i < ordersToFix.length; i += BATCH_SIZE) {
-    const batch = writeBatch(db);
-    const chunk = ordersToFix.slice(i, i + BATCH_SIZE);
-
-    for (const order of chunk) {
-      const nome = situacoes.get(order.situacaoId);
-      if (nome) {
-        const docRef = doc(db, 'salesOrders', order.docId);
-        batch.update(docRef, { 'situacao.nome': nome });
-        fixed++;
-      }
+    if (!docSnap.exists()) {
+        return { appId: '', clientSecret: '', connected: false };
     }
 
-    await batch.commit();
-    console.log(`   📦 Lote ${Math.floor(i / BATCH_SIZE) + 1}: ${chunk.length} pedidos processados`);
-  }
+    const data = docSnap.data() as MercadoLivreCredentials;
 
-  console.log('═══════════════════════════════════════════════════════════');
-  console.log(`✅ [REPAIR] Concluído: ${fixed} pedidos atualizados`);
-  console.log('═══════════════════════════════════════════════════════════');
-
-  return { examined: snap.size, missing: ordersToFix.length, fixed };
-}
-
-/**
- * Funçao para limpar as credenciais do Bling.
- * Útil para forçar uma nova autenticação.
- */
-export async function clearBlingCredentials() {
-    try {
-        await saveBlingCredentials({
-            accessToken: undefined,
-            refreshToken: undefined,
-            expiresAt: undefined
-        });
-        console.log("Credenciais do Bling foram limpas com sucesso.");
-        return { success: true };
-    } catch (error) {
-        console.error("Erro ao limpar credenciais do Bling:", error);
-        return { success: false, error: (error as Error).message };
-    }
-}
-
-/**
- * Diagnóstico completo para um SKU específico
- * Compara dados do Firebase com dados do Bling
- */
-export async function diagnoseSku(sku: string, fromDate?: Date, toDate?: Date) {
-    console.log('═══════════════════════════════════════════════════════════');
-    console.log(`🔍 [DIAGNÓSTICO] Iniciando análise do SKU: ${sku}`);
-    console.log('═══════════════════════════════════════════════════════════');
-
-    const from = fromDate || new Date(new Date().setMonth(new Date().getMonth() - 3));
-    const to = toDate || new Date();
-    const formatDate = (d: Date) => d.toISOString().split('T')[0];
-
-    // 1. Buscar dados do Firebase
-    console.log('\n📊 [FIREBASE] Buscando pedidos no banco local...');
-    const salesSnapshot = await getDocs(collection(db, 'salesOrders'));
-
-    const firebaseOrders: {
-        orderId: number;
-        orderDate: string;
-        hasNF: boolean;
-        nfId: number | null;
-        qty: number;
-        hasItems: boolean;
-        situacao: string;
-    }[] = [];
-
-    let totalQtyFirebase = 0;
-    let ordersWithoutItems = 0;
-
-    salesSnapshot.forEach(docSnap => {
-        const order = docSnap.data() as SaleOrder;
-        const orderDate = order.data;
-
-        // Verifica se está no período
-        if (orderDate >= formatDate(from) && orderDate <= formatDate(to)) {
-            const hasItems = order.itens && order.itens.length > 0;
-
-            if (!hasItems) {
-                ordersWithoutItems++;
-            }
-
-            // Procura o SKU nos itens
-            const matchingItems = order.itens?.filter(item => item.codigo === sku) || [];
-
-            if (matchingItems.length > 0) {
-                const qty = matchingItems.reduce((sum, item) => sum + item.quantidade, 0);
-                totalQtyFirebase += qty;
-
-                firebaseOrders.push({
-                    orderId: order.id,
-                    orderDate: order.data,
-                    hasNF: !!(order.notaFiscal && order.notaFiscal.id),
-                    nfId: order.notaFiscal?.id || null,
-                    qty,
-                    hasItems,
-                    situacao: order.situacao?.nome || 'Desconhecido'
-                });
-            }
-        }
-    });
-
-    console.log(`📊 [FIREBASE] Total de pedidos no período: ${salesSnapshot.size}`);
-    console.log(`📊 [FIREBASE] Pedidos sem itens: ${ordersWithoutItems}`);
-    console.log(`📊 [FIREBASE] Pedidos com SKU ${sku}: ${firebaseOrders.length}`);
-    console.log(`📊 [FIREBASE] Quantidade total do SKU: ${totalQtyFirebase}`);
-
-    // 2. Buscar dados do Bling - todos os pedidos do período
-    console.log('\n🌐 [BLING] Buscando pedidos na API do Bling...');
-    const blingUrl = `https://api.bling.com.br/Api/v3/pedidos/vendas?dataInicial=${formatDate(from)}&dataFinal=${formatDate(to)}`;
-
-    let blingOrdersWithSku: {
-        orderId: number;
-        orderDate: string;
-        hasNF: boolean;
-        nfId: number | null;
-        qty: number;
-        situacao: string;
-        existsInFirebase: boolean;
-    }[] = [];
-
-    let totalQtyBling = 0;
-    let totalBlingOrders = 0;
-    let ordersChecked = 0;
-
-    try {
-        // Lista todos os pedidos do período
-        const allBlingOrders = await blingGetPaged(blingUrl);
-        totalBlingOrders = allBlingOrders.length;
-
-        console.log(`🌐 [BLING] Total de pedidos no período: ${totalBlingOrders}`);
-        console.log(`🌐 [BLING] Verificando quais contêm o SKU ${sku}...`);
-        console.log(`⚠️ Isso pode levar alguns minutos devido ao rate limit da API...`);
-
-        // Para cada pedido, buscar detalhes e verificar o SKU
-        // Limitamos a verificação para não demorar muito
-        const firebaseOrderIds = new Set(firebaseOrders.map(o => o.orderId));
-
-        for (const order of allBlingOrders) {
-            ordersChecked++;
-
-            if (ordersChecked % 50 === 0) {
-                console.log(`🔄 [BLING] Verificados ${ordersChecked}/${totalBlingOrders} pedidos...`);
-            }
-
-            try {
-                const details = await blingFetchWithRefresh(`https://api.bling.com.br/Api/v3/pedidos/vendas/${order.id}`);
-                const orderData = details?.data;
-
-                if (orderData && orderData.itens) {
-                    const matchingItems = orderData.itens.filter((item: any) => item.codigo === sku);
-
-                    if (matchingItems.length > 0) {
-                        const qty = matchingItems.reduce((sum: number, item: any) => sum + (item.quantidade || 0), 0);
-                        totalQtyBling += qty;
-
-                        blingOrdersWithSku.push({
-                            orderId: order.id,
-                            orderDate: orderData.data || order.data,
-                            hasNF: !!(orderData.notaFiscal && orderData.notaFiscal.id),
-                            nfId: orderData.notaFiscal?.id || null,
-                            qty,
-                            situacao: orderData.situacao?.nome || 'Desconhecido',
-                            existsInFirebase: firebaseOrderIds.has(order.id)
-                        });
-                    }
-                }
-            } catch (e: any) {
-                console.warn(`⚠️ Erro ao buscar pedido ${order.id}: ${e.message}`);
-            }
-        }
-
-    } catch (error: any) {
-        console.error(`❌ [BLING] Erro ao buscar pedidos: ${error.message}`);
-    }
-
-    console.log(`\n🌐 [BLING] Pedidos com SKU ${sku}: ${blingOrdersWithSku.length}`);
-    console.log(`🌐 [BLING] Quantidade total do SKU: ${totalQtyBling}`);
-
-    // 3. Análise de divergência
-    const missingInFirebase = blingOrdersWithSku.filter(o => !o.existsInFirebase);
-    const ordersWithoutNFInFirebase = firebaseOrders.filter(o => !o.hasNF);
-    const ordersWithNFInFirebase = firebaseOrders.filter(o => o.hasNF);
-
-    console.log('\n═══════════════════════════════════════════════════════════');
-    console.log('📋 RESULTADO DO DIAGNÓSTICO');
-    console.log('═══════════════════════════════════════════════════════════');
-    console.log(`\nSKU analisado: ${sku}`);
-    console.log(`Período: ${formatDate(from)} a ${formatDate(to)}`);
-    console.log('\n--- FIREBASE (Banco Local) ---');
-    console.log(`Pedidos encontrados: ${firebaseOrders.length}`);
-    console.log(`  - Com Nota Fiscal: ${ordersWithNFInFirebase.length}`);
-    console.log(`  - Sem Nota Fiscal: ${ordersWithoutNFInFirebase.length}`);
-    console.log(`Quantidade total: ${totalQtyFirebase}`);
-    console.log(`  - Em pedidos COM NF: ${ordersWithNFInFirebase.reduce((s, o) => s + o.qty, 0)}`);
-    console.log(`  - Em pedidos SEM NF: ${ordersWithoutNFInFirebase.reduce((s, o) => s + o.qty, 0)}`);
-
-    console.log('\n--- BLING (API) ---');
-    console.log(`Pedidos verificados: ${ordersChecked}`);
-    console.log(`Pedidos com o SKU: ${blingOrdersWithSku.length}`);
-    console.log(`Quantidade total: ${totalQtyBling}`);
-
-    console.log('\n--- DIVERGÊNCIAS ---');
-    console.log(`Diferença de quantidade: ${totalQtyBling - totalQtyFirebase}`);
-    console.log(`Pedidos faltando no Firebase: ${missingInFirebase.length}`);
-
-    if (missingInFirebase.length > 0) {
-        console.log('\nPedidos do Bling que NÃO estão no Firebase:');
-        missingInFirebase.slice(0, 20).forEach(o => {
-            console.log(`  - Pedido ${o.orderId} | Data: ${o.orderDate} | NF: ${o.hasNF ? o.nfId : 'NÃO'} | Qty: ${o.qty} | Status: ${o.situacao}`);
-        });
-        if (missingInFirebase.length > 20) {
-            console.log(`  ... e mais ${missingInFirebase.length - 20} pedidos`);
-        }
-    }
+    const hasValidToken = data.accessToken && data.expiresAt && data.expiresAt > Date.now();
 
     return {
-        sku,
-        period: { from: formatDate(from), to: formatDate(to) },
-        firebase: {
-            ordersCount: firebaseOrders.length,
-            ordersWithNF: ordersWithNFInFirebase.length,
-            ordersWithoutNF: ordersWithoutNFInFirebase.length,
-            totalQuantity: totalQtyFirebase,
-            quantityWithNF: ordersWithNFInFirebase.reduce((s, o) => s + o.qty, 0),
-            quantityWithoutNF: ordersWithoutNFInFirebase.reduce((s, o) => s + o.qty, 0),
-            orders: firebaseOrders
-        },
-        bling: {
-            totalOrdersInPeriod: totalBlingOrders,
-            ordersWithSku: blingOrdersWithSku.length,
-            totalQuantity: totalQtyBling,
-            orders: blingOrdersWithSku
-        },
-        divergence: {
-            quantityDiff: totalQtyBling - totalQtyFirebase,
-            missingOrders: missingInFirebase.length,
-            missingOrderIds: missingInFirebase.map(o => o.orderId)
-        }
+        appId: data.appId || '',
+        clientSecret: data.clientSecret ? '********' : '',
+        connected: !!hasValidToken,
+        userId: data.userId,
     };
+}
+
+export async function disconnectMercadoLivre(): Promise<void> {
+    const credentialsDocRef = doc(db, 'appConfig', 'mercadoLivreCredentials');
+    await setDoc(credentialsDocRef, {
+        accessToken: null,
+        refreshToken: null,
+        expiresAt: null,
+        userId: null,
+    }, { merge: true });
+    console.log('Mercado Livre disconnected successfully.');
 }
 
 // Re-exporting user service functions from here to avoid breaking existing imports

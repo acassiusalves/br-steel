@@ -6,12 +6,12 @@ import { Suspense } from 'react';
 import DashboardLayout from '@/components/dashboard-layout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Loader2, Copy, Save, CheckCircle, XCircle, Plug, Sheet, Database, FileDown, Search, Package, Store, Trash2 } from 'lucide-react';
+import { Loader2, Copy, Save, CheckCircle, XCircle, Plug, Sheet, Database, Trash2 } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useToast } from '@/hooks/use-toast';
-import { getBlingCredentials, saveBlingCredentials, disconnectBling, countImportedOrders, getBlingOrderDetails, smartSyncOrders, fullSyncOrders, deleteAllSalesOrders, getBlingProductBySku, getBlingChannelByOrderId, getBlingProducts, diagnoseSku, type SyncProgress } from '@/app/actions';
+import { getBlingCredentials, saveBlingCredentials, disconnectBling, countImportedOrders, smartSyncOrders, fullSyncOrders, deleteAllSalesOrders, getMercadoLivreCredentials, saveMercadoLivreCredentials, disconnectMercadoLivre, type SyncProgress } from '@/app/actions';
 import { format, startOfMonth, endOfMonth, subDays } from 'date-fns';
 import { Calendar as CalendarIcon } from 'lucide-react';
 import type { DateRange } from 'react-day-picker';
@@ -54,39 +54,41 @@ function ApiSettingsContent() {
   const [importStatus, setImportStatus] = React.useState({ current: 0, total: 0 });
   const [importProgress, setImportProgress] = React.useState(0);
   
-  const [isFetchingProducts, setIsFetchingProducts] = React.useState(false);
-  const [isFetchingOrderDetails, setIsFetchingOrderDetails] = React.useState(false);
-  const [orderIdToTest, setOrderIdToTest] = React.useState('');
-  const [isFetchingChannel, setIsFetchingChannel] = React.useState(false);
-  const [orderIdForChannel, setOrderIdForChannel] = React.useState('');
-  const [skuToTest, setSkuToTest] = React.useState('');
-  const [isFetchingProductBySku, setIsFetchingProductBySku] = React.useState(false);
-
   const [syncMode, setSyncMode] = React.useState<'smart' | 'period'>('smart');
   const [importSummary, setImportSummary] = React.useState<any>(null);
   const [syncStatusMessage, setSyncStatusMessage] = React.useState<string>('');
   const [syncProgressData, setSyncProgressData] = React.useState<SyncProgress | null>(null);
 
-  // Diagnóstico de SKU
-  const [skuToDiagnose, setSkuToDiagnose] = React.useState('CNUL440205140IN');
-  const [isDiagnosing, setIsDiagnosing] = React.useState(false);
-  const [diagnosisResult, setDiagnosisResult] = React.useState<any>(null);
+  // Mercado Livre states
+  const [mlCredentials, setMlCredentials] = React.useState({ appId: '', clientSecret: '' });
+  const [mlStatus, setMlStatus] = React.useState<ApiStatus>('unchecked');
+  const [mlCallbackUrl, setMlCallbackUrl] = React.useState('');
+  const [mlAuthUrl, setMlAuthUrl] = React.useState('');
+  const [isMlSaving, setIsMlSaving] = React.useState(false);
+  const [isMlGenerating, setIsMlGenerating] = React.useState(false);
+  const [mlUserId, setMlUserId] = React.useState<string | undefined>();
 
   const { toast } = useToast();
   
   const loadInitialData = React.useCallback(async () => {
     setIsLoading(true);
     try {
-        const [savedCreds, count] = await Promise.all([
+        const [savedCreds, count, mlCreds] = await Promise.all([
             getBlingCredentials(),
-            countImportedOrders()
+            countImportedOrders(),
+            getMercadoLivreCredentials()
         ]);
         setCredentials(prev => ({ ...prev, clientId: savedCreds.clientId || '', clientSecret: savedCreds.clientSecret || '' }));
         setImportedCount(count);
         setApiStatus(savedCreds.connected ? 'valid' : 'unchecked');
 
+        // Mercado Livre
+        setMlCredentials(prev => ({ ...prev, appId: mlCreds.appId || '', clientSecret: mlCreds.clientSecret || '' }));
+        setMlStatus(mlCreds.connected ? 'valid' : 'unchecked');
+        setMlUserId(mlCreds.userId);
+
     } catch (error) {
-        console.error("Failed to load Bling credentials:", error);
+        console.error("Failed to load credentials:", error);
         setApiStatus('invalid');
         toast({
             variant: "destructive",
@@ -101,6 +103,7 @@ function ApiSettingsContent() {
   React.useEffect(() => {
     if (typeof window !== 'undefined') {
         setCallbackUrl(`${window.location.origin}/api/callback/bling`);
+        setMlCallbackUrl(`${window.location.origin}/api/callback/mercadolivre`);
         setDate({
             from: startOfMonth(new Date()),
             to: endOfMonth(new Date()),
@@ -307,151 +310,67 @@ function ApiSettingsContent() {
       await runSync(fullSyncOrders);
   };
 
-  const handleFetchProducts = async () => {
-      setIsFetchingProducts(true);
-      setApiResponse(null);
-      try {
-          const responseData = await getBlingProducts();
-          setApiResponse(responseData);
-          toast({ title: "Busca de Produtos Concluída", description: "A resposta da API foi recebida."});
-      } catch (error: any) {
-          setApiResponse({ error: "Falha na requisição", message: error.message });
-          toast({
-              variant: "destructive",
-              title: "Erro na Busca de Produtos",
-              description: `Não foi possível buscar os dados: ${error.message}`,
-          });
-      } finally {
-          setIsFetchingProducts(false);
-      }
-  }
+  // Mercado Livre handlers
+  const handleMlInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const { id, value } = e.target;
+    const field = id.replace('ml-', '');
+    setMlCredentials(prev => ({ ...prev, [field]: value }));
+  };
 
-  const handleFetchOrderDetails = async () => {
-    if (!orderIdToTest) {
-        toast({ variant: "destructive", title: "ID do Pedido Faltando", description: "Por favor, insira um ID de pedido para testar."});
-        return;
-    }
-    setIsFetchingOrderDetails(true);
-    setApiResponse(null);
+  const handleMlSaveCredentials = async () => {
+    setIsMlSaving(true);
     try {
-        const responseData = await getBlingOrderDetails(orderIdToTest);
-        setApiResponse(responseData);
-        toast({ title: "Busca de Detalhes Concluída", description: "A resposta da API foi recebida."});
-    } catch (error: any) {
-        setApiResponse({ error: "Falha na requisição", message: error.message });
+        await saveMercadoLivreCredentials({
+            appId: mlCredentials.appId,
+            clientSecret: mlCredentials.clientSecret,
+        });
+        toast({
+            title: "Credenciais Salvas!",
+            description: "Suas credenciais do Mercado Livre foram salvas com sucesso.",
+        });
+        await loadInitialData();
+    } catch (error) {
         toast({
             variant: "destructive",
-            title: "Erro na Busca de Detalhes",
-            description: `Não foi possível buscar os dados: ${error.message}`,
+            title: "Erro ao Salvar",
+            description: "Não foi possível salvar as credenciais.",
         });
     } finally {
-        setIsFetchingOrderDetails(false);
+        setIsMlSaving(false);
     }
-  }
+  };
 
-    const handleFetchChannel = async () => {
-    if (!orderIdForChannel) {
-        toast({ variant: "destructive", title: "ID do Pedido Faltando", description: "Por favor, insira um ID de pedido para testar."});
-        return;
-    }
-    setIsFetchingChannel(true);
-    setApiResponse(null);
-    try {
-        const responseData = await getBlingChannelByOrderId(orderIdForChannel);
-        setApiResponse(responseData);
-        toast({ title: "Busca de Canal de Venda Concluída", description: "A resposta da API foi recebida."});
-    } catch (error: any) {
-        setApiResponse({ error: "Falha na requisição", message: error.message });
+  const handleMlConnect = () => {
+    if (!mlCredentials.appId) {
         toast({
             variant: "destructive",
-            title: "Erro na Busca",
-            description: `Não foi possível buscar os dados: ${error.message}`,
+            title: "App ID Faltando",
+            description: "Por favor, insira e salve seu App ID do Mercado Livre.",
         });
-    } finally {
-        setIsFetchingChannel(false);
+        return;
     }
-  }
-  
-  const handleFetchProductBySku = async () => {
-      if (!skuToTest) {
-          toast({ variant: "destructive", title: "SKU Faltando", description: "Por favor, insira um SKU para testar."});
-          return;
-      }
-      setIsFetchingProductBySku(true);
-      setApiResponse(null);
-      try {
-          const responseData = await getBlingProductBySku(skuToTest);
-          setApiResponse(responseData);
-          toast({ title: "Busca por SKU Concluída", description: "A resposta da API foi recebida."});
-      } catch (error: any) {
-          setApiResponse({ error: "Falha na requisição", message: error.message });
-          toast({
-              variant: "destructive",
-              title: "Erro na Busca por SKU",
-              description: `Não foi possível buscar os dados: ${error.message}`,
-          });
-      } finally {
-          setIsFetchingProductBySku(false);
-      }
-  }
+    setIsMlGenerating(true);
 
-  const handleDiagnoseSku = async () => {
-      if (!skuToDiagnose) {
-          toast({ variant: "destructive", title: "SKU Faltando", description: "Por favor, insira um SKU para diagnosticar."});
-          return;
-      }
-      setIsDiagnosing(true);
-      setDiagnosisResult(null);
-      setApiResponse(null);
+    // Mercado Livre OAuth URL
+    const authorizationUrl = `https://auth.mercadolivre.com.br/authorization?response_type=code&client_id=${mlCredentials.appId}&redirect_uri=${encodeURIComponent(mlCallbackUrl)}`;
 
-      toast({
-          title: "Diagnóstico Iniciado",
-          description: `Analisando SKU ${skuToDiagnose}. Isso pode levar vários minutos...`,
-      });
+    setMlAuthUrl(authorizationUrl);
+    setIsMlGenerating(false);
+  };
 
-      console.log('═══════════════════════════════════════════════════════════');
-      console.log(`🔍 [DIAGNÓSTICO FRONTEND] Iniciando análise do SKU: ${skuToDiagnose}`);
-      console.log('⚠️ Acompanhe o progresso detalhado no terminal do servidor');
-      console.log('═══════════════════════════════════════════════════════════');
-
-      try {
-          const result = await diagnoseSku(skuToDiagnose);
-          setDiagnosisResult(result);
-          setApiResponse(result);
-
-          console.log('═══════════════════════════════════════════════════════════');
-          console.log('✅ [DIAGNÓSTICO FRONTEND] Análise concluída!');
-          console.log(`📊 Firebase: ${result.firebase.ordersCount} pedidos, ${result.firebase.totalQuantity} unidades`);
-          console.log(`📊 Bling: ${result.bling.ordersWithSku} pedidos, ${result.bling.totalQuantity} unidades`);
-          console.log(`📊 Diferença: ${result.divergence.quantityDiff} unidades`);
-          console.log(`📊 Pedidos faltando no Firebase: ${result.divergence.missingOrders}`);
-          console.log('═══════════════════════════════════════════════════════════');
-
-          if (result.divergence.missingOrders > 0) {
-              toast({
-                  variant: "destructive",
-                  title: "Divergência Encontrada!",
-                  description: `${result.divergence.missingOrders} pedidos do Bling não estão no Firebase. Diferença de ${result.divergence.quantityDiff} unidades.`,
-                  duration: 10000,
-              });
-          } else {
-              toast({
-                  title: "Diagnóstico Concluído",
-                  description: `Todos os pedidos do Bling estão no Firebase. ${result.firebase.totalQuantity} unidades encontradas.`,
-              });
-          }
-      } catch (error: any) {
-          console.error('❌ [DIAGNÓSTICO FRONTEND] Erro:', error.message);
-          setApiResponse({ error: "Falha no diagnóstico", message: error.message });
-          toast({
-              variant: "destructive",
-              title: "Erro no Diagnóstico",
-              description: `Não foi possível completar a análise: ${error.message}`,
-          });
-      } finally {
-          setIsDiagnosing(false);
-      }
-  }
+  const handleMlDisconnect = async () => {
+    setIsMlSaving(true);
+    try {
+        await disconnectMercadoLivre();
+        setMlAuthUrl('');
+        await loadInitialData();
+        toast({ title: 'Desconectado!', description: 'A integração com o Mercado Livre foi removida.' });
+    } catch (error: any) {
+        toast({ variant: 'destructive', title: 'Erro ao Desconectar', description: String(error?.message || error) });
+    } finally {
+        setIsMlSaving(false);
+    }
+  };
 
     const handleDeleteAllOrders = async () => {
         setIsDeleting(true);
@@ -678,10 +597,6 @@ function ApiSettingsContent() {
                               {isImporting ? "Sincronizando..." : "Sincronização Completa"}
                           </Button>
                       )}
-                      <Button variant="outline" disabled className="flex-1">
-                          <FileDown />
-                          Exportar Dados
-                      </Button>
                   </div>
 
                   {isImporting && (
@@ -744,197 +659,6 @@ function ApiSettingsContent() {
           </div>
           
           <Separator />
-
-          <div className="space-y-6">
-            <h3 className="font-semibold text-lg">Testes de Endpoints</h3>
-              <p className="text-sm text-muted-foreground -mt-4">
-                Use as seções abaixo para fazer chamadas individuais à API do Bling e inspecionar a resposta.
-            </p>
-            <Card className="bg-muted/40">
-              <CardHeader>
-                <CardTitle className="text-base">Detalhes do Pedido</CardTitle>
-                <CardDescription>Busque os dados completos de um pedido específico pelo ID.</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="flex items-end gap-2">
-                  <div className="flex-1 space-y-1.5">
-                    <Label htmlFor="orderIdToTest">ID do Pedido no Bling</Label>
-                    <Input 
-                        id="orderIdToTest"
-                        value={orderIdToTest}
-                        onChange={(e) => setOrderIdToTest(e.target.value)}
-                        placeholder="Ex: 123456789"
-                    />
-                  </div>
-                  <Button onClick={handleFetchOrderDetails} disabled={isFetchingOrderDetails}>
-                    {isFetchingOrderDetails ? (
-                      <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Buscando...</>
-                    ) : (
-                      <><Search className="mr-2 h-4 w-4" /> Buscar Detalhes</>
-                    )}
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-
-              <Card className="bg-muted/40">
-              <CardHeader>
-                <CardTitle className="text-base">Detalhes do Canal de Venda (Marketplace)</CardTitle>
-                <CardDescription>Busque o nome do marketplace associado a um pedido pelo ID do pedido.</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="flex items-end gap-2">
-                  <div className="flex-1 space-y-1.5">
-                    <Label htmlFor="orderIdForChannel">ID do Pedido no Bling</Label>
-                    <Input 
-                        id="orderIdForChannel"
-                        value={orderIdForChannel}
-                        onChange={(e) => setOrderIdForChannel(e.target.value)}
-                        placeholder="Ex: 123456789"
-                    />
-                  </div>
-                  <Button onClick={handleFetchChannel} disabled={isFetchingChannel}>
-                    {isFetchingChannel ? (
-                      <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Buscando...</>
-                    ) : (
-                      <><Store className="mr-2 h-4 w-4" /> Buscar Canal de Venda</>
-                    )}
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card className="bg-muted/40">
-              <CardHeader>
-                <CardTitle className="text-base">Busca de Produto por SKU</CardTitle>
-                <CardDescription>Busque os dados de um produto pelo seu SKU (código).</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="flex items-end gap-2">
-                  <div className="flex-1 space-y-1.5">
-                    <Label htmlFor="skuToTest">SKU do Produto</Label>
-                    <Input 
-                        id="skuToTest"
-                        value={skuToTest}
-                        onChange={(e) => setSkuToTest(e.target.value)}
-                        placeholder="Ex: PROD-001"
-                    />
-                  </div>
-                  <Button onClick={handleFetchProductBySku} disabled={isFetchingProductBySku}>
-                    {isFetchingProductBySku ? (
-                      <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Buscando...</>
-                    ) : (
-                      <><Package className="mr-2 h-4 w-4" /> Buscar por SKU</>
-                    )}
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card className="bg-muted/40">
-              <CardHeader>
-                <CardTitle className="text-base">Lista de Produtos</CardTitle>
-                  <CardDescription>Busque os produtos cadastrados no Bling.</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <Button onClick={handleFetchProducts} disabled={isFetchingProducts}>
-                    {isFetchingProducts ? (
-                      <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Buscando...</>
-                    ) : (
-                      <><Package className="mr-2 h-4 w-4" /> Buscar Produtos</>
-                    )}
-                </Button>
-              </CardContent>
-            </Card>
-
-            <Card className="bg-amber-50 border-amber-300">
-              <CardHeader>
-                <CardTitle className="text-base text-amber-800">🔍 Diagnóstico de Divergência por SKU</CardTitle>
-                <CardDescription className="text-amber-700">
-                  Compare os dados do Firebase com o Bling para identificar pedidos faltando ou divergências de quantidade.
-                  <br /><strong>⚠️ Esta operação pode levar vários minutos</strong> pois consulta cada pedido individualmente na API do Bling.
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="flex items-end gap-2">
-                  <div className="flex-1 space-y-1.5">
-                    <Label htmlFor="skuToDiagnose">SKU para Diagnosticar</Label>
-                    <Input
-                        id="skuToDiagnose"
-                        value={skuToDiagnose}
-                        onChange={(e) => setSkuToDiagnose(e.target.value)}
-                        placeholder="Ex: CNUL440205140IN"
-                    />
-                  </div>
-                  <Button onClick={handleDiagnoseSku} disabled={isDiagnosing} className="bg-amber-600 hover:bg-amber-700">
-                    {isDiagnosing ? (
-                      <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Analisando...</>
-                    ) : (
-                      <><Search className="mr-2 h-4 w-4" /> Executar Diagnóstico</>
-                    )}
-                  </Button>
-                </div>
-
-                {isDiagnosing && (
-                    <div className="p-3 bg-amber-100 border border-amber-300 rounded-md text-sm text-amber-800">
-                        <p className="font-medium">⏳ Diagnóstico em andamento...</p>
-                        <p className="mt-1">Acompanhe o progresso detalhado no terminal do servidor ou no Console do navegador (F12).</p>
-                        <p className="mt-1">Isso pode levar vários minutos dependendo do número de pedidos no período.</p>
-                    </div>
-                )}
-
-                {diagnosisResult && (
-                    <div className="space-y-3 p-4 bg-white border rounded-md">
-                        <h4 className="font-semibold text-sm">Resultado do Diagnóstico: {diagnosisResult.sku}</h4>
-                        <p className="text-xs text-muted-foreground">Período: {diagnosisResult.period.from} a {diagnosisResult.period.to}</p>
-
-                        <div className="grid grid-cols-2 gap-4 text-sm">
-                            <div className="space-y-2">
-                                <h5 className="font-medium text-blue-700">📊 Firebase (Local)</h5>
-                                <div className="bg-blue-50 p-2 rounded">
-                                    <p>Pedidos: <strong>{diagnosisResult.firebase.ordersCount}</strong></p>
-                                    <p>Com NF: {diagnosisResult.firebase.ordersWithNF}</p>
-                                    <p>Sem NF: {diagnosisResult.firebase.ordersWithoutNF}</p>
-                                    <p>Qty Total: <strong>{diagnosisResult.firebase.totalQuantity}</strong></p>
-                                </div>
-                            </div>
-                            <div className="space-y-2">
-                                <h5 className="font-medium text-green-700">🌐 Bling (API)</h5>
-                                <div className="bg-green-50 p-2 rounded">
-                                    <p>Pedidos no período: {diagnosisResult.bling.totalOrdersInPeriod}</p>
-                                    <p>Com este SKU: <strong>{diagnosisResult.bling.ordersWithSku}</strong></p>
-                                    <p>Qty Total: <strong>{diagnosisResult.bling.totalQuantity}</strong></p>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div className={`p-3 rounded ${diagnosisResult.divergence.missingOrders > 0 ? 'bg-red-50 border border-red-200' : 'bg-green-50 border border-green-200'}`}>
-                            <h5 className={`font-medium ${diagnosisResult.divergence.missingOrders > 0 ? 'text-red-700' : 'text-green-700'}`}>
-                                {diagnosisResult.divergence.missingOrders > 0 ? '❌ Divergência Encontrada' : '✅ Dados Sincronizados'}
-                            </h5>
-                            <p className="text-sm mt-1">
-                                Diferença de quantidade: <strong>{diagnosisResult.divergence.quantityDiff}</strong> unidades
-                            </p>
-                            <p className="text-sm">
-                                Pedidos faltando no Firebase: <strong>{diagnosisResult.divergence.missingOrders}</strong>
-                            </p>
-                            {diagnosisResult.divergence.missingOrderIds.length > 0 && (
-                                <div className="mt-2">
-                                    <p className="text-xs font-medium">IDs dos pedidos faltando (primeiros 10):</p>
-                                    <p className="text-xs text-muted-foreground">
-                                        {diagnosisResult.divergence.missingOrderIds.slice(0, 10).join(', ')}
-                                        {diagnosisResult.divergence.missingOrderIds.length > 10 && ` ... e mais ${diagnosisResult.divergence.missingOrderIds.length - 10}`}
-                                    </p>
-                                </div>
-                            )}
-                        </div>
-                    </div>
-                )}
-              </CardContent>
-            </Card>
-        </div>
-
-        <Separator />
 
           <Card className="border-destructive">
             <CardHeader>
@@ -1117,6 +841,150 @@ function ApiSettingsContent() {
             {renderConnectionContent()}
           </CardContent>
         </Card>
+
+        {/* Mercado Livre Card */}
+        <Card>
+          <CardHeader>
+            <div className="flex justify-between items-start">
+                <div>
+                    <CardTitle>Mercado Livre API</CardTitle>
+                    <CardDescription>
+                      Conecte sua conta do Mercado Livre para sincronizar dados da sua loja.
+                    </CardDescription>
+                </div>
+                <div className="flex items-center gap-4">
+                    {mlUserId && mlStatus === 'valid' && (
+                         <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground bg-muted p-2 rounded-md">
+                            User ID: {mlUserId}
+                        </div>
+                    )}
+                    <ApiStatusBadge status={mlStatus} />
+                </div>
+            </div>
+          </CardHeader>
+          <CardContent>
+            {isLoading ? (
+              <div className="flex items-center justify-center p-8">
+                <Loader2 className="m-auto h-8 w-8 animate-spin" />
+              </div>
+            ) : mlStatus === 'valid' ? (
+              <div className="space-y-4">
+                <div className="flex items-center gap-3 text-left">
+                  <CheckCircle className="h-10 w-10 text-green-500 shrink-0" />
+                  <div>
+                    <p className="font-semibold">Conectado ao Mercado Livre</p>
+                    <p className="text-sm text-muted-foreground">A integração está ativa e funcionando.</p>
+                  </div>
+                </div>
+                <Button onClick={handleMlDisconnect} variant="destructive" disabled={isMlSaving}>
+                  {isMlSaving ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Desconectando...
+                    </>
+                  ) : (
+                    <>
+                      <XCircle className="mr-2 h-4 w-4" />
+                      Desconectar
+                    </>
+                  )}
+                </Button>
+              </div>
+            ) : (
+              <div className="space-y-6">
+                <div className="flex flex-col items-start gap-6 max-w-lg">
+                  <div className="w-full space-y-2">
+                    <Label htmlFor="ml-appId">App ID</Label>
+                    <Input
+                        id="ml-appId"
+                        type="text"
+                        placeholder="Cole seu App ID aqui"
+                        value={mlCredentials.appId}
+                        onChange={handleMlInputChange}
+                    />
+                  </div>
+                  <div className="w-full space-y-2">
+                    <Label htmlFor="ml-clientSecret">Client Secret</Label>
+                    <Input
+                        id="ml-clientSecret"
+                        type="password"
+                        placeholder={mlCredentials.clientSecret === '********' ? '********' : 'Cole seu Client Secret aqui'}
+                        onChange={handleMlInputChange}
+                    />
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <Button onClick={handleMlSaveCredentials} disabled={isMlSaving}>
+                      {isMlSaving ? (
+                        <>
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          Salvando...
+                        </>
+                      ) : (
+                        <>
+                          <Save className="mr-2 h-4 w-4" />
+                          Salvar Credenciais
+                        </>
+                      )}
+                    </Button>
+                    <Button onClick={handleMlConnect} disabled={isMlGenerating || !mlCredentials.appId}>
+                      {isMlGenerating ? (
+                        <>
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          Gerando...
+                        </>
+                      ) : (
+                        <>
+                          <Plug className="mr-2 h-4 w-4" />
+                          Gerar Link de Conexão
+                        </>
+                      )}
+                    </Button>
+                  </div>
+
+                  {mlAuthUrl && (
+                    <div className="w-full space-y-2">
+                      <Label htmlFor="ml-auth-url">1. Link de Autorização</Label>
+                      <div className="flex items-center gap-2">
+                        <Input
+                          id="ml-auth-url"
+                          type="text"
+                          readOnly
+                          value={mlAuthUrl}
+                          className="bg-muted"
+                        />
+                        <Button variant="outline" size="icon" onClick={() => handleCopy(mlAuthUrl)}>
+                          <Copy className="h-4 w-4" />
+                        </Button>
+                      </div>
+                      <p className="text-sm text-muted-foreground">
+                        Copie o link acima e cole em um navegador para autorizar o acesso ao Mercado Livre.
+                      </p>
+                    </div>
+                  )}
+
+                  <div className="w-full space-y-2">
+                    <Label htmlFor="ml-callback-url">2. URL de Callback</Label>
+                    <div className="flex items-center gap-2">
+                      <Input
+                        id="ml-callback-url"
+                        type="text"
+                        readOnly
+                        value={mlCallbackUrl || 'Carregando...'}
+                        className="bg-muted"
+                      />
+                      <Button variant="outline" size="icon" onClick={() => handleCopy(mlCallbackUrl)}>
+                        <Copy className="h-4 w-4" />
+                      </Button>
+                    </div>
+                    <p className="text-sm text-muted-foreground">
+                      Configure esta URL de callback no seu aplicativo do Mercado Livre Developers.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
     </div>
   );
 }
@@ -1128,7 +996,7 @@ function ApiSettingsClient() {
         <div>
           <h2 className="text-3xl font-bold tracking-tight">Conexão API</h2>
           <p className="text-muted-foreground">
-            Gerencie as configurações de conexão com a API do Bling.
+            Gerencie as configurações de conexão com suas APIs.
           </p>
         </div>
         <ApiSettingsContent />
