@@ -1,9 +1,11 @@
 // app/api/callback/mercadolivre/route.ts
 import { NextResponse } from 'next/server';
 import { saveMercadoLivreCredentials } from '@/app/actions';
+import { db } from '@/lib/firebase';
+import { doc, getDoc } from 'firebase/firestore';
 
 export async function GET(request: Request) {
-  const { searchParams } = new URL(request.url);
+  const { searchParams, origin } = new URL(request.url);
   const code = searchParams.get('code');
   const error = searchParams.get('error');
   const errorDescription = searchParams.get('error_description');
@@ -27,14 +29,33 @@ export async function GET(request: Request) {
     }, { status: 400 });
   }
 
-  // Client ID and Secret MUST come from environment variables on the server.
-  const appId = process.env.MERCADOLIVRE_APP_ID;
-  const clientSecret = process.env.MERCADOLIVRE_CLIENT_SECRET;
-  const redirectUri = process.env.MERCADOLIVRE_REDIRECT_URI;
+  // Busca credenciais do Firestore (salvas pela interface de configurações)
+  let appId = process.env.MERCADOLIVRE_APP_ID;
+  let clientSecret = process.env.MERCADOLIVRE_CLIENT_SECRET;
+  let redirectUri = process.env.MERCADOLIVRE_REDIRECT_URI;
 
-  if (!appId || !clientSecret || !redirectUri) {
-    console.error("Credenciais do Mercado Livre não configuradas nas variáveis de ambiente do servidor.");
-    return NextResponse.json({ error: 'Credenciais do Mercado Livre não configuradas no servidor.' }, { status: 500 });
+  if (!appId || !clientSecret) {
+    try {
+      const credentialsDocRef = doc(db, 'appConfig', 'mercadoLivreCredentials');
+      const docSnap = await getDoc(credentialsDocRef);
+
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        appId = appId || data.appId;
+        clientSecret = clientSecret || data.clientSecret;
+      }
+    } catch (e) {
+      console.error('Erro ao buscar credenciais do Firestore:', e);
+    }
+  }
+
+  if (!redirectUri) {
+    redirectUri = `${origin}/api/callback/mercadolivre`;
+  }
+
+  if (!appId || !clientSecret) {
+    console.error("Credenciais do Mercado Livre não encontradas no servidor nem no Firestore.");
+    return NextResponse.json({ error: 'Credenciais do Mercado Livre não configuradas. Salve o App ID e Client Secret na página de Conexão API.' }, { status: 500 });
   }
 
   try {
