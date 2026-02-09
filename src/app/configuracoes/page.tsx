@@ -63,14 +63,12 @@ function UsersPageContent() {
               setUsers(userList);
             }
 
-            // Merge de permissões otimizado
-            if (appSettings?.permissions) {
-                const mergedPermissions = {
-                    ...defaultPagePermissions,
-                    ...appSettings.permissions
-                };
-                setPermissions(mergedPermissions);
-            }
+            // Merge: defaults do código + Firestore (Firestore tem prioridade)
+            const mergedPermissions = {
+                ...defaultPagePermissions,
+                ...(appSettings?.permissions || {})
+            };
+            setPermissions(mergedPermissions);
 
             if (appSettings?.inactivePages) {
                 setInactivePages(appSettings.inactivePages);

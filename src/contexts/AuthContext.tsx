@@ -87,8 +87,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
             if (docSnap.exists()) {
                 const data = docSnap.data();
+                const firestorePerms = data.permissions || {};
+                // Merge: defaults do código + Firestore (Firestore tem prioridade)
+                const mergedPermissions = { ...pagePermissions, ...firestorePerms };
                 return {
-                    permissions: data.permissions || pagePermissions,
+                    permissions: mergedPermissions,
                     inactivePages: data.inactivePages || [],
                 };
             }
