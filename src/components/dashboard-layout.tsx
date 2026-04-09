@@ -55,6 +55,7 @@ const allNavItems = [
         subItems: [
             { href: "/vendas?tab=dashboard", icon: LayoutDashboard, label: "Dashboard" },
             { href: "/vendas?tab=listagem", icon: ShoppingCart, label: "Listagem" },
+            { href: "/vendas?tab=curva-abc", icon: BarChart3, label: "Curva ABC" },
         ]
     },
     {

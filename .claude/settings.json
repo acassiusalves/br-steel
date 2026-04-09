@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//Users/acassiusalves/br-steel/**)",
+      "Bash(grep -l \"defineFlow\\\\|ai.generate\\\\|ai.definePrompt\" /Users/acassiusalves/br-steel/node_modules/genkit/lib/*.d.ts)"
+    ]
+  }
+}
