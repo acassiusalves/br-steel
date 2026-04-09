@@ -1412,9 +1412,77 @@ export async function disconnectMercadoLivre(): Promise<void> {
         accessToken: null,
         refreshToken: null,
         expiresAt: null,
-        userId: null,
+            userId: null,
     }, { merge: true });
     console.log('Mercado Livre disconnected successfully.');
+}
+
+// --- Mercado Livre Actions ---
+
+import { searchMercadoLivreProducts } from '@/services/mercadolivre';
+import { saveProductMatchTraining, ProductMatchTraining } from '@/services/ml-firestore';
+
+export async function searchMercadoLivreAction(prevState: any, formData: FormData) {
+    try {
+        const query = formData.get('productName') as string;
+        if (!query) return { error: 'Termo de busca não informado' };
+
+        // Default constraints
+        const limit = 50; 
+        
+        const results = await searchMercadoLivreProducts(query, limit);
+        
+        return { result: results };
+    } catch (error: any) {
+        console.error('Error searching ML:', error);
+        return { error: error.message || 'Erro ao buscar produtos' };
+    }
+}
+
+// --- ML Training Action ---
+
+// Define explicit type for input to avoid circular dependency with components
+
+// Define explicit type for input to avoid circular dependency with components
+export interface MlProductTrainingInput {
+    id: string; // productId
+    productName: string;
+    mlBrand: string;
+    mlModel: string;
+    mlStorage: string | null;
+    mlRam: string | null;
+    feedSku: string;
+    feedProductName: string;
+    attributes?: any[];
+}
+
+export async function saveProductMatchTrainingAction(info: MlProductTrainingInput) {
+    try {
+        const trainingData: Omit<ProductMatchTraining, 'id' | 'createdAt'> = {
+             mlBrand: info.mlBrand,
+             mlModel: info.mlModel,
+             mlStorage: info.mlStorage,
+             mlRam: info.mlRam,
+             feedSku: info.feedSku,
+             feedProductName: info.feedProductName,
+             mlProductExample: info.productName // saving name as example or we should add id? matches mlProductExample in interface
+        };
+        await saveProductMatchTraining(trainingData);
+        return { success: true };
+    } catch (error: any) {
+        console.error('Error saving training:', error);
+        return { success: false, error: error.message };
+    }
+}
+
+export async function createCatalogListingAction(prevState: any, formData: FormData) {
+    try {
+        // Placeholder implementation
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        return { success: true, message: 'Anúncio criado com sucesso (SIMULAÇÃO)' };
+    } catch (error: any) {
+        return { error: error.message };
+    }
 }
 
 // Re-exporting user service functions from here to avoid breaking existing imports
@@ -1422,6 +1490,7 @@ export const getUsers = getUsersService;
 export const addUser = addUserService;
 export const deleteUser = deleteUserService;
 export const seedUsers = seedUsersService;
+
 
     
 
