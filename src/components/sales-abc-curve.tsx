@@ -36,12 +36,14 @@ import {
   ChevronUp,
   DollarSign,
   FileDown,
+  Filter,
   Layers,
   Loader2,
   Package,
   Search,
   Sparkles,
   TrendingUp,
+  X,
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
@@ -80,6 +82,7 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import {
@@ -232,6 +235,12 @@ export default function SalesAbcCurve() {
     Set<string>
   >(new Set());
 
+  // Product selection for focused analysis
+  const [selectedSkus, setSelectedSkus] = React.useState<Set<string>>(
+    new Set()
+  );
+  const [showOnlySelected, setShowOnlySelected] = React.useState(false);
+
   const [date, setDate] = React.useState<DateRange | undefined>(() => {
     const today = new Date();
     return { from: startOfMonth(today), to: endOfMonth(today) };
@@ -305,15 +314,19 @@ export default function SalesAbcCurve() {
     [filteredOrders, metric, groupingEnabled, skuToGroup]
   );
 
-  // Search within the resulting rows
+  // Search within the resulting rows (+ optional "only selected" filter)
   const searchedRows = React.useMemo(() => {
+    let filtered = rows;
+    if (showOnlySelected && selectedSkus.size > 0) {
+      filtered = filtered.filter((row) => selectedSkus.has(row.sku));
+    }
     const term = searchTerm.trim().toLowerCase();
-    if (!term) return rows;
-    return rows.filter(
+    if (!term) return filtered;
+    return filtered.filter(
       (row) =>
         row.sku.toLowerCase().includes(term) || row.name.toLowerCase().includes(term)
     );
-  }, [rows, searchTerm]);
+  }, [rows, searchTerm, showOnlySelected, selectedSkus]);
 
   // Reset pagination whenever the derived list shrinks/grows
   React.useEffect(() => {
@@ -339,6 +352,61 @@ export default function SalesAbcCurve() {
       })),
     [rows]
   );
+
+  // --- Selection helpers -----------------------------------------------------
+  const hasSelection = selectedSkus.size > 0;
+
+  const toggleRowSelection = (sku: string) => {
+    setSelectedSkus((prev) => {
+      const next = new Set(prev);
+      if (next.has(sku)) next.delete(sku);
+      else next.add(sku);
+      return next;
+    });
+  };
+
+  const toggleAllVisible = () => {
+    const visibleSkus = searchedRows.map((r) => r.sku);
+    const allSelected = visibleSkus.every((s) => selectedSkus.has(s));
+    setSelectedSkus((prev) => {
+      const next = new Set(prev);
+      if (allSelected) {
+        visibleSkus.forEach((s) => next.delete(s));
+      } else {
+        visibleSkus.forEach((s) => next.add(s));
+      }
+      return next;
+    });
+  };
+
+  const clearSelection = () => {
+    setSelectedSkus(new Set());
+    setShowOnlySelected(false);
+  };
+
+  /** Summary recalculated from only the selected rows. */
+  const selectionSummary = React.useMemo(() => {
+    if (!hasSelection) return null;
+    const selected = rows.filter((r) => selectedSkus.has(r.sku));
+    const totalRevenue = selected.reduce((s, r) => s + r.revenue, 0);
+    const totalQuantity = selected.reduce((s, r) => s + r.quantity, 0);
+    const counts = { A: 0, B: 0, C: 0 };
+    const revenueByClass = { A: 0, B: 0, C: 0 };
+    for (const r of selected) {
+      counts[r.class] += 1;
+      revenueByClass[r.class] += r.revenue;
+    }
+    return {
+      totalRevenue,
+      totalQuantity,
+      totalSkus: selected.length,
+      counts,
+      revenueByClass,
+    };
+  }, [hasSelection, rows, selectedSkus]);
+
+  /** The summary to display — selection-specific when active, full otherwise. */
+  const displaySummary = selectionSummary ?? summary;
 
   // --- AI grouping handlers -------------------------------------------------
 
@@ -794,23 +862,53 @@ export default function SalesAbcCurve() {
         </div>
       </div>
 
+      {/* Selection banner */}
+      {hasSelection && (
+        <div className="mt-8 flex items-center gap-3 rounded-lg border border-primary/30 bg-primary/5 px-4 py-3">
+          <Filter className="h-4 w-4 text-primary" />
+          <span className="text-sm font-medium">
+            {selectedSkus.size} produto{selectedSkus.size !== 1 ? 's' : ''} selecionado{selectedSkus.size !== 1 ? 's' : ''} — totais abaixo refletem apenas a seleção.
+          </span>
+          <div className="ml-auto flex items-center gap-2">
+            <Button
+              variant={showOnlySelected ? 'default' : 'outline'}
+              size="sm"
+              onClick={() => setShowOnlySelected((v) => !v)}
+              className="h-7 gap-1 text-xs"
+            >
+              <Filter className="h-3 w-3" />
+              {showOnlySelected ? 'Mostrar todos' : 'Ver apenas selecionados'}
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={clearSelection}
+              className="h-7 gap-1 text-xs"
+            >
+              <X className="h-3 w-3" />
+              Limpar seleção
+            </Button>
+          </div>
+        </div>
+      )}
+
       {/* Stat cards */}
       <div className="mt-8 grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         <StatCard
-          title="Faturamento no período"
-          primary={formatCurrency(summary.totalRevenue)}
-          secondary={`${formatInteger(summary.totalSkus)} SKUs • ${formatInteger(
-            summary.totalQuantity
+          title={hasSelection ? 'Faturamento (seleção)' : 'Faturamento no período'}
+          primary={formatCurrency(displaySummary.totalRevenue)}
+          secondary={`${formatInteger(displaySummary.totalSkus)} SKUs • ${formatInteger(
+            displaySummary.totalQuantity
           )} unidades`}
           icon={DollarSign}
           isLoading={isLoading}
         />
         <StatCard
           title="Classe A"
-          primary={`${summary.counts.A} SKUs`}
-          secondary={`${formatCurrency(summary.revenueByClass.A)} (${formatPercent(
-            summary.totalRevenue > 0
-              ? summary.revenueByClass.A / summary.totalRevenue
+          primary={`${displaySummary.counts.A} SKUs`}
+          secondary={`${formatCurrency(displaySummary.revenueByClass.A)} (${formatPercent(
+            displaySummary.totalRevenue > 0
+              ? displaySummary.revenueByClass.A / displaySummary.totalRevenue
               : 0,
             1
           )})`}
@@ -820,10 +918,10 @@ export default function SalesAbcCurve() {
         />
         <StatCard
           title="Classe B"
-          primary={`${summary.counts.B} SKUs`}
-          secondary={`${formatCurrency(summary.revenueByClass.B)} (${formatPercent(
-            summary.totalRevenue > 0
-              ? summary.revenueByClass.B / summary.totalRevenue
+          primary={`${displaySummary.counts.B} SKUs`}
+          secondary={`${formatCurrency(displaySummary.revenueByClass.B)} (${formatPercent(
+            displaySummary.totalRevenue > 0
+              ? displaySummary.revenueByClass.B / displaySummary.totalRevenue
               : 0,
             1
           )})`}
@@ -833,10 +931,10 @@ export default function SalesAbcCurve() {
         />
         <StatCard
           title="Classe C"
-          primary={`${summary.counts.C} SKUs`}
-          secondary={`${formatCurrency(summary.revenueByClass.C)} (${formatPercent(
-            summary.totalRevenue > 0
-              ? summary.revenueByClass.C / summary.totalRevenue
+          primary={`${displaySummary.counts.C} SKUs`}
+          secondary={`${formatCurrency(displaySummary.revenueByClass.C)} (${formatPercent(
+            displaySummary.totalRevenue > 0
+              ? displaySummary.revenueByClass.C / displaySummary.totalRevenue
               : 0,
             1
           )})`}
@@ -957,6 +1055,16 @@ export default function SalesAbcCurve() {
             <Table>
               <TableHeader>
                 <TableRow>
+                  <TableHead className="w-10">
+                    <Checkbox
+                      checked={
+                        searchedRows.length > 0 &&
+                        searchedRows.every((r) => selectedSkus.has(r.sku))
+                      }
+                      onCheckedChange={toggleAllVisible}
+                      aria-label="Selecionar todos"
+                    />
+                  </TableHead>
                   <TableHead className="w-12">#</TableHead>
                   <TableHead>SKU</TableHead>
                   <TableHead>Produto</TableHead>
@@ -972,15 +1080,23 @@ export default function SalesAbcCurve() {
               <TableBody>
                 {isLoading ? (
                   <TableRow>
-                    <TableCell colSpan={10} className="h-24 text-center">
+                    <TableCell colSpan={11} className="h-24 text-center">
                       <Loader2 className="mx-auto h-6 w-6 animate-spin" />
                     </TableCell>
                   </TableRow>
                 ) : paginatedRows.length > 0 ? (
                   paginatedRows.flatMap((row) => {
                     const expanded = expandedGroupRows.has(row.sku);
+                    const isSelected = selectedSkus.has(row.sku);
                     const mainRow = (
-                      <TableRow key={row.sku}>
+                      <TableRow key={row.sku} className={isSelected ? 'bg-primary/5' : undefined}>
+                        <TableCell>
+                          <Checkbox
+                            checked={isSelected}
+                            onCheckedChange={() => toggleRowSelection(row.sku)}
+                            aria-label={`Selecionar ${row.name}`}
+                          />
+                        </TableCell>
                         <TableCell className="font-medium text-muted-foreground">
                           {row.rank}
                         </TableCell>
@@ -1039,6 +1155,7 @@ export default function SalesAbcCurve() {
                     const detailRow = (
                       <TableRow key={`${row.sku}-expanded`} className="bg-muted/30">
                         <TableCell />
+                        <TableCell />
                         <TableCell colSpan={9} className="py-2">
                           <div className="text-xs text-muted-foreground">
                             SKUs no grupo:
@@ -1058,7 +1175,7 @@ export default function SalesAbcCurve() {
                   })
                 ) : (
                   <TableRow>
-                    <TableCell colSpan={10} className="h-24 text-center">
+                    <TableCell colSpan={11} className="h-24 text-center">
                       Nenhuma venda no período selecionado.
                     </TableCell>
                   </TableRow>

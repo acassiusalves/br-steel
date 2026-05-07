@@ -1366,61 +1366,380 @@ export async function deleteAllSalesOrders(): Promise<{ deletedCount: number }> 
 // MERCADO LIVRE INTEGRATION
 // ============================================================================
 
-export interface MercadoLivreCredentials {
-    appId?: string;
-    clientSecret?: string;
-    accessToken?: string;
-    refreshToken?: string;
-    expiresAt?: number;
-    userId?: string;
+import type { MercadoLivreCredentials } from '@/lib/types';
+import { adminDb } from '@/lib/firebase-admin';
+import {
+    saveMlCredentialsAdmin,
+    getPrimaryMlAccountIdAdmin,
+    setPrimaryMlAccountIdAdmin,
+} from '@/services/firestore-admin';
+
+/**
+ * Persiste credenciais (parcial) do ML em `mercadoLivreAccounts/{accountId}`.
+ * Se `accountId` não for passado, usa a conta primária. Compatível com o uso
+ * antigo da UI que passa apenas `{ appId, clientSecret }`.
+ */
+export async function saveMercadoLivreCredentials(
+    partial: Partial<MercadoLivreCredentials>,
+    accountId?: string
+): Promise<void> {
+    const id = accountId || await getPrimaryMlAccountIdAdmin();
+    await saveMlCredentialsAdmin(id, partial);
+
+    // Se ainda não há conta primária definida, define esta como primária.
+    try {
+        const primarySnap = await adminDb.collection('appConfig').doc('mlPrimaryAccount').get();
+        if (!primarySnap.exists) {
+            await setPrimaryMlAccountIdAdmin(id);
+        }
+    } catch (e) {
+        console.warn('saveMercadoLivreCredentials: não foi possível verificar/definir conta primária', e);
+    }
+    console.log(`Mercado Livre credentials saved for account ${id}.`);
 }
 
-export async function saveMercadoLivreCredentials(partial: Partial<MercadoLivreCredentials>): Promise<void> {
-    const credentialsDocRef = doc(db, 'appConfig', 'mercadoLivreCredentials');
-    await setDoc(credentialsDocRef, partial, { merge: true });
-    console.log('Mercado Livre credentials saved successfully.');
-}
-
-export async function getMercadoLivreCredentials(): Promise<{
+/**
+ * Lê credenciais da conta primária (ou da informada) em `mercadoLivreAccounts`.
+ * `connected` é `true` quando há `refreshToken` armazenado — o serviço de token
+ * cuida de renovar o accessToken sob demanda.
+ */
+export async function getMercadoLivreCredentials(accountId?: string): Promise<{
     appId: string;
     clientSecret: string;
     connected: boolean;
     userId?: string;
+    accountId: string;
+    expiresAt?: number;
 }> {
-    const credentialsDocRef = doc(db, 'appConfig', 'mercadoLivreCredentials');
-    const docSnap = await getDoc(credentialsDocRef);
+    const id = accountId || await getPrimaryMlAccountIdAdmin();
+    const snap = await adminDb.collection('mercadoLivreAccounts').doc(id).get();
 
-    if (!docSnap.exists()) {
-        return { appId: '', clientSecret: '', connected: false };
+    if (!snap.exists) {
+        return { appId: '', clientSecret: '', connected: false, accountId: id };
     }
 
-    const data = docSnap.data() as MercadoLivreCredentials;
-
-    const hasValidToken = data.accessToken && data.expiresAt && data.expiresAt > Date.now();
+    const data = snap.data() as MercadoLivreCredentials;
+    const userId = data.userId !== undefined ? String(data.userId) : undefined;
 
     return {
-        appId: data.appId || '',
+        appId: data.appId || data.clientId || '',
         clientSecret: data.clientSecret ? '********' : '',
-        connected: !!hasValidToken,
-        userId: data.userId,
+        connected: !!data.refreshToken,
+        userId,
+        accountId: id,
+        expiresAt: data.expiresAt,
     };
 }
 
-export async function disconnectMercadoLivre(): Promise<void> {
-    const credentialsDocRef = doc(db, 'appConfig', 'mercadoLivreCredentials');
-    await setDoc(credentialsDocRef, {
+/** Resumo público (sem segredos) de uma conta ML para listagem na UI. */
+export type MlAccountSummary = {
+    accountId: string;
+    appId?: string;
+    userId?: string;
+    nickname?: string;
+    sellerId?: number;
+    accountName?: string;
+    apiStatus?: 'unchecked' | 'valid' | 'invalid';
+    expiresAt?: number;
+    lastRefreshedAt?: number;
+    hasRefreshToken: boolean;
+    isPrimary: boolean;
+};
+
+/**
+ * Lista todas as contas em `mercadoLivreAccounts` (sem expor clientSecret nem
+ * tokens). Marca a conta primária via `appConfig/mlPrimaryAccount.accountId`.
+ */
+export async function listMlAccounts(): Promise<MlAccountSummary[]> {
+    const [snap, primaryId] = await Promise.all([
+        adminDb.collection('mercadoLivreAccounts').get(),
+        getPrimaryMlAccountIdAdmin().catch(() => undefined),
+    ]);
+
+    return snap.docs.map((d) => {
+        const data = d.data() as MercadoLivreCredentials;
+        const userId = data.userId !== undefined ? String(data.userId) : undefined;
+        return {
+            accountId: d.id,
+            appId: data.appId || data.clientId,
+            userId,
+            nickname: data.nickname,
+            sellerId: data.sellerId,
+            accountName: data.accountName,
+            apiStatus: data.apiStatus,
+            expiresAt: data.expiresAt,
+            lastRefreshedAt: data.lastRefreshedAt,
+            hasRefreshToken: !!data.refreshToken,
+            isPrimary: d.id === primaryId,
+        };
+    });
+}
+
+/**
+ * Define qual conta é a primária (usada por `getMlToken` quando nenhuma é
+ * passada). Não altera tokens — apenas o ponteiro em `appConfig/mlPrimaryAccount`.
+ */
+export async function setPrimaryMlAccount(accountId: string): Promise<void> {
+    if (!accountId) throw new Error('accountId é obrigatório.');
+    const exists = await adminDb.collection('mercadoLivreAccounts').doc(accountId).get();
+    if (!exists.exists) {
+        throw new Error(`Conta '${accountId}' não existe em mercadoLivreAccounts.`);
+    }
+    await setPrimaryMlAccountIdAdmin(accountId);
+}
+
+/**
+ * Remove permanentemente uma conta de `mercadoLivreAccounts`. Se for a primária,
+ * elege outra automaticamente; se não houver nenhuma, limpa o ponteiro primário.
+ */
+export async function deleteMlAccount(accountId: string): Promise<void> {
+    if (!accountId) throw new Error('accountId é obrigatório.');
+    await adminDb.collection('mercadoLivreAccounts').doc(accountId).delete();
+
+    // Se essa era a primária, escolhe outra ou limpa o ponteiro.
+    const primaryId = await getPrimaryMlAccountIdAdmin().catch(() => undefined);
+    if (primaryId === accountId) {
+        const remaining = await adminDb.collection('mercadoLivreAccounts').limit(1).get();
+        if (!remaining.empty) {
+            await setPrimaryMlAccountIdAdmin(remaining.docs[0].id);
+        } else {
+            await adminDb.collection('appConfig').doc('mlPrimaryAccount').delete().catch(() => {});
+        }
+    }
+}
+
+/**
+ * Limpa tokens da conta (mantém appId/clientSecret para reconexão fácil).
+ */
+export async function disconnectMercadoLivre(accountId?: string): Promise<void> {
+    const id = accountId || await getPrimaryMlAccountIdAdmin();
+    await adminDb.collection('mercadoLivreAccounts').doc(id).set({
         accessToken: null,
         refreshToken: null,
         expiresAt: null,
-            userId: null,
+        scope: null,
+        userId: null,
+        lastRefreshedAt: null,
     }, { merge: true });
-    console.log('Mercado Livre disconnected successfully.');
+    console.log(`Mercado Livre disconnected for account ${id}.`);
+}
+
+/**
+ * Migração one-shot: copia credenciais de `appConfig/mercadoLivreCredentials`
+ * (formato antigo) para `mercadoLivreAccounts/{userId || 'primary'}` e define
+ * a conta primária. Idempotente: se o destino já existir, faz merge.
+ */
+export async function migrateMlCredentialsAction(): Promise<{
+    migrated: boolean;
+    accountId?: string;
+    reason?: string;
+}> {
+    const legacyRef = adminDb.collection('appConfig').doc('mercadoLivreCredentials');
+    const legacySnap = await legacyRef.get();
+
+    if (!legacySnap.exists) {
+        return { migrated: false, reason: 'Documento legado não existe.' };
+    }
+
+    const data = legacySnap.data() as MercadoLivreCredentials;
+
+    if (!data.appId && !data.clientId && !data.refreshToken && !data.accessToken) {
+        return { migrated: false, reason: 'Documento legado está vazio.' };
+    }
+
+    const userId = data.userId !== undefined ? String(data.userId) : undefined;
+    const accountId = userId || 'primary';
+
+    await saveMlCredentialsAdmin(accountId, {
+        appId: data.appId || data.clientId,
+        clientSecret: data.clientSecret,
+        accessToken: data.accessToken,
+        refreshToken: data.refreshToken,
+        expiresAt: data.expiresAt,
+        userId,
+    });
+
+    await setPrimaryMlAccountIdAdmin(accountId);
+
+    console.log(`[MIGRATION] Credenciais migradas de appConfig/mercadoLivreCredentials para mercadoLivreAccounts/${accountId}`);
+    return { migrated: true, accountId };
 }
 
 // --- Mercado Livre Actions ---
 
-import { searchMercadoLivreProducts } from '@/services/mercadolivre';
+import { searchMercadoLivreProducts, getMlToken } from '@/services/mercadolivre';
 import { saveProductMatchTraining, ProductMatchTraining } from '@/services/ml-firestore';
+import * as crypto from 'crypto';
+
+const ML_AUTH_BASE = 'https://auth.mercadolivre.com.br/authorization';
+const ML_OAUTH_SCOPE = 'offline_access read write';
+const ML_OAUTH_STATE_TTL_MS = 10 * 60 * 1000; // 10 minutos
+
+/**
+ * Resolve o redirect_uri canônico. Prefere a env var (deve bater EXATAMENTE
+ * com o cadastrado no painel ML Developers). Cai no `requestOrigin` apenas em
+ * dev/preview quando a env não estiver definida.
+ */
+function resolveMlRedirectUri(requestOrigin?: string): string {
+    const fromEnv = process.env.MERCADOLIVRE_REDIRECT_URI;
+    if (fromEnv) return fromEnv;
+    if (requestOrigin) return `${requestOrigin}/api/callback/mercadolivre`;
+    throw new Error('MERCADOLIVRE_REDIRECT_URI não configurada e requestOrigin não fornecido.');
+}
+
+function base64UrlEncode(buf: Buffer): string {
+    return buf.toString('base64')
+        .replace(/=/g, '')
+        .replace(/\+/g, '-')
+        .replace(/\//g, '_');
+}
+
+/**
+ * Inicia o fluxo OAuth do Mercado Livre com proteção contra CSRF (state) e
+ * PKCE (code_challenge S256). Retorna a URL de autorização para o frontend
+ * apenas redirecionar o usuário.
+ *
+ * O `state` e o `code_verifier` ficam armazenados em
+ * `appConfig/mlOAuthStates/{state}` com TTL de 10 min e são usados/invalidados
+ * pelo callback.
+ */
+export async function startMlOAuth(params: {
+    appId: string;
+    requestOrigin?: string; // p/ derivar redirect_uri quando env ausente (dev)
+}): Promise<{ authorizationUrl: string; state: string }> {
+    if (!params.appId) {
+        throw new Error('appId é obrigatório para iniciar o OAuth.');
+    }
+
+    const state = crypto.randomUUID();
+    // 32 bytes → 43 chars base64url (dentro do range RFC 7636: 43-128)
+    const codeVerifier = base64UrlEncode(crypto.randomBytes(32));
+    const codeChallenge = base64UrlEncode(
+        crypto.createHash('sha256').update(codeVerifier).digest()
+    );
+    const redirectUri = resolveMlRedirectUri(params.requestOrigin);
+
+    await adminDb.collection('appConfig')
+        .doc('mlOAuthStates')
+        .collection('pending')
+        .doc(state)
+        .set({
+            codeVerifier,
+            redirectUri,
+            appId: params.appId,
+            createdAt: Date.now(),
+            expiresAt: Date.now() + ML_OAUTH_STATE_TTL_MS,
+        });
+
+    const url = new URL(ML_AUTH_BASE);
+    url.searchParams.set('response_type', 'code');
+    url.searchParams.set('client_id', params.appId);
+    url.searchParams.set('redirect_uri', redirectUri);
+    url.searchParams.set('scope', ML_OAUTH_SCOPE);
+    url.searchParams.set('state', state);
+    url.searchParams.set('code_challenge', codeChallenge);
+    url.searchParams.set('code_challenge_method', 'S256');
+
+    return { authorizationUrl: url.toString(), state };
+}
+
+/**
+ * Lê e consome (one-shot) um state pendente. Retorna `null` se inexistente
+ * ou expirado.
+ */
+export async function consumeMlOAuthState(state: string): Promise<{
+    codeVerifier: string;
+    redirectUri: string;
+    appId: string;
+} | null> {
+    if (!state) return null;
+    const ref = adminDb.collection('appConfig')
+        .doc('mlOAuthStates')
+        .collection('pending')
+        .doc(state);
+    const snap = await ref.get();
+    if (!snap.exists) return null;
+    const data = snap.data() as {
+        codeVerifier: string;
+        redirectUri: string;
+        appId: string;
+        expiresAt: number;
+    };
+    // Apaga sempre — single-use
+    await ref.delete().catch(() => {});
+    if (!data.expiresAt || data.expiresAt < Date.now()) return null;
+    return {
+        codeVerifier: data.codeVerifier,
+        redirectUri: data.redirectUri,
+        appId: data.appId,
+    };
+}
+
+export type MlConnectionPing = {
+    status: 'valid' | 'invalid';
+    accountId: string;
+    userId?: string | number;
+    nickname?: string;
+    siteId?: string;
+    checkedAt: number;
+    error?: string;
+};
+
+/**
+ * Verifica conectividade real com a API do ML para uma conta:
+ *   1. Obtém um access_token (forçando refresh se preciso) via getMlToken
+ *   2. Chama GET /users/me
+ *   3. Persiste status + lastCheckedAt na conta
+ *
+ * Retorna o resultado para a UI usar imediatamente.
+ */
+export async function pingMlConnection(accountId?: string): Promise<MlConnectionPing> {
+    const id = accountId || await getPrimaryMlAccountIdAdmin();
+    const checkedAt = Date.now();
+
+    try {
+        const token = await getMlToken(id);
+
+        const r = await fetch('https://api.mercadolibre.com/users/me', {
+            headers: { Authorization: `Bearer ${token}` },
+            cache: 'no-store',
+        });
+
+        if (!r.ok) {
+            const text = await r.text();
+            const errMsg = `users/me retornou ${r.status}: ${text.slice(0, 200)}`;
+            await saveMlCredentialsAdmin(id, {
+                apiStatus: 'invalid',
+                lastRefreshedAt: checkedAt,
+            } as Partial<MercadoLivreCredentials>);
+            return { status: 'invalid', accountId: id, checkedAt, error: errMsg };
+        }
+
+        const data = await r.json();
+        await saveMlCredentialsAdmin(id, {
+            apiStatus: 'valid',
+            userId: data.id,
+            nickname: data.nickname,
+        } as Partial<MercadoLivreCredentials>);
+
+        return {
+            status: 'valid',
+            accountId: id,
+            userId: data.id,
+            nickname: data.nickname,
+            siteId: data.site_id,
+            checkedAt,
+        };
+    } catch (e: any) {
+        const errMsg = e?.message || String(e);
+        try {
+            await saveMlCredentialsAdmin(id, {
+                apiStatus: 'invalid',
+            } as Partial<MercadoLivreCredentials>);
+        } catch (_) { /* swallow secondary error */ }
+        return { status: 'invalid', accountId: id, checkedAt, error: errMsg };
+    }
+}
 
 export async function searchMercadoLivreAction(prevState: any, formData: FormData) {
     try {

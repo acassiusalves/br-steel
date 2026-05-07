@@ -11,7 +11,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useToast } from '@/hooks/use-toast';
-import { getBlingCredentials, saveBlingCredentials, disconnectBling, countImportedOrders, smartSyncOrders, fullSyncOrders, deleteAllSalesOrders, getMercadoLivreCredentials, saveMercadoLivreCredentials, disconnectMercadoLivre, type SyncProgress } from '@/app/actions';
+import { getBlingCredentials, saveBlingCredentials, disconnectBling, countImportedOrders, smartSyncOrders, fullSyncOrders, deleteAllSalesOrders, getMercadoLivreCredentials, saveMercadoLivreCredentials, disconnectMercadoLivre, pingMlConnection, startMlOAuth, listMlAccounts, setPrimaryMlAccount, deleteMlAccount, type SyncProgress, type MlAccountSummary } from '@/app/actions';
 import { format, startOfMonth, endOfMonth, subDays } from 'date-fns';
 import { Calendar as CalendarIcon } from 'lucide-react';
 import type { DateRange } from 'react-day-picker';
@@ -67,25 +67,57 @@ function ApiSettingsContent() {
   const [isMlSaving, setIsMlSaving] = React.useState(false);
   const [isMlGenerating, setIsMlGenerating] = React.useState(false);
   const [mlUserId, setMlUserId] = React.useState<string | undefined>();
+  const [mlAccounts, setMlAccounts] = React.useState<MlAccountSummary[]>([]);
+  const [mlAccountActionId, setMlAccountActionId] = React.useState<string | null>(null);
 
   const { toast } = useToast();
   
+  const refreshMlAccounts = React.useCallback(async () => {
+    try {
+        const list = await listMlAccounts();
+        setMlAccounts(list);
+    } catch (e) {
+        console.error('Erro ao listar contas ML:', e);
+    }
+  }, []);
+
   const loadInitialData = React.useCallback(async () => {
     setIsLoading(true);
     try {
-        const [savedCreds, count, mlCreds] = await Promise.all([
+        const [savedCreds, count, mlCreds, accounts] = await Promise.all([
             getBlingCredentials(),
             countImportedOrders(),
-            getMercadoLivreCredentials()
+            getMercadoLivreCredentials(),
+            listMlAccounts(),
         ]);
+        setMlAccounts(accounts);
         setCredentials(prev => ({ ...prev, clientId: savedCreds.clientId || '', clientSecret: savedCreds.clientSecret || '' }));
         setImportedCount(count);
         setApiStatus(savedCreds.connected ? 'valid' : 'unchecked');
 
-        // Mercado Livre
+        // Mercado Livre — exibe o estado armazenado primeiro
         setMlCredentials(prev => ({ ...prev, appId: mlCreds.appId || '', clientSecret: mlCreds.clientSecret || '' }));
         setMlStatus(mlCreds.connected ? 'valid' : 'unchecked');
         setMlUserId(mlCreds.userId);
+
+        // ...e revalida em background contra a API do ML (refresh + /users/me).
+        // Não faz await — não bloqueia o load principal.
+        if (mlCreds.connected) {
+            pingMlConnection(mlCreds.accountId)
+                .then((ping) => {
+                    setMlStatus(ping.status);
+                    if (ping.userId !== undefined) {
+                        setMlUserId(String(ping.userId));
+                    }
+                    if (ping.status === 'invalid') {
+                        console.warn('[ML PING] Conexão inválida:', ping.error);
+                    }
+                })
+                .catch((err) => {
+                    console.error('[ML PING] Erro inesperado:', err);
+                    setMlStatus('invalid');
+                });
+        }
 
     } catch (error) {
         console.error("Failed to load credentials:", error);
@@ -320,10 +352,16 @@ function ApiSettingsContent() {
   const handleMlSaveCredentials = async () => {
     setIsMlSaving(true);
     try {
-        await saveMercadoLivreCredentials({
+        // Importante: se o usuário não redigitou o secret (campo mascarado como
+        // "********"), NÃO enviar — evita sobrescrever o secret real no banco.
+        const payload: { appId: string; clientSecret?: string } = {
             appId: mlCredentials.appId,
-            clientSecret: mlCredentials.clientSecret,
-        });
+        };
+        if (mlCredentials.clientSecret && mlCredentials.clientSecret !== '********') {
+            payload.clientSecret = mlCredentials.clientSecret;
+        }
+
+        await saveMercadoLivreCredentials(payload);
         toast({
             title: "Credenciais Salvas!",
             description: "Suas credenciais do Mercado Livre foram salvas com sucesso.",
@@ -340,7 +378,7 @@ function ApiSettingsContent() {
     }
   };
 
-  const handleMlConnect = () => {
+  const handleMlConnect = async () => {
     if (!mlCredentials.appId) {
         toast({
             variant: "destructive",
@@ -350,12 +388,23 @@ function ApiSettingsContent() {
         return;
     }
     setIsMlGenerating(true);
-
-    // Mercado Livre OAuth URL
-    const authorizationUrl = `https://auth.mercadolivre.com.br/authorization?response_type=code&client_id=${mlCredentials.appId}&redirect_uri=${encodeURIComponent(mlCallbackUrl)}`;
-
-    setMlAuthUrl(authorizationUrl);
-    setIsMlGenerating(false);
+    try {
+        // Server action gera state CSRF + code_verifier (PKCE S256), persiste em
+        // Firestore (TTL 10 min) e devolve a URL pronta com scope e challenge.
+        const { authorizationUrl } = await startMlOAuth({
+            appId: mlCredentials.appId,
+            requestOrigin: typeof window !== 'undefined' ? window.location.origin : undefined,
+        });
+        setMlAuthUrl(authorizationUrl);
+    } catch (e: any) {
+        toast({
+            variant: 'destructive',
+            title: 'Erro ao gerar link',
+            description: e?.message || 'Não foi possível iniciar o fluxo OAuth do Mercado Livre.',
+        });
+    } finally {
+        setIsMlGenerating(false);
+    }
   };
 
   const handleMlDisconnect = async () => {
@@ -369,6 +418,62 @@ function ApiSettingsContent() {
         toast({ variant: 'destructive', title: 'Erro ao Desconectar', description: String(error?.message || error) });
     } finally {
         setIsMlSaving(false);
+    }
+  };
+
+  const handleAccountDisconnect = async (accountId: string) => {
+    setMlAccountActionId(accountId);
+    try {
+        await disconnectMercadoLivre(accountId);
+        await refreshMlAccounts();
+        toast({ title: 'Conta desconectada', description: 'Tokens removidos. Você pode reconectar quando quiser.' });
+    } catch (error: any) {
+        toast({ variant: 'destructive', title: 'Erro', description: String(error?.message || error) });
+    } finally {
+        setMlAccountActionId(null);
+    }
+  };
+
+  const handleSetPrimary = async (accountId: string) => {
+    setMlAccountActionId(accountId);
+    try {
+        await setPrimaryMlAccount(accountId);
+        await refreshMlAccounts();
+        toast({ title: 'Conta primária atualizada' });
+    } catch (error: any) {
+        toast({ variant: 'destructive', title: 'Erro', description: String(error?.message || error) });
+    } finally {
+        setMlAccountActionId(null);
+    }
+  };
+
+  const handleDeleteAccount = async (accountId: string) => {
+    setMlAccountActionId(accountId);
+    try {
+        await deleteMlAccount(accountId);
+        await refreshMlAccounts();
+        toast({ title: 'Conta removida', description: 'Conta excluída de mercadoLivreAccounts.' });
+    } catch (error: any) {
+        toast({ variant: 'destructive', title: 'Erro ao excluir conta', description: String(error?.message || error) });
+    } finally {
+        setMlAccountActionId(null);
+    }
+  };
+
+  const handlePingAccount = async (accountId: string) => {
+    setMlAccountActionId(accountId);
+    try {
+        const ping = await pingMlConnection(accountId);
+        if (ping.status === 'valid') {
+            toast({ title: 'Conexão OK', description: ping.nickname ? `Olá, ${ping.nickname}` : 'Token renovado com sucesso.' });
+        } else {
+            toast({ variant: 'destructive', title: 'Conexão inválida', description: ping.error || 'Falha ao validar token.' });
+        }
+        await refreshMlAccounts();
+    } catch (error: any) {
+        toast({ variant: 'destructive', title: 'Erro', description: String(error?.message || error) });
+    } finally {
+        setMlAccountActionId(null);
     }
   };
 
@@ -849,13 +954,13 @@ function ApiSettingsContent() {
                 <div>
                     <CardTitle>Mercado Livre API</CardTitle>
                     <CardDescription>
-                      Conecte sua conta do Mercado Livre para sincronizar dados da sua loja.
+                      Conecte uma ou mais contas do Mercado Livre para sincronizar dados das suas lojas.
                     </CardDescription>
                 </div>
                 <div className="flex items-center gap-4">
-                    {mlUserId && mlStatus === 'valid' && (
+                    {mlAccounts.length > 0 && (
                          <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground bg-muted p-2 rounded-md">
-                            User ID: {mlUserId}
+                            {mlAccounts.length} {mlAccounts.length === 1 ? 'conta' : 'contas'}
                         </div>
                     )}
                     <ApiStatusBadge status={mlStatus} />
@@ -867,31 +972,109 @@ function ApiSettingsContent() {
               <div className="flex items-center justify-center p-8">
                 <Loader2 className="m-auto h-8 w-8 animate-spin" />
               </div>
-            ) : mlStatus === 'valid' ? (
-              <div className="space-y-4">
-                <div className="flex items-center gap-3 text-left">
-                  <CheckCircle className="h-10 w-10 text-green-500 shrink-0" />
-                  <div>
-                    <p className="font-semibold">Conectado ao Mercado Livre</p>
-                    <p className="text-sm text-muted-foreground">A integração está ativa e funcionando.</p>
-                  </div>
-                </div>
-                <Button onClick={handleMlDisconnect} variant="destructive" disabled={isMlSaving}>
-                  {isMlSaving ? (
-                    <>
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      Desconectando...
-                    </>
-                  ) : (
-                    <>
-                      <XCircle className="mr-2 h-4 w-4" />
-                      Desconectar
-                    </>
-                  )}
-                </Button>
-              </div>
             ) : (
               <div className="space-y-6">
+                {/* Lista de contas conectadas */}
+                {mlAccounts.length > 0 && (
+                  <div className="space-y-2">
+                    <Label>Contas conectadas</Label>
+                    <div className="space-y-2">
+                      {mlAccounts.map((acc) => {
+                        const status: ApiStatus = acc.apiStatus || (acc.hasRefreshToken ? 'valid' : 'unchecked');
+                        const isBusy = mlAccountActionId === acc.accountId;
+                        return (
+                          <div key={acc.accountId} className="flex items-center justify-between gap-3 rounded-md border p-3">
+                            <div className="flex items-center gap-3 min-w-0">
+                              <ApiStatusBadge status={status} />
+                              <div className="min-w-0">
+                                <div className="flex items-center gap-2">
+                                  <p className="font-semibold truncate">
+                                    {acc.nickname || acc.accountName || acc.accountId}
+                                  </p>
+                                  {acc.isPrimary && (
+                                    <Badge variant="default" className="bg-blue-600 hover:bg-blue-700">Primária</Badge>
+                                  )}
+                                </div>
+                                <p className="text-xs text-muted-foreground truncate">
+                                  {acc.userId ? `User ID: ${acc.userId}` : `ID: ${acc.accountId}`}
+                                  {acc.appId ? ` · App ${acc.appId}` : ''}
+                                </p>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                disabled={isBusy}
+                                onClick={() => handlePingAccount(acc.accountId)}
+                              >
+                                {isBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Testar'}
+                              </Button>
+                              {!acc.isPrimary && (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  disabled={isBusy}
+                                  onClick={() => handleSetPrimary(acc.accountId)}
+                                >
+                                  Tornar primária
+                                </Button>
+                              )}
+                              {acc.hasRefreshToken && (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  disabled={isBusy}
+                                  onClick={() => handleAccountDisconnect(acc.accountId)}
+                                >
+                                  Desconectar
+                                </Button>
+                              )}
+                              <AlertDialog>
+                                <AlertDialogTrigger asChild>
+                                  <Button size="sm" variant="ghost" className="text-destructive" disabled={isBusy}>
+                                    <Trash2 className="h-4 w-4" />
+                                  </Button>
+                                </AlertDialogTrigger>
+                                <AlertDialogContent>
+                                  <AlertDialogHeader>
+                                    <AlertDialogTitle>Excluir conta?</AlertDialogTitle>
+                                    <AlertDialogDescription>
+                                      Isso remove a conta de <code>mercadoLivreAccounts</code>. Para reconectar, será necessário refazer o OAuth.
+                                    </AlertDialogDescription>
+                                  </AlertDialogHeader>
+                                  <AlertDialogFooter>
+                                    <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                                    <AlertDialogAction onClick={() => handleDeleteAccount(acc.accountId)}>
+                                      Excluir
+                                    </AlertDialogAction>
+                                  </AlertDialogFooter>
+                                </AlertDialogContent>
+                              </AlertDialog>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                <Separator />
+
+                {/* Formulário para adicionar nova conta */}
+                <div>
+                  <Label className="text-base">
+                    {mlAccounts.length === 0 ? 'Conectar primeira conta' : 'Adicionar outra conta'}
+                  </Label>
+                  <p className="text-sm text-muted-foreground mb-4">
+                    Use as credenciais do app no painel do Mercado Livre Developers para iniciar o OAuth.
+                  </p>
+                </div>
+              </div>
+            )}
+            {/* Formulário OAuth (sempre visível abaixo da lista) */}
+            {!isLoading && (
+              <div className="space-y-6 pt-2">
                 <div className="flex flex-col items-start gap-6 max-w-lg">
                   <div className="w-full space-y-2">
                     <Label htmlFor="ml-appId">App ID</Label>

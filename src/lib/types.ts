@@ -594,12 +594,15 @@ export interface PickingNotice {
 
 
 export interface MercadoLivreCredentials {
-  appId?: string; // Antigo nome do campo
-  clientId?: string; // Nome correto usado no Firestore
-  clientSecret: string;
+  appId?: string; // Application ID (campo canônico)
+  clientId?: string; // Alias legado para appId, mantido para retrocompatibilidade
+  clientSecret?: string;
   redirectUri?: string;
-  refreshToken: string;
+  refreshToken?: string;
   accessToken?: string;
+  expiresAt?: number; // Timestamp em ms de quando o accessToken expira
+  scope?: string;
+  lastRefreshedAt?: number; // Timestamp do último refresh bem-sucedido
   apiStatus?: ApiKeyStatus;
   nickname?: string;
   id_conta_autenticada?: string;
@@ -607,6 +610,63 @@ export interface MercadoLivreCredentials {
   accountName?: string;
   sellerId?: number;
   status?: string;
+}
+
+/**
+ * Tópicos de notificação do Mercado Livre.
+ * Lista oficial: https://developers.mercadolivre.com.br/en_us/products-receive-notifications
+ */
+export type MlWebhookTopic =
+  | 'orders_v2'
+  | 'items'
+  | 'questions'
+  | 'messages'
+  | 'shipments'
+  | 'payments'
+  | 'claims'
+  | 'orders_feedback'
+  | 'item_competition'
+  | 'public_candidates'
+  | 'public_offers'
+  | 'catalog_suggestions'
+  | 'invoices'
+  | 'leads_credits'
+  | 'stock_fulfillment'
+  | 'best_price_eligible'
+  | 'items_prices'
+  | 'flex-handshakes'
+  | 'stock_locations'
+  | 'user_products_families'
+  | 'quotations'
+  | string; // permite tópicos novos sem quebrar
+
+/** Payload exato enviado pelo ML em cada notificação. */
+export interface MlWebhookEvent {
+  _id: string;
+  resource: string; // ex.: "/orders/2195160686"
+  user_id: number;
+  topic: MlWebhookTopic;
+  application_id: number;
+  attempts: number;
+  sent: string;     // ISO timestamp
+  received: string; // ISO timestamp (do ML, não nosso)
+}
+
+/** Status de processamento interno de um evento de webhook. */
+export type MlWebhookProcessingStatus =
+  | 'received'   // recebido, ainda não processado
+  | 'processing' // em processamento
+  | 'processed'  // concluído com sucesso
+  | 'failed'     // falhou após retries internos
+  | 'ignored';   // tópico não tratado pelo sistema
+
+/** Documento persistido em `mercadoLivreWebhookEvents/{id}`. */
+export interface MlWebhookEventRecord extends MlWebhookEvent {
+  status: MlWebhookProcessingStatus;
+  receivedAt: number;       // Date.now() do nosso lado
+  processedAt?: number;
+  processingError?: string;
+  accountId?: string;       // accountId que casou com user_id (se conhecido)
 }
 
 export interface MagaluCredentials {

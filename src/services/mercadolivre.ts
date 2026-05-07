@@ -1,26 +1,39 @@
 'use server';
 
-import { getMlCredentialsByIdAdmin } from '@/services/firestore-admin';
+import {
+    getMlCredentialsByIdAdmin,
+    getPrimaryMlAccountIdAdmin,
+    saveMlCredentialsAdmin,
+} from '@/services/firestore-admin';
 import type { MercadoLivreCredentials, CreateListingPayload, MyItem } from '@/lib/types';
 import { adminDb } from '@/lib/firebase-admin';
 import { getShippingCostFor1To2Kg } from '@/lib/utils';
 import { getStockRange, getStockLevel, STOCK_RANGES } from '@/lib/ml-utils';
 
 
+/**
+ * Resposta completa do endpoint /oauth/token do ML.
+ * IMPORTANTE: `refresh_token` é single-use; um novo é retornado a cada chamada
+ * de refresh e DEVE ser persistido para a próxima renovação funcionar.
+ */
 type MlTokenResponse = {
   access_token: string;
-  expires_in: number; // em segundos (geralmente ~21600 = 6h)
+  token_type?: string;
+  expires_in: number;     // segundos (geralmente 21600 = 6h)
+  scope?: string;
+  user_id?: number;
+  refresh_token?: string;
 };
 
-// Agora o cache guarda tokens por conta
+// Cache em memória de access_tokens por conta (evita refresh excessivo dentro
+// do mesmo runtime). Não substitui a persistência em Firestore.
 const _tokenCache: Record<string, { token: string; expiresAt: number }> = {};
-const TOKEN_LIFETIME_MS = 6 * 60 * 60 * 1000; // 6 horas em ms
 
 export async function generateNewAccessToken(creds: {
     appId: string;
     clientSecret: string;
     refreshToken: string;
-}): Promise<string> {
+}): Promise<MlTokenResponse> {
     const body = new URLSearchParams({
         grant_type: 'refresh_token',
         client_id: creds.appId,
@@ -41,50 +54,86 @@ export async function generateNewAccessToken(creds: {
         throw new Error(`Falha ao renovar token do Mercado Livre: ${msg}`);
     }
 
-    const j = await r.json() as MlTokenResponse;
-    return j.access_token;
+    return await r.json() as MlTokenResponse;
 }
 
 export async function getMlToken(accountIdentifier?: string): Promise<string> {
-  // CORREÇÃO: Usa o ID fornecido ou o fallback para a conta principal 'BtAEb2czqoWWZnNwUkRq'
-  const accountIdToUse = accountIdentifier || "BtAEb2czqoWWZnNwUkRq";
+  const accountIdToUse = accountIdentifier || await getPrimaryMlAccountIdAdmin();
   const cacheKey = accountIdToUse;
-  
+
   const cached = _tokenCache[cacheKey];
 
   if (cached && Date.now() < cached.expiresAt - 60_000) { // 60s buffer
     return cached.token;
   }
 
-  // A função getMlCredentialsByIdAdmin busca pelo ID do documento na coleção 'mercadoLivreAccounts' usando Admin SDK
   console.log(`[getMlToken] Buscando credenciais para conta ${accountIdToUse}...`);
   const creds = await getMlCredentialsByIdAdmin(accountIdToUse);
 
   if (!creds) {
     throw new Error(`Credenciais para a conta ID '${cacheKey}' do Mercado Livre não foram encontradas.`);
   }
-  
-  // Tenta renovar o token SEMPRE que possível
+
   const appId = creds.appId || creds.clientId; // Suporta ambos os nomes de campo
 
+  // Se já temos um accessToken válido em Firestore, use-o sem fazer refresh.
+  if (creds.accessToken && creds.expiresAt && creds.expiresAt > Date.now() + 60_000) {
+    _tokenCache[cacheKey] = {
+      token: creds.accessToken,
+      expiresAt: creds.expiresAt,
+    };
+    return creds.accessToken;
+  }
+
+  // Caso contrário, tenta renovar usando refresh_token.
   if (appId && creds.clientSecret && creds.refreshToken) {
     try {
-      const token = await generateNewAccessToken({
+      const tokenResp = await generateNewAccessToken({
         appId: appId,
         clientSecret: creds.clientSecret,
         refreshToken: creds.refreshToken,
       });
-      _tokenCache[cacheKey] = {
-        token: token,
-        expiresAt: Date.now() + TOKEN_LIFETIME_MS,
+
+      const newExpiresAt = Date.now() + (Number(tokenResp.expires_in) * 1000);
+
+      // CRÍTICO: persistir o novo refresh_token (single-use). Sem isso, a
+      // próxima renovação falhará com `invalid_grant`.
+      const updates: Partial<MercadoLivreCredentials> = {
+        accessToken: tokenResp.access_token,
+        expiresAt: newExpiresAt,
+        scope: tokenResp.scope,
+        lastRefreshedAt: Date.now(),
       };
-      return token;
-    } catch(e) {
-      console.error("Falha ao renovar o token, usando o accessToken do banco de dados como fallback.", e);
+      if (tokenResp.refresh_token) {
+        updates.refreshToken = tokenResp.refresh_token;
+      }
+      if (tokenResp.user_id !== undefined) {
+        updates.userId = tokenResp.user_id;
+      }
+
+      try {
+        await saveMlCredentialsAdmin(accountIdToUse, updates);
+      } catch (persistErr: any) {
+        console.error(
+          `[getMlToken] FALHA ao persistir novo refresh_token para conta ${accountIdToUse}. ` +
+          `Próximo refresh pode falhar.`,
+          persistErr?.message || persistErr
+        );
+      }
+
+      _tokenCache[cacheKey] = {
+        token: tokenResp.access_token,
+        expiresAt: newExpiresAt,
+      };
+      return tokenResp.access_token;
+    } catch (e) {
+      console.error("Falha ao renovar o token. Tentando fallback de accessToken existente.", e);
+      // Fallback: se ainda houver um accessToken (mesmo que possivelmente
+      // expirado), usa-o. O caller decide se a chamada subsequente falha.
       if (creds.accessToken) {
         _tokenCache[cacheKey] = {
           token: creds.accessToken,
-          expiresAt: Date.now() + TOKEN_LIFETIME_MS,
+          expiresAt: Date.now() + 60_000, // cache curto, força nova tentativa em breve
         };
         return creds.accessToken;
       }
@@ -92,16 +141,16 @@ export async function getMlToken(accountIdentifier?: string): Promise<string> {
     }
   }
 
-  // Se não tiver refresh token mas tiver um access token, usa ele como último recurso
+  // Último recurso: usa accessToken existente sem renovar.
   if (creds.accessToken) {
     _tokenCache[cacheKey] = {
       token: creds.accessToken,
-      expiresAt: Date.now() + TOKEN_LIFETIME_MS,
+      expiresAt: creds.expiresAt || (Date.now() + 60_000),
     };
     return creds.accessToken;
   }
 
-  throw new Error(`Credenciais para a conta '${cacheKey}' do ML estão incompletas. Verifique clientId (ou appId), clientSecret e refreshToken.`);
+  throw new Error(`Credenciais para a conta '${cacheKey}' do ML estão incompletas. Verifique appId (ou clientId), clientSecret e refreshToken.`);
 }
 
 

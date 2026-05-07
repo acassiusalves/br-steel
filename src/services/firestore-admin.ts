@@ -54,10 +54,57 @@ export async function loadMyItemsAdmin(): Promise<MyItem[]> {
 }
 
 /**
- * Busca credenciais do Mercado Livre pelo ID da conta usando Admin SDK
+ * ID legado mantido apenas como último fallback durante a transição para
+ * `appConfig/mlPrimaryAccount`. Pode ser removido após confirmar a migração.
+ */
+const LEGACY_PRIMARY_ML_ACCOUNT_ID = "BtAEb2czqoWWZnNwUkRq";
+
+/**
+ * Lê o ID da conta primária do ML (configurável em `appConfig/mlPrimaryAccount.accountId`).
+ * Cai no ID legado se ainda não foi configurada.
+ */
+export async function getPrimaryMlAccountIdAdmin(): Promise<string> {
+    try {
+        const snap = await adminDb.collection('appConfig').doc('mlPrimaryAccount').get();
+        if (snap.exists) {
+            const data = snap.data() as { accountId?: string };
+            if (data?.accountId) return data.accountId;
+        }
+    } catch (e: any) {
+        console.warn('[ADMIN] getPrimaryMlAccountIdAdmin: erro lendo config, usando legado.', e?.message);
+    }
+    return LEGACY_PRIMARY_ML_ACCOUNT_ID;
+}
+
+/**
+ * Define a conta primária do ML em `appConfig/mlPrimaryAccount`.
+ */
+export async function setPrimaryMlAccountIdAdmin(accountId: string): Promise<void> {
+    await adminDb.collection('appConfig').doc('mlPrimaryAccount').set(
+        { accountId, updatedAt: Date.now() },
+        { merge: true }
+    );
+}
+
+/**
+ * Persiste credenciais (parcial) de uma conta ML em `mercadoLivreAccounts/{accountId}`
+ * usando Admin SDK. Use `merge: true` para não sobrescrever campos não enviados.
+ */
+export async function saveMlCredentialsAdmin(
+    accountId: string,
+    partial: Partial<MercadoLivreCredentials>
+): Promise<void> {
+    if (!accountId) throw new Error('saveMlCredentialsAdmin: accountId é obrigatório');
+    const ref = adminDb.collection('mercadoLivreAccounts').doc(accountId);
+    await ref.set(partial, { merge: true });
+}
+
+/**
+ * Busca credenciais do Mercado Livre pelo ID da conta usando Admin SDK.
+ * Se nenhum ID for passado, usa a conta primária configurada em `appConfig/mlPrimaryAccount`.
  */
 export async function getMlCredentialsByIdAdmin(accountId?: string): Promise<MercadoLivreCredentials | null> {
-    const accountIdToUse = accountId || "BtAEb2czqoWWZnNwUkRq"; // Usa o ID fixo como fallback
+    const accountIdToUse = accountId || await getPrimaryMlAccountIdAdmin();
     console.log(`[ADMIN] getMlCredentialsByIdAdmin: Buscando conta ${accountIdToUse}...`);
 
     if (!accountIdToUse) {
@@ -73,18 +120,19 @@ export async function getMlCredentialsByIdAdmin(accountId?: string): Promise<Mer
             return docSnap.data() as MercadoLivreCredentials;
         }
 
-        // Se o ID específico não foi encontrado, e não era o fallback, tenta o fallback.
-        if (accountId && accountId !== "BtAEb2czqoWWZnNwUkRq") {
-            console.log(`[ADMIN] getMlCredentialsByIdAdmin: Tentando fallback...`);
-            const fallbackRef = adminDb.collection('mercadoLivreAccounts').doc("BtAEb2czqoWWZnNwUkRq");
-            const fallbackSnap = await fallbackRef.get();
-            if (fallbackSnap.exists) {
-                console.log(`[ADMIN] getMlCredentialsByIdAdmin: Usando fallback`);
-                return fallbackSnap.data() as MercadoLivreCredentials;
+        // Se o ID específico não foi encontrado, e não era a primária, tenta a primária.
+        const primaryId = await getPrimaryMlAccountIdAdmin();
+        if (accountId && accountId !== primaryId) {
+            console.log(`[ADMIN] getMlCredentialsByIdAdmin: Tentando conta primária ${primaryId}...`);
+            const primaryRef = adminDb.collection('mercadoLivreAccounts').doc(primaryId);
+            const primarySnap = await primaryRef.get();
+            if (primarySnap.exists) {
+                console.log(`[ADMIN] getMlCredentialsByIdAdmin: Usando conta primária`);
+                return primarySnap.data() as MercadoLivreCredentials;
             }
         }
 
-        throw new Error(`Nenhuma credencial encontrada para a conta ID '${accountIdToUse}' ou para a conta padrão.`);
+        throw new Error(`Nenhuma credencial encontrada para a conta ID '${accountIdToUse}' ou para a conta primária.`);
     } catch (error: any) {
         console.error('[ADMIN] getMlCredentialsByIdAdmin ERRO:', error?.message || error);
         throw error;

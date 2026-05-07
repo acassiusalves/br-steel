@@ -1,17 +1,24 @@
 // app/api/callback/mercadolivre/route.ts
 import { NextResponse } from 'next/server';
-import { saveMercadoLivreCredentials } from '@/app/actions';
-import { db } from '@/lib/firebase';
-import { doc, getDoc } from 'firebase/firestore';
+import { adminDb } from '@/lib/firebase-admin';
+import {
+  saveMlCredentialsAdmin,
+  setPrimaryMlAccountIdAdmin,
+  getPrimaryMlAccountIdAdmin,
+} from '@/services/firestore-admin';
+import { consumeMlOAuthState } from '@/app/actions';
+import type { MercadoLivreCredentials } from '@/lib/types';
 
 export async function GET(request: Request) {
   const { searchParams, origin } = new URL(request.url);
   const code = searchParams.get('code');
+  const state = searchParams.get('state');
   const error = searchParams.get('error');
   const errorDescription = searchParams.get('error_description');
 
   console.log('🔐 [MERCADO LIVRE CALLBACK] URL completa:', request.url);
   console.log('🔐 [MERCADO LIVRE CALLBACK] code:', code);
+  console.log('🔐 [MERCADO LIVRE CALLBACK] state:', state);
   console.log('🔐 [MERCADO LIVRE CALLBACK] error:', error);
 
   // Se o Mercado Livre retornou um erro
@@ -29,28 +36,41 @@ export async function GET(request: Request) {
     }, { status: 400 });
   }
 
-  // Busca credenciais do Firestore (salvas pela interface de configurações)
-  let appId = process.env.MERCADOLIVRE_APP_ID;
-  let clientSecret = process.env.MERCADOLIVRE_CLIENT_SECRET;
-  let redirectUri = process.env.MERCADOLIVRE_REDIRECT_URI;
+  // Validação do `state` (CSRF) e recuperação do `code_verifier` (PKCE).
+  // Se a UI iniciou o fluxo via `startMlOAuth`, o state existe no Firestore.
+  if (!state) {
+    return NextResponse.json({
+      error: 'Parâmetro state ausente. Por motivos de segurança, inicie o fluxo pela página de Conexão API.',
+    }, { status: 400 });
+  }
 
-  if (!appId || !clientSecret) {
+  const pendingState = await consumeMlOAuthState(state);
+  if (!pendingState) {
+    return NextResponse.json({
+      error: 'State inválido, expirado ou já utilizado. Por motivos de segurança, inicie o fluxo novamente.',
+    }, { status: 400 });
+  }
+
+  // Resolve credenciais (env > conta primária no Firestore). O appId já vem
+  // pinado no state — usamos como verificação cruzada.
+  let appId: string | undefined = process.env.MERCADOLIVRE_APP_ID || pendingState.appId;
+  let clientSecret: string | undefined = process.env.MERCADOLIVRE_CLIENT_SECRET;
+  // redirect_uri DEVE bater com o que foi enviado no authorize. Usa o que está
+  // pinado no state (gerado pela mesma resolveMlRedirectUri da action).
+  const redirectUri = pendingState.redirectUri;
+
+  if (!clientSecret) {
     try {
-      const credentialsDocRef = doc(db, 'appConfig', 'mercadoLivreCredentials');
-      const docSnap = await getDoc(credentialsDocRef);
-
-      if (docSnap.exists()) {
-        const data = docSnap.data();
-        appId = appId || data.appId;
+      const primaryId = await getPrimaryMlAccountIdAdmin();
+      const docSnap = await adminDb.collection('mercadoLivreAccounts').doc(primaryId).get();
+      if (docSnap.exists) {
+        const data = docSnap.data() as MercadoLivreCredentials;
+        appId = appId || data.appId || data.clientId;
         clientSecret = clientSecret || data.clientSecret;
       }
     } catch (e) {
-      console.error('Erro ao buscar credenciais do Firestore:', e);
+      console.error('Erro ao buscar credenciais primárias do Firestore:', e);
     }
-  }
-
-  if (!redirectUri) {
-    redirectUri = `${origin}/api/callback/mercadolivre`;
   }
 
   if (!appId || !clientSecret) {
@@ -71,6 +91,7 @@ export async function GET(request: Request) {
         client_secret: clientSecret,
         code: code,
         redirect_uri: redirectUri,
+        code_verifier: pendingState.codeVerifier,
       }),
       cache: "no-store",
     });
@@ -78,14 +99,34 @@ export async function GET(request: Request) {
     const tokenData = await tokenResponse.json();
 
     if (tokenResponse.ok) {
-      // Save tokens securely in Firestore
-      await saveMercadoLivreCredentials({
+      // Identificador da conta = user_id do ML quando disponível.
+      // Fallback para a conta primária atual ou 'primary' se ainda não houver nenhuma.
+      const userId = tokenData.user_id?.toString();
+      const primaryId = await getPrimaryMlAccountIdAdmin().catch(() => 'primary');
+      const accountId = userId || primaryId || 'primary';
+
+      const payload: Partial<MercadoLivreCredentials> = {
         appId: appId,
+        clientSecret: clientSecret,
         accessToken: tokenData.access_token,
         refreshToken: tokenData.refresh_token,
         expiresAt: Date.now() + (Number(tokenData.expires_in) * 1000),
-        userId: tokenData.user_id?.toString(),
-      });
+        scope: tokenData.scope,
+        userId: userId,
+        lastRefreshedAt: Date.now(),
+      };
+
+      await saveMlCredentialsAdmin(accountId, payload);
+
+      // Se ainda não havia conta primária definida, define esta como primária.
+      try {
+        const currentPrimaryDoc = await adminDb.collection('appConfig').doc('mlPrimaryAccount').get();
+        if (!currentPrimaryDoc.exists) {
+          await setPrimaryMlAccountIdAdmin(accountId);
+        }
+      } catch (e) {
+        console.warn('Não foi possível definir conta primária:', e);
+      }
 
       return new NextResponse(`
         <html>
