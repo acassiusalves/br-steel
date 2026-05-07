@@ -1595,6 +1595,73 @@ function base64UrlEncode(buf: Buffer): string {
 }
 
 /**
+ * Resolve o App ID do Mercado Livre a partir de (em ordem de preferência):
+ *   1. Parâmetro explícito
+ *   2. Env var `MERCADOLIVRE_APP_ID`
+ *   3. Doc legado `appConfig/mercadoLivreCredentials`
+ *   4. Primeira conta em `mercadoLivreAccounts` que tenha appId
+ */
+async function resolveMlAppId(explicit?: string): Promise<string | null> {
+    if (explicit) return explicit;
+    if (process.env.MERCADOLIVRE_APP_ID) return process.env.MERCADOLIVRE_APP_ID;
+
+    try {
+        const legacy = await adminDb.collection('appConfig').doc('mercadoLivreCredentials').get();
+        if (legacy.exists) {
+            const data = legacy.data() as MercadoLivreCredentials;
+            if (data.appId || data.clientId) return (data.appId || data.clientId) as string;
+        }
+    } catch (_) { /* ignore */ }
+
+    try {
+        const snap = await adminDb.collection('mercadoLivreAccounts').limit(5).get();
+        for (const d of snap.docs) {
+            const data = d.data() as MercadoLivreCredentials;
+            if (data.appId) return data.appId;
+            if (data.clientId) return data.clientId;
+        }
+    } catch (_) { /* ignore */ }
+
+    return null;
+}
+
+/**
+ * Indica à UI se o app está pronto para conexão (tem App ID configurado).
+ * Não retorna o secret (segurança).
+ */
+export async function getMlAppConfigStatus(): Promise<{
+    configured: boolean;
+    source: 'env' | 'legacy-firestore' | 'account-firestore' | 'none';
+    appIdMasked?: string;
+}> {
+    if (process.env.MERCADOLIVRE_APP_ID) {
+        const a = process.env.MERCADOLIVRE_APP_ID;
+        return { configured: true, source: 'env', appIdMasked: a.slice(0, 4) + '…' + a.slice(-4) };
+    }
+    try {
+        const legacy = await adminDb.collection('appConfig').doc('mercadoLivreCredentials').get();
+        if (legacy.exists) {
+            const data = legacy.data() as MercadoLivreCredentials;
+            const a = data.appId || data.clientId;
+            if (a && data.clientSecret) {
+                return { configured: true, source: 'legacy-firestore', appIdMasked: a.slice(0, 4) + '…' + a.slice(-4) };
+            }
+        }
+    } catch (_) { /* ignore */ }
+    try {
+        const snap = await adminDb.collection('mercadoLivreAccounts').limit(5).get();
+        for (const d of snap.docs) {
+            const data = d.data() as MercadoLivreCredentials;
+            const a = data.appId || data.clientId;
+            if (a && data.clientSecret) {
+                return { configured: true, source: 'account-firestore', appIdMasked: a.slice(0, 4) + '…' + a.slice(-4) };
+            }
+        }
+    } catch (_) { /* ignore */ }
+    return { configured: false, source: 'none' };
+}
+
+/**
  * Inicia o fluxo OAuth do Mercado Livre com proteção contra CSRF (state) e
  * PKCE (code_challenge S256). Retorna a URL de autorização para o frontend
  * apenas redirecionar o usuário.
@@ -1602,13 +1669,18 @@ function base64UrlEncode(buf: Buffer): string {
  * O `state` e o `code_verifier` ficam armazenados em
  * `appConfig/mlOAuthStates/{state}` com TTL de 10 min e são usados/invalidados
  * pelo callback.
+ *
+ * `appId` é opcional: quando ausente, é resolvido server-side a partir de env
+ * vars ou Firestore (fluxo "Connect with Mercado Livre" sem o usuário ter de
+ * cadastrar credenciais manualmente).
  */
-export async function startMlOAuth(params: {
-    appId: string;
+export async function startMlOAuth(params?: {
+    appId?: string;
     requestOrigin?: string; // p/ derivar redirect_uri quando env ausente (dev)
 }): Promise<{ authorizationUrl: string; state: string }> {
-    if (!params.appId) {
-        throw new Error('appId é obrigatório para iniciar o OAuth.');
+    const appId = await resolveMlAppId(params?.appId);
+    if (!appId) {
+        throw new Error('App ID do Mercado Livre não configurado. Defina MERCADOLIVRE_APP_ID nas variáveis de ambiente.');
     }
 
     const state = crypto.randomUUID();
@@ -1617,7 +1689,7 @@ export async function startMlOAuth(params: {
     const codeChallenge = base64UrlEncode(
         crypto.createHash('sha256').update(codeVerifier).digest()
     );
-    const redirectUri = resolveMlRedirectUri(params.requestOrigin);
+    const redirectUri = resolveMlRedirectUri(params?.requestOrigin);
 
     await adminDb.collection('appConfig')
         .doc('mlOAuthStates')
@@ -1626,14 +1698,14 @@ export async function startMlOAuth(params: {
         .set({
             codeVerifier,
             redirectUri,
-            appId: params.appId,
+            appId,
             createdAt: Date.now(),
             expiresAt: Date.now() + ML_OAUTH_STATE_TTL_MS,
         });
 
     const url = new URL(ML_AUTH_BASE);
     url.searchParams.set('response_type', 'code');
-    url.searchParams.set('client_id', params.appId);
+    url.searchParams.set('client_id', appId);
     url.searchParams.set('redirect_uri', redirectUri);
     url.searchParams.set('scope', ML_OAUTH_SCOPE);
     url.searchParams.set('state', state);

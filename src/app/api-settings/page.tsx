@@ -11,7 +11,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useToast } from '@/hooks/use-toast';
-import { getBlingCredentials, saveBlingCredentials, disconnectBling, countImportedOrders, smartSyncOrders, fullSyncOrders, deleteAllSalesOrders, getMercadoLivreCredentials, saveMercadoLivreCredentials, disconnectMercadoLivre, pingMlConnection, startMlOAuth, listMlAccounts, setPrimaryMlAccount, deleteMlAccount, type SyncProgress, type MlAccountSummary } from '@/app/actions';
+import { getBlingCredentials, saveBlingCredentials, disconnectBling, countImportedOrders, smartSyncOrders, fullSyncOrders, deleteAllSalesOrders, getMercadoLivreCredentials, saveMercadoLivreCredentials, disconnectMercadoLivre, pingMlConnection, startMlOAuth, listMlAccounts, setPrimaryMlAccount, deleteMlAccount, getMlAppConfigStatus, type SyncProgress, type MlAccountSummary } from '@/app/actions';
 import { format, startOfMonth, endOfMonth, subDays } from 'date-fns';
 import { Calendar as CalendarIcon } from 'lucide-react';
 import type { DateRange } from 'react-day-picker';
@@ -69,6 +69,7 @@ function ApiSettingsContent() {
   const [mlUserId, setMlUserId] = React.useState<string | undefined>();
   const [mlAccounts, setMlAccounts] = React.useState<MlAccountSummary[]>([]);
   const [mlAccountActionId, setMlAccountActionId] = React.useState<string | null>(null);
+  const [mlAppConfig, setMlAppConfig] = React.useState<{ configured: boolean; source: string; appIdMasked?: string } | null>(null);
 
   const { toast } = useToast();
   
@@ -84,13 +85,15 @@ function ApiSettingsContent() {
   const loadInitialData = React.useCallback(async () => {
     setIsLoading(true);
     try {
-        const [savedCreds, count, mlCreds, accounts] = await Promise.all([
+        const [savedCreds, count, mlCreds, accounts, appCfg] = await Promise.all([
             getBlingCredentials(),
             countImportedOrders(),
             getMercadoLivreCredentials(),
             listMlAccounts(),
+            getMlAppConfigStatus(),
         ]);
         setMlAccounts(accounts);
+        setMlAppConfig(appCfg);
         setCredentials(prev => ({ ...prev, clientId: savedCreds.clientId || '', clientSecret: savedCreds.clientSecret || '' }));
         setImportedCount(count);
         setApiStatus(savedCreds.connected ? 'valid' : 'unchecked');
@@ -379,32 +382,27 @@ function ApiSettingsContent() {
   };
 
   const handleMlConnect = async () => {
-    if (!mlCredentials.appId) {
-        toast({
-            variant: "destructive",
-            title: "App ID Faltando",
-            description: "Por favor, insira e salve seu App ID do Mercado Livre.",
-        });
-        return;
-    }
     setIsMlGenerating(true);
     try {
-        // Server action gera state CSRF + code_verifier (PKCE S256), persiste em
-        // Firestore (TTL 10 min) e devolve a URL pronta com scope e challenge.
+        // Server action resolve App ID/Secret server-side (env > Firestore),
+        // gera state CSRF + PKCE S256 e devolve a URL.
         const { authorizationUrl } = await startMlOAuth({
-            appId: mlCredentials.appId,
             requestOrigin: typeof window !== 'undefined' ? window.location.origin : undefined,
         });
-        setMlAuthUrl(authorizationUrl);
+        // Redireciona o navegador direto para a tela de autorização do ML.
+        if (typeof window !== 'undefined') {
+            window.location.href = authorizationUrl;
+        }
     } catch (e: any) {
+        setIsMlGenerating(false);
         toast({
             variant: 'destructive',
-            title: 'Erro ao gerar link',
+            title: 'Erro ao iniciar conexão',
             description: e?.message || 'Não foi possível iniciar o fluxo OAuth do Mercado Livre.',
         });
-    } finally {
-        setIsMlGenerating(false);
     }
+    // Não setamos isMlGenerating(false) no caso de sucesso porque a página
+    // está sendo navegada para fora.
   };
 
   const handleMlDisconnect = async () => {
@@ -1061,108 +1059,54 @@ function ApiSettingsContent() {
 
                 <Separator />
 
-                {/* Formulário para adicionar nova conta */}
-                <div>
-                  <Label className="text-base">
-                    {mlAccounts.length === 0 ? 'Conectar primeira conta' : 'Adicionar outra conta'}
-                  </Label>
-                  <p className="text-sm text-muted-foreground mb-4">
-                    Use as credenciais do app no painel do Mercado Livre Developers para iniciar o OAuth.
-                  </p>
-                </div>
-              </div>
-            )}
-            {/* Formulário OAuth (sempre visível abaixo da lista) */}
-            {!isLoading && (
-              <div className="space-y-6 pt-2">
-                <div className="flex flex-col items-start gap-6 max-w-lg">
-                  <div className="w-full space-y-2">
-                    <Label htmlFor="ml-appId">App ID</Label>
-                    <Input
-                        id="ml-appId"
-                        type="text"
-                        placeholder="Cole seu App ID aqui"
-                        value={mlCredentials.appId}
-                        onChange={handleMlInputChange}
-                    />
+                {/* Conexão simplificada — botão único redireciona para o ML */}
+                <div className="flex flex-col items-start gap-3 max-w-lg">
+                  <div>
+                    <Label className="text-base">
+                      {mlAccounts.length === 0 ? 'Conectar conta Mercado Livre' : 'Adicionar outra conta'}
+                    </Label>
+                    <p className="text-sm text-muted-foreground mt-1">
+                      Você será redirecionado para o Mercado Livre para autorizar o acesso. Após autorizar, voltará automaticamente para esta página.
+                    </p>
                   </div>
-                  <div className="w-full space-y-2">
-                    <Label htmlFor="ml-clientSecret">Client Secret</Label>
-                    <Input
-                        id="ml-clientSecret"
-                        type="password"
-                        placeholder={mlCredentials.clientSecret === '********' ? '********' : 'Cole seu Client Secret aqui'}
-                        onChange={handleMlInputChange}
-                    />
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    <Button onClick={handleMlSaveCredentials} disabled={isMlSaving}>
-                      {isMlSaving ? (
-                        <>
-                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                          Salvando...
-                        </>
-                      ) : (
-                        <>
-                          <Save className="mr-2 h-4 w-4" />
-                          Salvar Credenciais
-                        </>
-                      )}
-                    </Button>
-                    <Button onClick={handleMlConnect} disabled={isMlGenerating || !mlCredentials.appId}>
+
+                  {mlAppConfig && !mlAppConfig.configured ? (
+                    <div className="w-full rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm">
+                      <p className="font-semibold text-destructive">App não configurado</p>
+                      <p className="text-muted-foreground mt-1">
+                        Defina <code>MERCADOLIVRE_APP_ID</code> e <code>MERCADOLIVRE_CLIENT_SECRET</code> nas variáveis de ambiente do Vercel para habilitar a conexão.
+                      </p>
+                    </div>
+                  ) : (
+                    <Button
+                      size="lg"
+                      onClick={handleMlConnect}
+                      disabled={isMlGenerating}
+                      className="bg-[#FFE600] text-black hover:bg-[#FFE600]/90"
+                    >
                       {isMlGenerating ? (
                         <>
                           <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                          Gerando...
+                          Redirecionando para o Mercado Livre...
                         </>
                       ) : (
                         <>
                           <Plug className="mr-2 h-4 w-4" />
-                          Gerar Link de Conexão
+                          {mlAccounts.length === 0 ? 'Conectar com Mercado Livre' : 'Conectar outra conta'}
                         </>
                       )}
                     </Button>
-                  </div>
-
-                  {mlAuthUrl && (
-                    <div className="w-full space-y-2">
-                      <Label htmlFor="ml-auth-url">1. Link de Autorização</Label>
-                      <div className="flex items-center gap-2">
-                        <Input
-                          id="ml-auth-url"
-                          type="text"
-                          readOnly
-                          value={mlAuthUrl}
-                          className="bg-muted"
-                        />
-                        <Button variant="outline" size="icon" onClick={() => handleCopy(mlAuthUrl)}>
-                          <Copy className="h-4 w-4" />
-                        </Button>
-                      </div>
-                      <p className="text-sm text-muted-foreground">
-                        Copie o link acima e cole em um navegador para autorizar o acesso ao Mercado Livre.
-                      </p>
-                    </div>
                   )}
 
-                  <div className="w-full space-y-2">
-                    <Label htmlFor="ml-callback-url">2. URL de Callback</Label>
-                    <div className="flex items-center gap-2">
-                      <Input
-                        id="ml-callback-url"
-                        type="text"
-                        readOnly
-                        value={mlCallbackUrl || 'Carregando...'}
-                        className="bg-muted"
-                      />
-                      <Button variant="outline" size="icon" onClick={() => handleCopy(mlCallbackUrl)}>
-                        <Copy className="h-4 w-4" />
-                      </Button>
-                    </div>
-                    <p className="text-sm text-muted-foreground">
-                      Configure esta URL de callback no seu aplicativo do Mercado Livre Developers.
+                  {mlAppConfig?.configured && mlAppConfig.appIdMasked && (
+                    <p className="text-xs text-muted-foreground">
+                      App configurado: <code>{mlAppConfig.appIdMasked}</code> (origem: {
+                        mlAppConfig.source === 'env' ? 'env vars' :
+                        mlAppConfig.source === 'legacy-firestore' ? 'Firestore (legado)' :
+                        'Firestore (conta existente)'
+                      })
                     </p>
-                  </div>
+                  )}
                 </div>
               </div>
             )}

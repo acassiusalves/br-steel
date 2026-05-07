@@ -60,6 +60,7 @@ export async function GET(request: Request) {
   const redirectUri = pendingState.redirectUri;
 
   if (!clientSecret) {
+    // 1. Tenta a conta primária
     try {
       const primaryId = await getPrimaryMlAccountIdAdmin();
       const docSnap = await adminDb.collection('mercadoLivreAccounts').doc(primaryId).get();
@@ -69,7 +70,38 @@ export async function GET(request: Request) {
         clientSecret = clientSecret || data.clientSecret;
       }
     } catch (e) {
-      console.error('Erro ao buscar credenciais primárias do Firestore:', e);
+      console.error('Erro ao buscar credenciais primárias:', e);
+    }
+  }
+
+  // 2. Tenta o doc legado
+  if (!clientSecret) {
+    try {
+      const legacy = await adminDb.collection('appConfig').doc('mercadoLivreCredentials').get();
+      if (legacy.exists) {
+        const data = legacy.data() as MercadoLivreCredentials;
+        appId = appId || data.appId || data.clientId;
+        clientSecret = clientSecret || data.clientSecret;
+      }
+    } catch (e) {
+      console.error('Erro ao buscar credenciais legadas:', e);
+    }
+  }
+
+  // 3. Tenta qualquer conta com secret
+  if (!clientSecret) {
+    try {
+      const snap = await adminDb.collection('mercadoLivreAccounts').limit(10).get();
+      for (const d of snap.docs) {
+        const data = d.data() as MercadoLivreCredentials;
+        if (data.clientSecret) {
+          appId = appId || data.appId || data.clientId;
+          clientSecret = data.clientSecret;
+          break;
+        }
+      }
+    } catch (e) {
+      console.error('Erro varrendo contas:', e);
     }
   }
 
