@@ -1,0 +1,63 @@
+--- src-original/src/index.ts	2026-05-05 12:44:56
++++ src/index.ts	2026-05-13 10:33:30
+@@ -8247,8 +8247,50 @@
+       );
+     }
+   }
++);
++
++// ---------------------------------------------------------------------------
++// BR-Steel webhook forwarder (fire-and-forget)
++// ---------------------------------------------------------------------------
++// Encaminha cada notifica\u00e7\u00e3o ML para o webhook do app br-steel, em paralelo
++// ao processamento padr\u00e3o do Calculaqui. Apenas eventos de sellers listados
++// em BR_STEEL_SELLER_USER_IDS s\u00e3o repassados (se a lista estiver vazia, todos).
++// N\u00e3o bloqueia a resposta 200 ao ML.
++const BR_STEEL_WEBHOOK_URL = process.env.BR_STEEL_WEBHOOK_URL || '';
++const BR_STEEL_WEBHOOK_SECRET = process.env.BR_STEEL_WEBHOOK_SECRET || '';
++const BR_STEEL_SELLER_USER_IDS = new Set(
++  (process.env.BR_STEEL_SELLER_USER_IDS || '')
++    .split(',')
++    .map((s) => s.trim())
++    .filter(Boolean)
+ );
+ 
++function shouldForwardToBrSteel(meliUserId: string | null): boolean {
++  if (!BR_STEEL_WEBHOOK_URL) return false;
++  if (BR_STEEL_SELLER_USER_IDS.size === 0) return true;
++  return !!meliUserId && BR_STEEL_SELLER_USER_IDS.has(meliUserId);
++}
++
++async function forwardToBrSteel(rawPayload: Record<string, any>): Promise<void> {
++  if (!BR_STEEL_WEBHOOK_URL) return;
++  try {
++    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
++    if (BR_STEEL_WEBHOOK_SECRET) {
++      headers['X-BrSteel-Secret'] = BR_STEEL_WEBHOOK_SECRET;
++    }
++    const response = await fetch(BR_STEEL_WEBHOOK_URL, {
++      method: 'POST',
++      headers,
++      body: JSON.stringify(rawPayload),
++    });
++    if (!response.ok) {
++      console.warn('forwardToBrSteel non-2xx', response.status);
++    }
++  } catch (error) {
++    console.error('forwardToBrSteel failed', error);
++  }
++}
++
+ export const mercadoLivreNotifications = functions
+   .runWith({ secrets: ['SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY'] })
+   .https.onRequest(
+@@ -8269,6 +8311,9 @@
+       let queued = 0;
+ 
+       for (const payload of normalizedPayloads) {
++        if (shouldForwardToBrSteel(payload.meliUserId)) {
++          void forwardToBrSteel(payload.payload);
++        }
+         try {
+           const result = await queueMercadoLivreNotificationEvent({
+             ...payload,

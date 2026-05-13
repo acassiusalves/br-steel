@@ -43,6 +43,18 @@ const ML_NOTIFICATION_IPS = new Set([
 ]);
 
 /**
+ * Secret compartilhado com a GCF Calculaqui (forwarder).
+ * Quando definido, exige que o POST contenha o header
+ * `X-BrSteel-Secret: <BR_STEEL_WEBHOOK_SECRET>`. Sem o header v\u00e1lido o
+ * evento \u00e9 ignorado (retorna 200 mesmo assim, para n\u00e3o gerar redelivery).
+ *
+ * Os webhooks vindos diretamente do ML (sem passar pela GCF) n\u00e3o ter\u00e3o
+ * esse header. Por isso, quando o secret est\u00e1 configurado, tamb\u00e9m
+ * aceitamos requisi\u00e7\u00f5es vindas dos IPs oficiais do ML.
+ */
+const BR_STEEL_WEBHOOK_SECRET = process.env.BR_STEEL_WEBHOOK_SECRET || '';
+
+/**
  * Resolve o accountId interno para o `user_id` do ML, consultando
  * `mercadoLivreAccounts` (campo `userId`). Retorna `undefined` se não
  * houver match — o evento ainda é gravado para auditoria.
@@ -131,6 +143,21 @@ export async function POST(request: Request) {
   const ipKnown = remoteIp ? ML_NOTIFICATION_IPS.has(remoteIp) : false;
   if (remoteIp && !ipKnown) {
     console.warn(`[ML WEBHOOK] IP fora da whitelist: ${remoteIp} (topic=${payload.topic})`);
+  }
+
+  // Quando o secret est\u00e1 configurado, exigimos:
+  //  - header X-BrSteel-Secret v\u00e1lido (vindo da GCF Calculaqui forwarder), OU
+  //  - requisi\u00e7\u00e3o vinda dos IPs oficiais do ML (caso o callback aponte direto aqui).
+  if (BR_STEEL_WEBHOOK_SECRET) {
+    const headerSecret = request.headers.get('x-brsteel-secret') || '';
+    const secretValid = headerSecret === BR_STEEL_WEBHOOK_SECRET;
+    if (!secretValid && !ipKnown) {
+      console.warn(
+        `[ML WEBHOOK] Rejeitado: header X-BrSteel-Secret ausente/inv\u00e1lido e IP ${remoteIp} fora da whitelist ML.`
+      );
+      // Retorna 200 para que o ML/GCF n\u00e3o tente novamente em loop.
+      return NextResponse.json({ received: false, reason: 'auth_failed' }, { status: 200 });
+    }
   }
 
   console.log(

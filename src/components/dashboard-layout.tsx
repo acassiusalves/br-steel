@@ -22,6 +22,7 @@ import {
   Kanban,
   BarChart3,
   BookOpen,
+  MessageCircle,
 } from "lucide-react";
 import * as React from "react";
 
@@ -78,6 +79,7 @@ const allNavItems = [
         ]
     },
     { href: "/estoque", icon: Warehouse, label: "Estoque" },
+    { href: "/atendimento/chat", icon: MessageCircle, label: "Atendimento" },
     {
         href: "/configuracoes",
         icon: Settings,
