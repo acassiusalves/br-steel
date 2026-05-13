@@ -25,7 +25,7 @@
 // `application_id`. Lista oficial de IPs ML (atualizar conforme docs):
 //   54.88.218.97, 18.215.140.160, 18.213.114.129, 18.206.34.84
 
-import { NextResponse } from 'next/server';
+import { NextResponse, after } from 'next/server';
 import { adminDb } from '@/lib/firebase-admin';
 import type {
   MlWebhookEvent,
@@ -186,6 +186,45 @@ export async function POST(request: Request) {
       .collection('mercadoLivreWebhookEvents')
       .doc(payload._id)
       .set(record, { merge: true });
+
+    // Processamento assíncrono pós-resposta para o tópico `messages`:
+    // chamamos o sync da conversa imediatamente após retornar 200 ao ML.
+    // Latência ML → UI cai de ~30-60s (cron) para ~1-2s.
+    // O cron drainPendingMessageEvents continua como rede de seguran\u00e7a.
+    if (payload.topic === 'messages' && accountId) {
+      const eventId = payload._id;
+      after(async () => {
+        try {
+          const { processMessagesWebhookEvent } = await import('@/services/ml/chat-sync');
+          const ref = adminDb.collection('mercadoLivreWebhookEvents').doc(eventId);
+          await ref.update({ status: 'processing' });
+          const result = await processMessagesWebhookEvent({
+            resource: payload.resource,
+            userId: payload.user_id,
+            accountId,
+          });
+          if (result.ok) {
+            await ref.update({ status: 'processed', processedAt: Date.now() });
+            console.log(`[ML WEBHOOK after()] processed packId=${result.packId} eventId=${eventId}`);
+          } else {
+            await ref.update({
+              status: 'failed',
+              processingError: result.reason,
+              processedAt: Date.now(),
+            });
+            console.warn(`[ML WEBHOOK after()] failed reason=${result.reason} eventId=${eventId}`);
+          }
+        } catch (e: any) {
+          console.error('[ML WEBHOOK after()] erro inesperado', e?.message || e);
+          // Volta o status para 'received' para que o cron drain reprocesse.
+          await adminDb
+            .collection('mercadoLivreWebhookEvents')
+            .doc(eventId)
+            .update({ status: 'received', processingError: String(e?.message || e) })
+            .catch(() => undefined);
+        }
+      });
+    }
 
     return NextResponse.json({ received: true }, { status: 200 });
   } catch (error: any) {
