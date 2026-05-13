@@ -21,6 +21,7 @@ import {
   Plug,
   Kanban,
   BarChart3,
+  BookOpen,
 } from "lucide-react";
 import * as React from "react";
 
@@ -84,6 +85,7 @@ const allNavItems = [
         subItems: [
             { href: "/configuracoes", icon: Users, label: "Usuários e Permissões" },
             { href: "/api-settings", icon: Plug, label: "Conexão API" },
+            { href: "/ml-docs", icon: BookOpen, label: "Docs Mercado Livre" },
         ]
     },
 ];

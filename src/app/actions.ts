@@ -12,6 +12,12 @@ import { updateSupplyBySku } from '@/services/supply-service';
 import type { SaleOrder } from '@/types/sale-order';
 import type { Supply } from '@/types/supply';
 import { seedUsers as seedUsersService, getUsers as getUsersService, addUser as addUserService, deleteUser as deleteUserService } from '@/services/user-service';
+import {
+    searchMlDocumentation as _searchMlDocumentation,
+    getMlDocumentationPage as _getMlDocumentationPage,
+    listMlMcpTools as _listMlMcpTools,
+    type MlMcpCallResult,
+} from '@/services/ml-mcp';
 
 
 // Bling API actions
@@ -1881,6 +1887,85 @@ export const getUsers = getUsersService;
 export const addUser = addUserService;
 export const deleteUser = deleteUserService;
 export const seedUsers = seedUsersService;
+
+
+// =========================================================================
+// MCP Oficial do Mercado Livre — Server Actions
+// =========================================================================
+// Estas actions encapsulam o cliente MCP em src/services/ml-mcp.ts e
+// retornam { ok, data | error } para a UI tratar erros sem throws.
+// (Imports do módulo ml-mcp foram movidos para o topo do arquivo.)
+
+export type MlDocsSearchInput = {
+    accountId?: string;
+    query: string;
+    language?: string; // default 'pt_br'
+    siteId?: string;   // default 'MLB'
+    limit?: number;    // default 10
+    offset?: number;
+};
+
+export type MlDocsGetPageInput = {
+    accountId?: string;
+    path: string;
+    language?: string;
+    siteId?: string;
+};
+
+export type MlDocsActionResult =
+    | { ok: true; data: MlMcpCallResult }
+    | { ok: false; error: string };
+
+export async function mlDocsSearch(input: MlDocsSearchInput): Promise<MlDocsActionResult> {
+    try {
+        if (!input?.query?.trim()) {
+            return { ok: false, error: 'Informe um termo de busca.' };
+        }
+        const data = await _searchMlDocumentation({
+            accountId: input.accountId,
+            query: input.query.trim(),
+            language: input.language?.trim() || 'pt_br',
+            siteId: input.siteId?.trim() || 'MLB',
+            limit: typeof input.limit === 'number' ? input.limit : 10,
+            offset: typeof input.offset === 'number' ? input.offset : undefined,
+        });
+        return { ok: true, data };
+    } catch (e: any) {
+        console.error('[mlDocsSearch] erro:', e);
+        return { ok: false, error: e?.message || 'Falha ao consultar MCP do Mercado Livre.' };
+    }
+}
+
+export async function mlDocsGetPage(input: MlDocsGetPageInput): Promise<MlDocsActionResult> {
+    try {
+        if (!input?.path?.trim()) {
+            return { ok: false, error: 'Informe o path da página.' };
+        }
+        const data = await _getMlDocumentationPage({
+            accountId: input.accountId,
+            path: input.path.trim(),
+            language: input.language?.trim() || 'pt_br',
+            siteId: input.siteId?.trim() || 'MLB',
+        });
+        return { ok: true, data };
+    } catch (e: any) {
+        console.error('[mlDocsGetPage] erro:', e);
+        return { ok: false, error: e?.message || 'Falha ao buscar página de documentação.' };
+    }
+}
+
+export async function mlDocsListTools(accountId?: string): Promise<
+    | { ok: true; tools: Array<{ name: string; description?: string }> }
+    | { ok: false; error: string }
+> {
+    try {
+        const r = await _listMlMcpTools(accountId);
+        return { ok: true, tools: r.tools };
+    } catch (e: any) {
+        console.error('[mlDocsListTools] erro:', e);
+        return { ok: false, error: e?.message || 'Falha ao listar tools do MCP.' };
+    }
+}
 
 
     
