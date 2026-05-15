@@ -197,7 +197,7 @@ function UsersPageContent() {
             await addUser(userData);
             toast({
                 title: 'Usuário Adicionado!',
-                description: 'O novo usuário foi cadastrado com sucesso.'
+                description: 'Senha temporária para o primeiro acesso: 123456.'
             });
             setIsFormOpen(false);
             fetchInitialData();

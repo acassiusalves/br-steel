@@ -14,7 +14,7 @@ import { pagePermissions } from '@/lib/permissions';
 
 export const AUTH_COOKIE_NAME = 'brsteel_session';
 const SESSION_TTL_MS = 8 * 60 * 60 * 1000;
-const DEFAULT_LEGACY_PASSWORD = '123456';
+export const DEFAULT_INITIAL_PASSWORD = '123456';
 
 export interface SessionUser {
   id: string;
@@ -29,9 +29,14 @@ interface SessionPayload {
 }
 
 interface StoredUser extends SessionUser {
+  normalizedEmail?: string | null;
   passwordHash?: string | null;
   passwordSalt?: string | null;
   mustChangePassword?: boolean;
+}
+
+export function normalizeUserEmail(email: string) {
+  return email.trim().toLowerCase();
 }
 
 function getSecret() {
@@ -111,43 +116,57 @@ export function hashPassword(password: string, salt = crypto.randomBytes(16).toS
 }
 
 export function verifyPassword(password: string, hash?: string | null, salt?: string | null) {
-  if (!hash || !salt) return password === DEFAULT_LEGACY_PASSWORD;
+  if (!hash || !salt) return password === DEFAULT_INITIAL_PASSWORD;
   const candidate = crypto.scryptSync(password, salt, 64);
   const stored = Buffer.from(hash, 'base64url');
   return candidate.length === stored.length && crypto.timingSafeEqual(candidate, stored);
 }
 
-export async function findUserByEmail(email: string): Promise<StoredUser | null> {
-  const normalized = email.trim().toLowerCase();
-  if (!normalized) return null;
-
-  const direct = await getDoc(firestoreDoc(db, 'users', normalized));
-  if (direct.exists()) {
-    const data = direct.data() as any;
-    return {
-      id: direct.id,
-      name: data.name,
-      email: data.email || normalized,
-      role: data.role,
-      passwordHash: data.passwordHash,
-      passwordSalt: data.passwordSalt,
-      mustChangePassword: data.mustChangePassword,
-    };
-  }
-
-  const snap = await getDocs(query(collection(db, 'users'), where('email', '==', normalized), limit(1)));
-  if (snap.empty) return null;
-  const doc = snap.docs[0];
-  const data = doc.data() as any;
+function storedUserFromDoc(id: string, data: any, fallbackEmail: string): StoredUser {
+  const email = normalizeUserEmail(String(data.email || data.normalizedEmail || fallbackEmail || id));
   return {
-    id: doc.id,
+    id,
     name: data.name,
-    email: data.email || normalized,
+    email,
+    normalizedEmail: data.normalizedEmail || email,
     role: data.role,
     passwordHash: data.passwordHash,
     passwordSalt: data.passwordSalt,
     mustChangePassword: data.mustChangePassword,
   };
+}
+
+export async function findUserByEmail(email: string): Promise<StoredUser | null> {
+  const normalized = normalizeUserEmail(email);
+  if (!normalized) return null;
+
+  const direct = await getDoc(firestoreDoc(db, 'users', normalized));
+  if (direct.exists()) {
+    return storedUserFromDoc(direct.id, direct.data(), normalized);
+  }
+
+  const normalizedSnap = await getDocs(
+    query(collection(db, 'users'), where('normalizedEmail', '==', normalized), limit(1))
+  );
+  if (!normalizedSnap.empty) {
+    const doc = normalizedSnap.docs[0];
+    return storedUserFromDoc(doc.id, doc.data(), normalized);
+  }
+
+  const snap = await getDocs(query(collection(db, 'users'), where('email', '==', normalized), limit(1)));
+  if (!snap.empty) {
+    const doc = snap.docs[0];
+    return storedUserFromDoc(doc.id, doc.data(), normalized);
+  }
+
+  const allUsers = await getDocs(collection(db, 'users'));
+  const caseInsensitiveMatch = allUsers.docs.find((doc) => {
+    const data = doc.data() as any;
+    return normalizeUserEmail(String(data.email || data.normalizedEmail || doc.id)) === normalized;
+  });
+  if (!caseInsensitiveMatch) return null;
+
+  return storedUserFromDoc(caseInsensitiveMatch.id, caseInsensitiveMatch.data(), normalized);
 }
 
 export async function loadAppAccessSettings() {

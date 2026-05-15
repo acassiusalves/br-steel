@@ -5,6 +5,7 @@ import {
   findUserByEmail,
   getSessionFromRequest,
   hashPassword,
+  normalizeUserEmail,
   sessionCookieHeader,
   createSessionToken,
   verifyPassword,
@@ -38,9 +39,18 @@ export async function PATCH(request: Request) {
 
   const update: Record<string, unknown> = {
     name,
+    email: normalizeUserEmail(stored.email),
+    normalizedEmail: normalizeUserEmail(stored.email),
     updatedAt: new Date().toISOString(),
   };
   const effectiveMustChangePassword = !!stored.mustChangePassword || !stored.passwordHash;
+
+  if (effectiveMustChangePassword && !newPassword) {
+    return NextResponse.json(
+      { ok: false, error: 'Cadastre uma nova senha para concluir o primeiro acesso.' },
+      { status: 400 }
+    );
+  }
 
   if (newPassword) {
     if (newPassword.length < 6) {

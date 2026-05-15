@@ -2,8 +2,14 @@
 "use server";
 
 import { db } from '@/lib/firebase';
-import { collection, getDocs, doc, query, where, setDoc, getDoc, addDoc, deleteDoc, orderBy, serverTimestamp, Timestamp, updateDoc, writeBatch } from 'firebase/firestore';
+import { collection, getDocs, doc, query, addDoc, deleteDoc, orderBy, Timestamp, updateDoc, writeBatch } from 'firebase/firestore';
 import type { User } from '@/types/user';
+import {
+  DEFAULT_INITIAL_PASSWORD,
+  findUserByEmail,
+  hashPassword,
+  normalizeUserEmail,
+} from '@/lib/server-auth';
 
 
 // User Management Actions
@@ -33,15 +39,23 @@ export async function getUsers(): Promise<User[]> {
 
 export async function addUser(userData: Omit<User, 'id' | 'createdAt'>): Promise<{ id: string }> {
   const usersCollection = collection(db, 'users');
-  // Check for existing user with the same email
-  const q = query(usersCollection, where('email', '==', userData.email));
-  const existing = await getDocs(q);
-  if (!existing.empty) {
-    throw new Error(`O e-mail "${userData.email}" já está em uso.`);
+  const normalizedEmail = normalizeUserEmail(userData.email);
+  if (!normalizedEmail) {
+    throw new Error('E-mail é obrigatório.');
   }
 
+  const existing = await findUserByEmail(normalizedEmail);
+  if (existing) {
+    throw new Error(`O e-mail "${normalizedEmail}" já está em uso.`);
+  }
+
+  const { hash, salt } = hashPassword(DEFAULT_INITIAL_PASSWORD);
   const docRef = await addDoc(usersCollection, {
     ...userData,
+    email: normalizedEmail,
+    normalizedEmail,
+    passwordHash: hash,
+    passwordSalt: salt,
     createdAt: new Date().toISOString(), // Use ISO string directly
     mustChangePassword: true, // Force password change on first login
   });
@@ -81,9 +95,15 @@ export async function seedUsers() {
         console.log("Populando coleção de usuários...");
         const batch = writeBatch(db);
         usersToSeed.forEach(user => {
-            const docRef = doc(db, 'users', user.email);
+            const normalizedEmail = normalizeUserEmail(user.email);
+            const { hash, salt } = hashPassword(DEFAULT_INITIAL_PASSWORD);
+            const docRef = doc(db, 'users', normalizedEmail);
             batch.set(docRef, { 
                 ...user, 
+                email: normalizedEmail,
+                normalizedEmail,
+                passwordHash: hash,
+                passwordSalt: salt,
                 createdAt: new Date().toISOString(),
                 mustChangePassword: user.role !== 'Administrador'
             });

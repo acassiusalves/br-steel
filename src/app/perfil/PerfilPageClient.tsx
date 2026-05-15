@@ -19,6 +19,10 @@ export default function PerfilPageClient() {
     const [mustChangePassword, setMustChangePassword] = React.useState(user?.mustChangePassword || false);
     const { toast } = useToast();
 
+    React.useEffect(() => {
+        setMustChangePassword(!!user?.mustChangePassword);
+    }, [user?.mustChangePassword]);
+
     const handleProfileUpdate = async (event: React.FormEvent<HTMLFormElement>) => {
         event.preventDefault();
         if (!user || !user.id || user.id === 'local') return;
