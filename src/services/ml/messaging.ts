@@ -95,6 +95,20 @@ export async function getMessageById(opts: {
 }
 
 /**
+ * Obtém detalhes de uma ordem para enriquecer a conversa com comprador,
+ * envio e itens. Usado em best effort: falhas não devem impedir o chat.
+ */
+export async function getOrderDetails(opts: {
+  orderId: string | number;
+  token: string;
+}): Promise<any> {
+  return mlFetch<any>(`/orders/${encodeURIComponent(String(opts.orderId))}`, {
+    method: 'GET',
+    token: opts.token,
+  });
+}
+
+/**
  * Envia uma mensagem ao comprador.
  *
  * IMPORTANTE — nova arquitetura (a partir de 02/02/2026):

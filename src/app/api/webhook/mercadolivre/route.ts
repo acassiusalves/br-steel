@@ -187,25 +187,36 @@ export async function POST(request: Request) {
       .doc(payload._id)
       .set(record, { merge: true });
 
-    // Processamento assíncrono pós-resposta para o tópico `messages`:
-    // chamamos o sync da conversa imediatamente após retornar 200 ao ML.
-    // Latência ML → UI cai de ~30-60s (cron) para ~1-2s.
+    // Processamento assíncrono pós-resposta para tópicos de atendimento:
+    // chamamos o sync imediatamente após retornar 200 ao ML.
     // O cron drainPendingMessageEvents continua como rede de seguran\u00e7a.
-    if (payload.topic === 'messages' && accountId) {
+    if ((payload.topic === 'messages' || payload.topic === 'questions') && accountId) {
       const eventId = payload._id;
       after(async () => {
         try {
-          const { processMessagesWebhookEvent } = await import('@/services/ml/chat-sync');
           const ref = adminDb.collection('mercadoLivreWebhookEvents').doc(eventId);
           await ref.update({ status: 'processing' });
-          const result = await processMessagesWebhookEvent({
-            resource: payload.resource,
-            userId: payload.user_id,
-            accountId,
-          });
+          const result =
+            payload.topic === 'messages'
+              ? await import('@/services/ml/chat-sync').then(({ processMessagesWebhookEvent }) =>
+                  processMessagesWebhookEvent({
+                    resource: payload.resource,
+                    userId: payload.user_id,
+                    accountId,
+                  })
+                )
+              : await import('@/services/ml/questions').then(({ processQuestionsWebhookEvent }) =>
+                  processQuestionsWebhookEvent({
+                    resource: payload.resource,
+                    userId: payload.user_id,
+                    accountId,
+                    eventId,
+                  })
+                );
           if (result.ok) {
             await ref.update({ status: 'processed', processedAt: Date.now() });
-            console.log(`[ML WEBHOOK after()] processed packId=${result.packId} eventId=${eventId}`);
+            const target = 'packId' in result ? result.packId : result.questionId;
+            console.log(`[ML WEBHOOK after()] processed ${payload.topic} target=${target} eventId=${eventId}`);
           } else {
             await ref.update({
               status: 'failed',

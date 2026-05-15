@@ -151,6 +151,8 @@ export interface MlChatConversationDoc {
 
   /** Lista de orders associadas ao pacote. */
   orderIds?: string[];
+  /** Títulos dos itens associados ao pedido/pacote, quando resolvidos. */
+  itemTitles?: string[];
 
   /** Última mensagem - usado para listagem ordenada. */
   lastMessageAt?: number | null; // ms epoch

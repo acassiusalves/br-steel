@@ -1,0 +1,8 @@
+.env*
+service-account.json
+firebase-debug.log
+firestore-debug.log
+
+.git
+.next
+node_modules

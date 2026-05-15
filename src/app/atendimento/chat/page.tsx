@@ -6,9 +6,12 @@ import {
   Bot,
   Check,
   CheckCheck,
+  CircleHelp,
   Clock,
   Loader2,
+  MessageSquare,
   Paperclip,
+  Package,
   RefreshCw,
   Search,
   Send,
@@ -49,11 +52,18 @@ import {
   type MlSupportPriority,
   type MlSupportQueueStatus,
 } from '@/lib/ml-chat-types';
+import {
+  ML_QUESTION_ANSWER_MAX_LENGTH,
+  type MlQuestionDoc,
+  type MlQuestionQueueStatus,
+} from '@/lib/ml-question-types';
 import { describeSubstatus } from '@/lib/ml-chat-substatus';
 import { listMlAccounts, type MlAccountSummary } from '@/app/actions';
 import { useAuth } from '@/contexts/AuthContext';
 
 type QueueFilter = 'all' | 'unread' | 'unassigned' | 'mine' | 'blocked' | 'resolved';
+type QuestionFilter = 'all' | 'unanswered' | 'unassigned' | 'mine' | 'answered' | 'ignored';
+type AtendimentoMode = 'messages' | 'questions';
 
 type ConversationListResponse = {
   ok?: boolean;
@@ -69,6 +79,21 @@ type ConversationDetailResponse = {
   error?: string;
   conversation?: MlChatConversationDoc;
   messages?: MlChatMessageDoc[];
+};
+
+type QuestionListResponse = {
+  ok?: boolean;
+  error?: string;
+  questions?: MlQuestionDoc[];
+  scanned?: number;
+  synced?: number;
+  errors?: number;
+};
+
+type QuestionDetailResponse = {
+  ok?: boolean;
+  error?: string;
+  question?: MlQuestionDoc;
 };
 
 async function readApiJson<T>(response: Response): Promise<T> {
@@ -94,10 +119,20 @@ const PRIORITY_LABELS: Record<MlSupportPriority, string> = {
   urgent: 'Urgente',
 };
 
+const QUESTION_QUEUE_STATUS_LABELS: Record<MlQuestionQueueStatus, string> = {
+  new: 'Nova',
+  open: 'Em atendimento',
+  answered: 'Respondida',
+  ignored: 'Ignorada',
+};
+
 const QUEUE_STATUS_OPTIONS = Object.entries(QUEUE_STATUS_LABELS) as Array<
   [MlSupportQueueStatus, string]
 >;
 const PRIORITY_OPTIONS = Object.entries(PRIORITY_LABELS) as Array<[MlSupportPriority, string]>;
+const QUESTION_QUEUE_STATUS_OPTIONS = Object.entries(QUESTION_QUEUE_STATUS_LABELS) as Array<
+  [MlQuestionQueueStatus, string]
+>;
 
 function formatTime(iso?: string | null) {
   if (!iso) return '';
@@ -150,6 +185,11 @@ function getPriority(c?: MlChatConversationDoc | null): MlSupportPriority {
   return c?.priority || 'normal';
 }
 
+function getQuestionQueueStatus(q?: MlQuestionDoc | null): MlQuestionQueueStatus {
+  if (q?.queueStatus) return q.queueStatus;
+  return String(q?.status || '').toUpperCase() === 'ANSWERED' ? 'answered' : 'new';
+}
+
 function priorityClass(priority: MlSupportPriority) {
   if (priority === 'urgent') return 'border-red-500 bg-red-50 text-red-700';
   if (priority === 'high') return 'border-amber-500 bg-amber-50 text-amber-700';
@@ -160,6 +200,12 @@ function priorityClass(priority: MlSupportPriority) {
 function queueStatusVariant(status: MlSupportQueueStatus): 'default' | 'secondary' | 'outline' {
   if (status === 'new') return 'default';
   if (status === 'resolved' || status === 'ignored') return 'outline';
+  return 'secondary';
+}
+
+function questionStatusVariant(status: MlQuestionQueueStatus): 'default' | 'secondary' | 'outline' {
+  if (status === 'new') return 'default';
+  if (status === 'answered' || status === 'ignored') return 'outline';
   return 'secondary';
 }
 
@@ -184,6 +230,23 @@ function matchesSearch(conv: MlChatConversationDoc, search: string) {
     conv.claimId,
     conv.lastMessagePreview,
     ...(conv.tags || []),
+  ]
+    .filter((v) => v != null)
+    .join(' ')
+    .toLowerCase();
+  return haystack.includes(search.toLowerCase());
+}
+
+function matchesQuestionSearch(question: MlQuestionDoc, search: string) {
+  if (!search) return true;
+  const haystack = [
+    question.buyerName,
+    question.buyerId,
+    question.id,
+    question.itemId,
+    question.itemTitle,
+    question.text,
+    question.answerText,
   ]
     .filter((v) => v != null)
     .join(' ')
@@ -373,6 +436,190 @@ function ConversationList(props: {
                   <div className="truncate text-[10px] text-muted-foreground">
                     pack {c.packId}
                     {c.assignedTo?.name || c.assignedTo?.email ? ` · ${c.assignedTo.name || c.assignedTo.email}` : ''}
+                  </div>
+                </div>
+              </button>
+            );
+          })}
+      </ScrollArea>
+    </Card>
+  );
+}
+
+function QuestionList(props: {
+  accountId: string | null;
+  selectedQuestionId: string | null;
+  currentUserEmail?: string | null;
+  refreshKey: number;
+  onSelect: (questionId: string) => void;
+}) {
+  const [questions, setQuestions] = React.useState<MlQuestionDoc[]>([]);
+  const [loading, setLoading] = React.useState(true);
+  const [error, setError] = React.useState<string | null>(null);
+  const [filter, setFilter] = React.useState<QuestionFilter>('all');
+  const [search, setSearch] = React.useState('');
+
+  React.useEffect(() => {
+    if (!props.accountId) {
+      setQuestions([]);
+      setLoading(false);
+      setError(null);
+      return;
+    }
+
+    let cancelled = false;
+    const load = async (showLoading: boolean) => {
+      if (showLoading) setLoading(true);
+      try {
+        const params = new URLSearchParams({
+          accountId: props.accountId as string,
+          limit: '250',
+        });
+        const response = await fetch(`/api/ml/questions?${params.toString()}`, {
+          cache: 'no-store',
+        });
+        const json = await readApiJson<QuestionListResponse>(response);
+        if (cancelled) return;
+        setQuestions(json.questions || []);
+        setError(null);
+      } catch (e: any) {
+        if (cancelled) return;
+        setError(e?.message || String(e));
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+
+    load(true);
+    const timer = window.setInterval(() => load(false), 15000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [props.accountId, props.refreshKey]);
+
+  const filtered = React.useMemo(() => {
+    return questions.filter((question) => {
+      const queueStatus = getQuestionQueueStatus(question);
+      if (!matchesQuestionSearch(question, search.trim())) return false;
+      if (filter === 'unanswered') return String(question.status).toUpperCase() === 'UNANSWERED';
+      if (filter === 'unassigned') return !question.assignedTo?.email && queueStatus !== 'answered';
+      if (filter === 'mine') {
+        return !!props.currentUserEmail && question.assignedTo?.email === props.currentUserEmail;
+      }
+      if (filter === 'answered') return queueStatus === 'answered';
+      if (filter === 'ignored') return queueStatus === 'ignored';
+      return true;
+    });
+  }, [filter, props.currentUserEmail, questions, search]);
+
+  const filterItems: Array<[QuestionFilter, string]> = [
+    ['all', 'Todas'],
+    ['unanswered', 'A responder'],
+    ['unassigned', 'Sem dono'],
+    ['mine', 'Minhas'],
+    ['answered', 'Respondidas'],
+    ['ignored', 'Ignoradas'],
+  ];
+
+  return (
+    <Card className="flex h-full flex-col">
+      <div className="space-y-3 border-b p-3">
+        <div className="flex items-center justify-between gap-2">
+          <h2 className="text-sm font-semibold">Perguntas pré-venda</h2>
+          <Badge variant="outline" className="shrink-0">
+            {filtered.length}
+          </Badge>
+        </div>
+        <div className="relative">
+          <Search className="pointer-events-none absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+          <Input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Buscar pergunta, item, comprador..."
+            className="h-9 pl-8 text-sm"
+          />
+        </div>
+        <div className="flex flex-wrap gap-1">
+          {filterItems.map(([key, label]) => (
+            <Button
+              key={key}
+              size="sm"
+              variant={filter === key ? 'default' : 'ghost'}
+              className="h-7 px-2 text-xs"
+              onClick={() => setFilter(key)}
+            >
+              {label}
+            </Button>
+          ))}
+        </div>
+      </div>
+
+      <ScrollArea className="flex-1">
+        {loading && (
+          <div className="space-y-2 p-3">
+            {Array.from({ length: 6 }).map((_, i) => (
+              <Skeleton key={i} className="h-20 w-full" />
+            ))}
+          </div>
+        )}
+        {!loading && filtered.length === 0 && (
+          <div className="p-6 text-center text-sm text-muted-foreground">
+            {error || 'Nenhuma pergunta encontrada.'}
+          </div>
+        )}
+        {!loading &&
+          filtered.map((question) => {
+            const selected = question.id === props.selectedQuestionId;
+            const queueStatus = getQuestionQueueStatus(question);
+            return (
+              <button
+                key={question.id}
+                onClick={() => props.onSelect(question.id)}
+                className={cn(
+                  'flex w-full items-start gap-3 border-b p-3 text-left transition-colors hover:bg-muted/50',
+                  selected && 'bg-muted'
+                )}
+              >
+                <div className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-md bg-muted">
+                  {question.thumbnail ? (
+                    <img
+                      src={question.thumbnail}
+                      alt=""
+                      className="h-full w-full object-cover"
+                    />
+                  ) : (
+                    <Package className="h-5 w-5 text-muted-foreground" />
+                  )}
+                </div>
+                <div className="min-w-0 flex-1 space-y-1">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="truncate text-sm font-medium">
+                      {question.itemTitle || question.itemId || 'Anúncio'}
+                    </span>
+                    <span className="shrink-0 text-xs text-muted-foreground">
+                      {formatDate(question.sortKey)}
+                    </span>
+                  </div>
+                  <div className="line-clamp-2 text-xs text-muted-foreground">
+                    {question.text || '-'}
+                  </div>
+                  <div className="flex flex-wrap items-center gap-1">
+                    <Badge
+                      variant={questionStatusVariant(queueStatus)}
+                      className="h-5 px-1.5 text-[10px]"
+                    >
+                      {QUESTION_QUEUE_STATUS_LABELS[queueStatus]}
+                    </Badge>
+                    <Badge variant="outline" className="h-5 px-1.5 text-[10px]">
+                      {question.status}
+                    </Badge>
+                  </div>
+                  <div className="truncate text-[10px] text-muted-foreground">
+                    pergunta {question.id}
+                    {question.assignedTo?.name || question.assignedTo?.email
+                      ? ` · ${question.assignedTo.name || question.assignedTo.email}`
+                      : ''}
                   </div>
                 </div>
               </button>
@@ -830,6 +1077,320 @@ function ConversationPanel(props: {
   );
 }
 
+function QuestionPanel(props: {
+  accountId: string;
+  questionId: string | null;
+  refreshKey: number;
+  currentUser: { id?: string; name?: string; email?: string } | null;
+  onChanged: () => void;
+}) {
+  const { toast } = useToast();
+  const [question, setQuestion] = React.useState<MlQuestionDoc | null>(null);
+  const [loading, setLoading] = React.useState(false);
+  const [refreshing, setRefreshing] = React.useState(false);
+  const [stateSaving, setStateSaving] = React.useState(false);
+  const [sending, setSending] = React.useState(false);
+  const [text, setText] = React.useState('');
+
+  const loadQuestion = React.useCallback(
+    async (options: { sync?: boolean; showLoading?: boolean } = {}) => {
+      if (!props.questionId || !props.accountId) return;
+      if (options.showLoading) setLoading(true);
+      const params = new URLSearchParams({ accountId: props.accountId });
+      if (options.sync) params.set('sync', '1');
+      const response = await fetch(
+        `/api/ml/questions/${props.questionId}?${params.toString()}`,
+        { cache: 'no-store' }
+      );
+      const json = await readApiJson<QuestionDetailResponse>(response);
+      setQuestion(json.question || null);
+      setLoading(false);
+    },
+    [props.accountId, props.questionId]
+  );
+
+  React.useEffect(() => {
+    setQuestion(null);
+    setText('');
+    if (!props.questionId || !props.accountId) {
+      setLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    const load = async (options: { sync?: boolean; showLoading?: boolean } = {}) => {
+      if (options.showLoading) setLoading(true);
+      try {
+        const params = new URLSearchParams({ accountId: props.accountId });
+        if (options.sync) params.set('sync', '1');
+        const response = await fetch(
+          `/api/ml/questions/${props.questionId}?${params.toString()}`,
+          { cache: 'no-store' }
+        );
+        const json = await readApiJson<QuestionDetailResponse>(response);
+        if (cancelled) return;
+        setQuestion(json.question || null);
+      } catch (e: any) {
+        if (!cancelled) {
+          toast({ variant: 'destructive', title: 'Erro', description: e?.message || String(e) });
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+
+    load({ sync: true, showLoading: true });
+    const timer = window.setInterval(() => load(), 10000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [props.accountId, props.questionId, props.refreshKey, toast]);
+
+  const patchQuestion = async (body: Record<string, unknown>) => {
+    if (!props.questionId) return;
+    setStateSaving(true);
+    try {
+      const response = await fetch(`/api/ml/questions/${props.questionId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ accountId: props.accountId, ...body }),
+      });
+      const json = await readApiJson<QuestionDetailResponse>(response);
+      setQuestion(json.question || null);
+      props.onChanged();
+    } catch (e: any) {
+      toast({ variant: 'destructive', title: 'Erro', description: e?.message || String(e) });
+    } finally {
+      setStateSaving(false);
+    }
+  };
+
+  const handleRefresh = async () => {
+    if (!props.questionId) return;
+    setRefreshing(true);
+    try {
+      await loadQuestion({ sync: true });
+      props.onChanged();
+    } catch (e: any) {
+      toast({ variant: 'destructive', title: 'Erro', description: e?.message || String(e) });
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
+  const handleAssume = async () => {
+    if (!props.currentUser?.email && !props.currentUser?.id) {
+      toast({ variant: 'destructive', title: 'Usuário não identificado' });
+      return;
+    }
+    await patchQuestion({
+      assignedTo: {
+        id: props.currentUser.id || props.currentUser.email || null,
+        name: props.currentUser.name || props.currentUser.email || null,
+        email: props.currentUser.email || null,
+      },
+      queueStatus: getQuestionQueueStatus(question) === 'new' ? 'open' : undefined,
+    });
+  };
+
+  const handleSend = async () => {
+    if (!props.questionId) return;
+    const trimmed = text.trim();
+    if (!trimmed || trimmed.length > ML_QUESTION_ANSWER_MAX_LENGTH) return;
+    setSending(true);
+    try {
+      const response = await fetch(`/api/ml/questions/${props.questionId}/answer`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ accountId: props.accountId, text: trimmed }),
+      });
+      const json = await readApiJson<QuestionDetailResponse>(response);
+      setQuestion(json.question || null);
+      setText('');
+      props.onChanged();
+      toast({ title: 'Pergunta respondida' });
+    } catch (e: any) {
+      toast({ variant: 'destructive', title: 'Erro ao responder', description: e?.message });
+      await loadQuestion().catch(() => undefined);
+    } finally {
+      setSending(false);
+    }
+  };
+
+  if (!props.questionId) {
+    return (
+      <Card className="flex h-full items-center justify-center">
+        <div className="text-center text-sm text-muted-foreground">
+          Selecione uma pergunta à esquerda.
+        </div>
+      </Card>
+    );
+  }
+
+  const queueStatus = getQuestionQueueStatus(question);
+  const status = String(question?.status || '').toUpperCase();
+  const canAnswer = status === 'UNANSWERED';
+  const charsLeft = ML_QUESTION_ANSWER_MAX_LENGTH - text.length;
+
+  return (
+    <Card className="flex h-full min-h-0 flex-col">
+      <div className="space-y-3 border-b p-3">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="truncate text-sm font-semibold">
+              {question?.itemTitle || question?.itemId || 'Pergunta'}
+            </div>
+            <div className="truncate text-xs text-muted-foreground">
+              pergunta {props.questionId}
+              {question?.buyerName || question?.buyerId
+                ? ` · comprador ${question.buyerName || question.buyerId}`
+                : ''}
+            </div>
+          </div>
+          <div className="flex shrink-0 items-center gap-2">
+            <Button size="sm" variant="outline" onClick={handleAssume} disabled={stateSaving}>
+              <UserCheck className="mr-2 h-4 w-4" />
+              Assumir
+            </Button>
+            <Button size="icon" variant="ghost" onClick={handleRefresh} disabled={refreshing}>
+              <RefreshCw className={cn('h-4 w-4', refreshing && 'animate-spin')} />
+            </Button>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <Select
+            value={queueStatus}
+            onValueChange={(value) => patchQuestion({ queueStatus: value })}
+            disabled={stateSaving}
+          >
+            <SelectTrigger className="h-8 w-[180px] text-xs">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {QUESTION_QUEUE_STATUS_OPTIONS.map(([value, label]) => (
+                <SelectItem key={value} value={value}>
+                  {label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Badge variant={questionStatusVariant(queueStatus)}>
+            {question ? question.status : 'Carregando'}
+          </Badge>
+          {question?.assignedTo?.name || question?.assignedTo?.email ? (
+            <Badge variant="secondary" className="gap-1">
+              <UserCheck className="h-3 w-3" />
+              {question.assignedTo.name || question.assignedTo.email}
+            </Badge>
+          ) : (
+            <Badge variant="outline">Sem responsável</Badge>
+          )}
+        </div>
+      </div>
+
+      <div className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[minmax(0,1fr)_310px]">
+        <div className="flex min-h-0 flex-col">
+          <div className="flex-1 overflow-y-auto p-4">
+            {loading && (
+              <div className="flex items-center justify-center p-6">
+                <Loader2 className="h-5 w-5 animate-spin" />
+              </div>
+            )}
+
+            {!loading && question && (
+              <div className="mx-auto max-w-3xl space-y-4">
+                <div className="rounded-lg border bg-muted/40 p-4">
+                  <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase text-muted-foreground">
+                    <CircleHelp className="h-4 w-4" />
+                    Pergunta do comprador
+                  </div>
+                  <p className="whitespace-pre-wrap text-sm leading-relaxed">{question.text}</p>
+                  <div className="mt-3 text-xs text-muted-foreground">
+                    {formatDateTime(question.sortKey)}
+                  </div>
+                </div>
+
+                {question.answerText && (
+                  <div className="rounded-lg border bg-background p-4">
+                    <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase text-muted-foreground">
+                      <MessageSquare className="h-4 w-4" />
+                      Resposta enviada
+                    </div>
+                    <p className="whitespace-pre-wrap text-sm leading-relaxed">{question.answerText}</p>
+                    <div className="mt-3 text-xs text-muted-foreground">
+                      {question.answeredAt || 'Respondida'}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          <div className="border-t p-3">
+            <div className="flex items-end gap-2">
+              <Textarea
+                value={text}
+                onChange={(e) => setText(e.target.value.slice(0, ML_QUESTION_ANSWER_MAX_LENGTH))}
+                placeholder={
+                  canAnswer
+                    ? 'Digite a resposta para a pergunta...'
+                    : 'Pergunta sem envio disponível.'
+                }
+                disabled={!canAnswer || sending}
+                className="min-h-[72px] resize-none"
+                rows={3}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    handleSend();
+                  }
+                }}
+              />
+              <div className="flex flex-col items-end gap-1">
+                <span
+                  className={cn(
+                    'text-[10px]',
+                    charsLeft < 80 ? 'text-destructive' : 'text-muted-foreground'
+                  )}
+                >
+                  {charsLeft}
+                </span>
+                <Button size="icon" onClick={handleSend} disabled={!canAnswer || sending || !text.trim()}>
+                  {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <aside className="min-h-0 overflow-y-auto border-t bg-muted/20 p-3 lg:border-l lg:border-t-0">
+          <div className="space-y-5">
+            <section className="space-y-2">
+              <div className="text-xs font-semibold uppercase text-muted-foreground">Contexto</div>
+              <div className="grid gap-2 text-xs">
+                <InfoRow label="Status" value={question?.status || 'N/A'} />
+                <InfoRow label="Item" value={question?.itemId || 'N/A'} />
+                <InfoRow label="Comprador" value={question?.buyerName || question?.buyerId || 'N/A'} />
+                <InfoRow label="Criada em" value={formatDateTime(question?.sortKey)} />
+                <InfoRow label="Respondida em" value={question?.answeredAt || 'N/A'} />
+              </div>
+              {question?.itemPermalink && (
+                <Button asChild variant="outline" size="sm" className="w-full">
+                  <a href={question.itemPermalink} target="_blank" rel="noreferrer">
+                    Abrir anúncio
+                  </a>
+                </Button>
+              )}
+            </section>
+          </div>
+        </aside>
+      </div>
+    </Card>
+  );
+}
+
 function SupportSidePanel(props: {
   conv: MlChatConversationDoc | null;
   aiLoading: boolean;
@@ -1011,7 +1572,9 @@ function MessageBubble({ m }: { m: MlChatMessageDoc }) {
 function AtendimentoChatClient() {
   const [accounts, setAccounts] = React.useState<MlAccountSummary[]>([]);
   const [accountId, setAccountId] = React.useState<string | null>(null);
+  const [mode, setMode] = React.useState<AtendimentoMode>('messages');
   const [selectedPackId, setSelectedPackId] = React.useState<string | null>(null);
+  const [selectedQuestionId, setSelectedQuestionId] = React.useState<string | null>(null);
   const [refreshKey, setRefreshKey] = React.useState(0);
   const [syncing, setSyncing] = React.useState(false);
   const { toast } = useToast();
@@ -1031,13 +1594,24 @@ function AtendimentoChatClient() {
     if (!accountId) return;
     setSyncing(true);
     try {
-      const r = await fetch(`/api/ml/chat/conversations?accountId=${accountId}&backfill=1`);
+      const endpoint =
+        mode === 'messages'
+          ? `/api/ml/chat/conversations?accountId=${accountId}&backfill=1`
+          : `/api/ml/questions?accountId=${accountId}&backfill=1&status=UNANSWERED`;
+      const r = await fetch(endpoint);
       const j = await r.json();
       if (!r.ok || !j?.ok) throw new Error(j?.error || 'Falha');
-      toast({
-        title: 'Sincronização concluída',
-        description: `Verificadas ${j.scanned} conversas - ${j.synced} sincronizadas, ${j.errors} erros.`,
-      });
+      if (mode === 'messages') {
+        toast({
+          title: 'Sincronização concluída',
+          description: `Verificadas ${j.scanned} conversas - ${j.synced} sincronizadas, ${j.errors} erros.`,
+        });
+      } else {
+        toast({
+          title: 'Perguntas sincronizadas',
+          description: `Verificadas ${j.scanned} perguntas - ${j.synced} sincronizadas, ${j.errors} erros.`,
+        });
+      }
       setRefreshKey((key) => key + 1);
     } catch (e: any) {
       toast({ variant: 'destructive', title: 'Erro', description: e?.message });
@@ -1062,6 +1636,7 @@ function AtendimentoChatClient() {
               onValueChange={(v) => {
                 setAccountId(v || null);
                 setSelectedPackId(null);
+                setSelectedQuestionId(null);
               }}
             >
               <SelectTrigger className="w-[260px]">
@@ -1076,34 +1651,73 @@ function AtendimentoChatClient() {
                 ))}
               </SelectContent>
             </Select>
+            <div className="flex rounded-md border p-1">
+              <Button
+                size="sm"
+                variant={mode === 'messages' ? 'default' : 'ghost'}
+                className="h-8 gap-2"
+                onClick={() => setMode('messages')}
+              >
+                <MessageSquare className="h-4 w-4" />
+                Pós-venda
+              </Button>
+              <Button
+                size="sm"
+                variant={mode === 'questions' ? 'default' : 'ghost'}
+                className="h-8 gap-2"
+                onClick={() => setMode('questions')}
+              >
+                <CircleHelp className="h-4 w-4" />
+                Perguntas
+              </Button>
+            </div>
             <Button onClick={handleSyncAll} disabled={!accountId || syncing} variant="outline">
               {syncing ? (
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
               ) : (
                 <RefreshCw className="mr-2 h-4 w-4" />
               )}
-              Sincronizar não-lidas
+              {mode === 'messages' ? 'Sincronizar não-lidas' : 'Sincronizar perguntas'}
             </Button>
           </div>
         </div>
 
         <div className="grid flex-1 grid-cols-1 gap-3 overflow-hidden lg:grid-cols-12">
           <div className="overflow-hidden lg:col-span-4">
-            <ConversationList
-              accountId={accountId}
-              selectedPackId={selectedPackId}
-              currentUserEmail={user?.email}
-              refreshKey={refreshKey}
-              onSelect={setSelectedPackId}
-            />
+            {mode === 'messages' ? (
+              <ConversationList
+                accountId={accountId}
+                selectedPackId={selectedPackId}
+                currentUserEmail={user?.email}
+                refreshKey={refreshKey}
+                onSelect={setSelectedPackId}
+              />
+            ) : (
+              <QuestionList
+                accountId={accountId}
+                selectedQuestionId={selectedQuestionId}
+                currentUserEmail={user?.email}
+                refreshKey={refreshKey}
+                onSelect={setSelectedQuestionId}
+              />
+            )}
           </div>
           <div className="overflow-hidden lg:col-span-8">
-            {accountId && (
+            {accountId && mode === 'messages' && (
               <ConversationPanel
                 accountId={accountId}
                 packId={selectedPackId}
                 refreshKey={refreshKey}
                 currentUser={user}
+              />
+            )}
+            {accountId && mode === 'questions' && (
+              <QuestionPanel
+                accountId={accountId}
+                questionId={selectedQuestionId}
+                refreshKey={refreshKey}
+                currentUser={user}
+                onChanged={() => setRefreshKey((key) => key + 1)}
               />
             )}
           </div>

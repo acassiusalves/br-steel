@@ -15,7 +15,7 @@
 
 import { adminDb } from '@/lib/firebase-admin';
 import { FieldValue } from 'firebase-admin/firestore';
-import { getPackMessages, getMessageById, getUnreadConversations } from './messaging';
+import { getPackMessages, getMessageById, getUnreadConversations, getOrderDetails } from './messaging';
 import { getMlToken } from '@/services/mercadolivre';
 import type {
   MlChatConversationDoc,
@@ -40,6 +40,63 @@ function isAgentUser(siteId: string | undefined, userId: string | number | null)
   if (!siteId || userId == null) return false;
   const agentId = ML_AGENT_USER_IDS[siteId];
   return !!agentId && String(agentId) === String(userId);
+}
+
+type OrderContext = {
+  buyerHint?: { id?: string | number | null; name?: string | null; email?: string | null };
+  orderIds?: string[];
+  shippingId?: string | number | null;
+  itemTitles?: string[];
+};
+
+function cleanString(value: unknown): string | null {
+  const text = String(value ?? '').trim();
+  return text ? text : null;
+}
+
+function readBuyerName(buyer: any): string | null {
+  return (
+    cleanString(buyer?.nickname) ||
+    cleanString([buyer?.first_name, buyer?.last_name].filter(Boolean).join(' ')) ||
+    cleanString(buyer?.name) ||
+    null
+  );
+}
+
+async function loadOrderContext(opts: {
+  packId: string;
+  token: string;
+}): Promise<OrderContext | null> {
+  try {
+    const order = await getOrderDetails({ orderId: opts.packId, token: opts.token });
+    const itemTitles = Array.from(
+      new Set(
+        (order?.order_items || [])
+          .map((entry: any) => cleanString(entry?.item?.title))
+          .filter(Boolean)
+      )
+    ).slice(0, 5) as string[];
+
+    return {
+      buyerHint: {
+        id: order?.buyer?.id ?? null,
+        name: readBuyerName(order?.buyer),
+        email: cleanString(order?.buyer?.email),
+      },
+      orderIds: order?.id ? [String(order.id)] : [],
+      shippingId: order?.shipping?.id ?? order?.shipping?.shipment_id ?? null,
+      itemTitles,
+    };
+  } catch (e: any) {
+    const status = Number(e?.status || 0);
+    if (status && status !== 404) {
+      console.warn('[chat-sync] loadOrderContext falhou', {
+        packId: opts.packId,
+        error: e?.message || e,
+      });
+    }
+    return null;
+  }
 }
 
 function inferPriority(args: {
@@ -86,8 +143,9 @@ function buildConversationDocs(args: {
   sellerId: number;
   resp: MlMessagesPackResponse;
   buyerHint?: { id?: string | number | null; name?: string | null; email?: string | null };
+  orderHint?: Pick<OrderContext, 'orderIds' | 'shippingId' | 'itemTitles'> | null;
 }): { conv: Partial<MlChatConversationDoc>; messages: MlChatMessageDoc[] } {
-  const { packId, accountId, sellerId, resp, buyerHint } = args;
+  const { packId, accountId, sellerId, resp, buyerHint, orderHint } = args;
   const now = Date.now();
   const cs = resp.conversation_status || {};
   const rawMessages = resp.messages || [];
@@ -167,7 +225,9 @@ function buildConversationDocs(args: {
     conversationStatusPath: cs.path || null,
     statusUpdateAllowed: cs.status_update_allowed ?? false,
     claimId: (cs.claim_id ?? cs.claim_ids?.[0]) ?? null,
-    shippingId: cs.shipping_id ?? null,
+    shippingId: cs.shipping_id ?? orderHint?.shippingId ?? null,
+    orderIds: orderHint?.orderIds || [],
+    itemTitles: orderHint?.itemTitles || [],
     lastMessageAt: last?.sortKey || null,
     lastMessagePreview: last?.text?.slice(0, 160) || '',
     lastMessageDirection: last?.direction,
@@ -199,12 +259,15 @@ export async function syncConversation(opts: {
     token,
     markAsRead: false,
   });
+  const orderContext = await loadOrderContext({ packId: opts.packId, token });
 
   const { conv, messages } = buildConversationDocs({
     packId: opts.packId,
     accountId: opts.accountId,
     sellerId: opts.sellerId,
     resp,
+    buyerHint: orderContext?.buyerHint,
+    orderHint: orderContext,
   });
 
   const batch = adminDb.batch();
