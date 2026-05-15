@@ -9,8 +9,6 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Loader2, AlertCircle } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
-import { doc, updateDoc } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
 import { useAuth } from '@/contexts/AuthContext';
 
@@ -28,6 +26,7 @@ export default function PerfilPageClient() {
         setIsSaving(true);
         const formData = new FormData(event.currentTarget);
         const newName = formData.get('name') as string;
+        const currentPassword = formData.get('current-password') as string;
         const newPassword = formData.get('new-password') as string;
         const confirmPassword = formData.get('confirm-password') as string;
 
@@ -38,30 +37,31 @@ export default function PerfilPageClient() {
         }
 
         try {
-            const userDocRef = doc(db, 'users', user.id);
-            const dataToUpdate: any = {
-                name: newName
-            };
-
-            if (mustChangePassword && newPassword) {
-                // In a real app, you would call Firebase Auth to update the password.
-                // Here, we just update the flag in Firestore.
-                dataToUpdate.mustChangePassword = false;
+            const response = await fetch('/api/auth/profile', {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    name: newName,
+                    currentPassword,
+                    newPassword,
+                }),
+            });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok || !data?.ok) {
+                throw new Error(data?.error || 'Não foi possível salvar as alterações.');
             }
-            
-            await updateDoc(userDocRef, dataToUpdate);
 
             // Atualiza o contexto global
-            updateUser({ name: newName, mustChangePassword: false });
-            if (mustChangePassword) setMustChangePassword(false);
+            updateUser(data.user || { name: newName, mustChangePassword: false });
+            setMustChangePassword(!!data.user?.mustChangePassword);
 
 
             toast({
                 title: "Perfil Atualizado!",
                 description: "Suas informações foram salvas com sucesso."
             });
-        } catch (error) {
-             toast({ variant: 'destructive', title: 'Erro', description: 'Não foi possível salvar as alterações.' });
+        } catch (error: any) {
+             toast({ variant: 'destructive', title: 'Erro', description: error?.message || 'Não foi possível salvar as alterações.' });
         } finally {
             setIsSaving(false);
         }
@@ -123,7 +123,7 @@ export default function PerfilPageClient() {
                              {!mustChangePassword && (
                                 <div className="space-y-2">
                                     <Label htmlFor="current-password">Senha Atual</Label>
-                                    <Input id="current-password" type="password" />
+                                    <Input id="current-password" name="current-password" type="password" />
                                 </div>
                              )}
                              <div className="grid grid-cols-1 gap-6 md:grid-cols-2">

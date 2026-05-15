@@ -2,19 +2,90 @@ rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Permite leitura e escrita em toda a base de dados.
-    // ATENÇÃO: Use apenas para desenvolvimento e prototipagem.
-    match /{document=**} {
-      allow read, write: if true;
+    // A autenticação principal do app ainda não emite Firebase Auth tokens.
+    // Por isso, as coleções legadas abaixo continuam abertas temporariamente
+    // até serem migradas para APIs server-side. O catch-all global foi removido
+    // para impedir exposição acidental de novas coleções sensíveis.
+    function legacyClientAccess() {
+      return true;
     }
 
-    // Regras específicas para coleções (exemplo)
+    // Conversas e credenciais do Mercado Livre devem ser acessadas apenas por
+    // API routes/server actions com Admin SDK.
+    match /mercadoLivreConversations/{document=**} {
+      allow read, write: if false;
+    }
+
+    match /mercadoLivreAccounts/{document=**} {
+      allow read, write: if false;
+    }
+
     match /users/{userId} {
-      allow read, write: if true;
+      allow read, write: if legacyClientAccess();
+
+      match /{document=**} {
+        allow read, write: if legacyClientAccess();
+      }
     }
 
-    match /appSettings/{settingId} {
-      allow read, write: if true;
+    match /appSettings/{document=**} {
+      allow read, write: if legacyClientAccess();
+    }
+
+    match /appConfig/{document=**} {
+      allow read, write: if legacyClientAccess();
+    }
+
+    match /supplies/{document=**} {
+      allow read, write: if legacyClientAccess();
+    }
+
+    match /inventoryMovements/{document=**} {
+      allow read, write: if legacyClientAccess();
+    }
+
+    match /salesOrders/{document=**} {
+      allow read, write: if legacyClientAccess();
+    }
+
+    match /productionColumns/{document=**} {
+      allow read, write: if legacyClientAccess();
+    }
+
+    match /productionLots/{document=**} {
+      allow read, write: if legacyClientAccess();
+    }
+
+    match /productionLotItems/{document=**} {
+      allow read, write: if legacyClientAccess();
+    }
+
+    match /productionComments/{document=**} {
+      allow read, write: if legacyClientAccess();
+    }
+
+    match /feed_entries/{document=**} {
+      allow read, write: if legacyClientAccess();
+    }
+
+    match /product_match_training/{document=**} {
+      allow read, write: if legacyClientAccess();
+    }
+
+    match /productGroups/{document=**} {
+      allow read, write: if legacyClientAccess();
+    }
+
+    match /stockUpdates/{document=**} {
+      allow read, write: if legacyClientAccess();
+    }
+
+    match /webhookDebugLogs/{document=**} {
+      allow read, write: if legacyClientAccess();
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
     }
   }
 }

@@ -13,6 +13,7 @@ export const pagePermissions: Record<string, string[]> = {
     '/producao/kanban': ['Administrador', 'Operador'],
     '/insumos': ['Administrador', 'Operador'],
     '/estoque': ['Administrador', 'Operador', 'Vendedor'],
+    '/atendimento/chat': ['Administrador', 'Operador', 'Vendedor'],
     '/configuracoes': ['Administrador'],
     '/api-settings': ['Administrador'],
     '/perfil': ['Administrador', 'Vendedor', 'Operador'],

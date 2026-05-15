@@ -19,11 +19,15 @@ import {
   ML_ATTACHMENT_ALLOWED_EXTS,
   ML_ATTACHMENT_MAX_BYTES,
 } from '@/lib/ml-chat-types';
+import { requirePagePermission } from '@/lib/server-auth';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
 export async function POST(request: Request) {
+  const auth = await requirePagePermission(request, '/atendimento/chat');
+  if (!auth.ok) return auth.response;
+
   let form: FormData;
   try {
     form = await request.formData();

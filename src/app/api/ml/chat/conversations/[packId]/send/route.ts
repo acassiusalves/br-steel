@@ -16,12 +16,13 @@
  */
 
 import { NextResponse } from 'next/server';
-import { sendMessageToBuyer, resolveDestinationUserId } from '@/services/ml/messaging';
+import { getPackMessages, sendMessageToBuyer, resolveDestinationUserId } from '@/services/ml/messaging';
 import { syncConversation } from '@/services/ml/chat-sync';
 import { getMlToken } from '@/services/mercadolivre';
 import { getPrimaryMlAccountIdAdmin } from '@/services/firestore-admin';
 import { adminDb } from '@/lib/firebase-admin';
 import { ML_MESSAGE_MAX_LENGTH, ML_AGENT_USER_IDS } from '@/lib/ml-chat-types';
+import { requirePagePermission } from '@/lib/server-auth';
 
 export const dynamic = 'force-dynamic';
 
@@ -29,6 +30,9 @@ export async function POST(
   request: Request,
   { params }: { params: Promise<{ packId: string }> }
 ) {
+  const auth = await requirePagePermission(request, '/atendimento/chat');
+  if (!auth.ok) return auth.response;
+
   const { packId } = await params;
 
   let body: any;
@@ -85,12 +89,10 @@ export async function POST(
     if (buyerId && ML_AGENT_USER_IDS[siteId] && String(buyerId) === String(ML_AGENT_USER_IDS[siteId])) {
       toUserId = ML_AGENT_USER_IDS[siteId];
     } else {
-      // Sem campo conversationStatusPath salvo — usamos buyerId direto.
-      // Se a conta migrou para nova arq., a UI pode passar toUserId explicitamente.
       toUserId =
         resolveDestinationUserId({
           siteId,
-          conversationStatusPath: undefined,
+          conversationStatusPath: conv?.conversationStatusPath,
           buyerId,
         }) ?? buyerId;
     }
@@ -111,6 +113,8 @@ export async function POST(
     direction: 'out',
     fromUserId: sellerId,
     toUserId,
+    toIsAgent:
+      !!ML_AGENT_USER_IDS[siteId] && String(toUserId) === String(ML_AGENT_USER_IDS[siteId]),
     text,
     attachments: [],
     status: 'pending',
@@ -131,8 +135,19 @@ export async function POST(
       attachments,
       token,
     });
+    await getPackMessages({ packId, sellerId, token, markAsRead: true }).catch(() => undefined);
     // Re-sincroniza para puxar a mensagem real (com ID definitivo do ML).
     const result = await syncConversation({ packId, accountId, sellerId });
+    await convRef.set(
+      {
+        queueStatus: 'waiting_customer',
+        firstUnreadAt: null,
+        slaDueAt: null,
+        lastHumanReplyAt: Date.now(),
+        updatedAt: Date.now(),
+      },
+      { merge: true }
+    );
     // Apaga o doc pendente (a mensagem real já foi gravada com o ID do ML).
     await pendingRef.delete().catch(() => undefined);
     return NextResponse.json({ ok: true, ...result });

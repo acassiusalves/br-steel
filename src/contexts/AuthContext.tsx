@@ -1,8 +1,6 @@
 "use client";
 
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
-import { collection, query, where, getDocs, doc, getDoc, updateDoc } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
 import { pagePermissions } from '@/lib/permissions';
 import type { User } from '@/types/user';
 
@@ -12,7 +10,7 @@ interface AuthContextType {
     inactivePages: string[];
     isAuthenticated: boolean;
     isLoading: boolean;
-    login: (email: string) => Promise<{ success: boolean; mustChangePassword?: boolean; error?: string }>;
+    login: (email: string, password: string) => Promise<{ success: boolean; mustChangePassword?: boolean; error?: string }>;
     logout: () => void;
     refreshPermissions: () => Promise<void>;
     updateUser: (userData: Partial<User>) => void;
@@ -36,9 +34,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const [isAuthenticated, setIsAuthenticated] = useState(false);
     const [isLoading, setIsLoading] = useState(true);
 
-    // Carrega dados do localStorage ao montar (rehidratação)
+    // Carrega dados do localStorage ao montar e confirma a sessão HttpOnly no servidor.
     useEffect(() => {
-        const loadFromStorage = () => {
+        const loadFromStorage = async () => {
             try {
                 const storedAuth = localStorage.getItem(STORAGE_KEYS.isAuthenticated);
                 const storedUser = localStorage.getItem(STORAGE_KEYS.userData);
@@ -55,6 +53,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                     if (storedInactivePages) {
                         setInactivePages(JSON.parse(storedInactivePages));
                     }
+                }
+
+                const response = await fetch('/api/auth/me', { cache: 'no-store' });
+                if (response.ok) {
+                    const data = await response.json();
+                    if (data?.ok && data?.user) {
+                        setUser(data.user);
+                        setPermissions(data.permissions || pagePermissions);
+                        setInactivePages(data.inactivePages || []);
+                        setIsAuthenticated(true);
+                        saveToStorage(data.user, data.permissions || pagePermissions, data.inactivePages || []);
+                    }
+                } else {
+                    setUser(null);
+                    setIsAuthenticated(false);
+                    clearStorage();
                 }
             } catch (error) {
                 console.error('Erro ao carregar dados do localStorage:', error);
@@ -80,59 +94,30 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         localStorage.setItem(STORAGE_KEYS.inactivePages, JSON.stringify(inactive));
     };
 
-    const fetchAppSettings = async (): Promise<{ permissions: Record<string, string[]>; inactivePages: string[] }> => {
+    const login = useCallback(async (email: string, password: string): Promise<{ success: boolean; mustChangePassword?: boolean; error?: string }> => {
         try {
-            const settingsRef = doc(db, "appSettings", "general");
-            const docSnap = await getDoc(settingsRef);
-
-            if (docSnap.exists()) {
-                const data = docSnap.data();
-                const firestorePerms = data.permissions || {};
-                // Merge: defaults do código + Firestore (Firestore tem prioridade)
-                const mergedPermissions = { ...pagePermissions, ...firestorePerms };
-                return {
-                    permissions: mergedPermissions,
-                    inactivePages: data.inactivePages || [],
-                };
+            const response = await fetch('/api/auth/login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ email, password }),
+            });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok || !data?.ok) {
+                return { success: false, error: data?.error || 'Usuário ou senha inválidos' };
             }
-        } catch (error) {
-            console.error('Erro ao carregar appSettings:', error);
-        }
-
-        return { permissions: pagePermissions, inactivePages: [] };
-    };
-
-    const login = useCallback(async (email: string): Promise<{ success: boolean; mustChangePassword?: boolean; error?: string }> => {
-        try {
-            // Busca usuário no Firebase
-            const userQuery = query(collection(db, "users"), where("email", "==", email));
-            const userSnapshot = await getDocs(userQuery);
-
-            if (userSnapshot.empty) {
-                return { success: false, error: 'Usuário não encontrado' };
-            }
-
-            const userDoc = userSnapshot.docs[0];
-            const userData = { id: userDoc.id, ...userDoc.data() } as User;
-
-            // Atualiza último login
-            await updateDoc(userDoc.ref, { lastLogin: new Date().toISOString() });
-
-            // Busca permissões (em paralelo se possível, mas aqui já temos o user)
-            const { permissions: appPerms, inactivePages: inactive } = await fetchAppSettings();
 
             // Salva no state
-            setUser(userData);
-            setPermissions(appPerms);
-            setInactivePages(inactive);
+            setUser(data.user);
+            setPermissions(data.permissions || pagePermissions);
+            setInactivePages(data.inactivePages || []);
             setIsAuthenticated(true);
 
             // Salva no localStorage para persistência
-            saveToStorage(userData, appPerms, inactive);
+            saveToStorage(data.user, data.permissions || pagePermissions, data.inactivePages || []);
 
             return {
                 success: true,
-                mustChangePassword: userData.mustChangePassword
+                mustChangePassword: data.user?.mustChangePassword
             };
         } catch (error) {
             console.error('Erro no login:', error);
@@ -146,12 +131,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setInactivePages([]);
         setIsAuthenticated(false);
         clearStorage();
+        fetch('/api/auth/logout', { method: 'POST' }).catch(() => undefined);
     }, []);
 
     const refreshPermissions = useCallback(async () => {
-        const { permissions: appPerms, inactivePages: inactive } = await fetchAppSettings();
+        const response = await fetch('/api/auth/me', { cache: 'no-store' });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok || !data?.ok) {
+            setPermissions(pagePermissions);
+            setInactivePages([]);
+            localStorage.setItem(STORAGE_KEYS.permissions, JSON.stringify(pagePermissions));
+            localStorage.setItem(STORAGE_KEYS.inactivePages, JSON.stringify([]));
+            return;
+        }
+
+        const appPerms = data.permissions || pagePermissions;
+        const inactive = data.inactivePages || [];
         setPermissions(appPerms);
         setInactivePages(inactive);
+        if (data.user) setUser(data.user);
 
         // Atualiza localStorage
         localStorage.setItem(STORAGE_KEYS.permissions, JSON.stringify(appPerms));

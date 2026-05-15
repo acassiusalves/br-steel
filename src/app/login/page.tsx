@@ -40,10 +40,11 @@ export default function LoginPage() {
 
     const formData = new FormData(event.currentTarget);
     const email = formData.get('email') as string;
+    const password = formData.get('password') as string;
 
     try {
         // Login via AuthContext - carrega user + permissions de uma vez
-        const result = await login(email);
+        const result = await login(email, password);
 
         if (!result.success) {
             throw new Error(result.error || "Usuário ou senha inválidos.");
@@ -94,7 +95,6 @@ export default function LoginPage() {
                 type="email" 
                 placeholder="seu@email.com" 
                 required 
-                defaultValue="admin@brsteel.com"
               />
             </div>
             <div className="space-y-2">
@@ -104,7 +104,6 @@ export default function LoginPage() {
                 name="password"
                 type="password" 
                 required 
-                defaultValue="123456"
               />
             </div>
           </CardContent>

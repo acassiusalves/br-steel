@@ -9,8 +9,8 @@
  *      mercadoLivreConversations/{packId}/messages/{messageId} e atualizamos
  *      os metadados em mercadoLivreConversations/{packId}.
  *
- * O cliente da UI escuta esses documentos via onSnapshot, garantindo
- * atualização em tempo real após a sincronização.
+ * A UI lê esses documentos por APIs protegidas e faz polling leve para
+ * refletir atualizações sem expor o Firestore direto no navegador.
  */
 
 import { adminDb } from '@/lib/firebase-admin';
@@ -21,14 +21,60 @@ import type {
   MlChatConversationDoc,
   MlChatMessageDoc,
   MlMessagesPackResponse,
+  MlSupportPriority,
+  MlSupportQueueStatus,
 } from '@/lib/ml-chat-types';
+import { ML_AGENT_USER_IDS } from '@/lib/ml-chat-types';
 
 const CONVERSATIONS_COLL = 'mercadoLivreConversations';
+const DEFAULT_SLA_MS = 4 * 60 * 60 * 1000;
+const HIGH_PRIORITY_SLA_MS = 2 * 60 * 60 * 1000;
 
 function toEpoch(iso?: string | null): number {
   if (!iso) return 0;
   const t = Date.parse(iso);
   return Number.isFinite(t) ? t : 0;
+}
+
+function isAgentUser(siteId: string | undefined, userId: string | number | null): boolean {
+  if (!siteId || userId == null) return false;
+  const agentId = ML_AGENT_USER_IDS[siteId];
+  return !!agentId && String(agentId) === String(userId);
+}
+
+function inferPriority(args: {
+  existing?: MlChatConversationDoc;
+  conv: Partial<MlChatConversationDoc>;
+  firstUnreadAt: number | null;
+  now: number;
+}): MlSupportPriority {
+  if (args.existing?.priority) return args.existing.priority;
+  const substatus = String(args.conv.substatus || '');
+  if (args.conv.claimId || substatus.includes('mediation')) return 'high';
+  if (args.firstUnreadAt && args.now - args.firstUnreadAt > DEFAULT_SLA_MS) return 'high';
+  if (args.conv.status === 'blocked') return 'low';
+  return 'normal';
+}
+
+function inferQueueStatus(args: {
+  existing?: MlChatConversationDoc;
+  conv: Partial<MlChatConversationDoc>;
+}): MlSupportQueueStatus {
+  const existingStatus = args.existing?.queueStatus;
+  const hasNewCustomerMessage =
+    args.conv.lastMessageDirection === 'in' &&
+    !!args.conv.lastMessageAt &&
+    args.conv.lastMessageAt !== args.existing?.lastMessageAt;
+
+  if (
+    hasNewCustomerMessage &&
+    (!existingStatus || ['waiting_customer', 'resolved', 'ignored'].includes(existingStatus))
+  ) {
+    return 'new';
+  }
+
+  if (existingStatus) return existingStatus;
+  return (args.conv.unreadCount || 0) > 0 ? 'new' : 'open';
 }
 
 /**
@@ -74,6 +120,7 @@ function buildConversationDocs(args: {
       direction,
       fromUserId: fromId,
       toUserId: toId,
+      toIsAgent: isAgentUser(m.site_id || 'MLB', toId),
       text: m.text || '',
       attachments: m.message_attachments || [],
       status: m.status,
@@ -101,6 +148,9 @@ function buildConversationDocs(args: {
   const sorted = [...messages].sort((a, b) => a.sortKey - b.sortKey);
   const last = sorted[sorted.length - 1];
   const unreadCount = messages.filter((m) => m.direction === 'in' && !m.dates.read).length;
+  const inboundMessages = sorted.filter((m) => m.direction === 'in');
+  const outboundMessages = sorted.filter((m) => m.direction === 'out');
+  const unreadMessages = inboundMessages.filter((m) => !m.dates.read);
 
   const firstMsgSite = rawMessages.find((m) => m.site_id)?.site_id;
   const conv: Partial<MlChatConversationDoc> = {
@@ -114,6 +164,7 @@ function buildConversationDocs(args: {
     status: (cs.status as any) || 'active',
     substatus: (cs.substatus as any) || null,
     statusDate: cs.status_date || null,
+    conversationStatusPath: cs.path || null,
     statusUpdateAllowed: cs.status_update_allowed ?? false,
     claimId: (cs.claim_id ?? cs.claim_ids?.[0]) ?? null,
     shippingId: cs.shipping_id ?? null,
@@ -121,6 +172,9 @@ function buildConversationDocs(args: {
     lastMessagePreview: last?.text?.slice(0, 160) || '',
     lastMessageDirection: last?.direction,
     unreadCount,
+    firstUnreadAt: unreadMessages[0]?.sortKey || null,
+    lastCustomerMessageAt: inboundMessages[inboundMessages.length - 1]?.sortKey || null,
+    lastHumanReplyAt: outboundMessages[outboundMessages.length - 1]?.sortKey || null,
     sellerMaxMessageLength: resp.seller_max_message_length,
     buyerMaxMessageLength: resp.buyer_max_message_length,
     syncedAt: now,
@@ -155,11 +209,33 @@ export async function syncConversation(opts: {
 
   const batch = adminDb.batch();
   const convRef = adminDb.collection(CONVERSATIONS_COLL).doc(opts.packId);
+  const existingSnap = await convRef.get();
+  const existing = existingSnap.exists ? (existingSnap.data() as MlChatConversationDoc) : undefined;
+  const priority = inferPriority({
+    existing,
+    conv,
+    firstUnreadAt: conv.firstUnreadAt ?? null,
+    now: Date.now(),
+  });
+  const queueStatus = inferQueueStatus({ existing, conv });
+  const slaBase = conv.firstUnreadAt ?? conv.lastCustomerMessageAt ?? null;
+  const slaDueAt =
+    (conv.unreadCount || 0) > 0 && slaBase
+      ? existing?.slaDueAt && existing.slaDueAt > Date.now()
+        ? existing.slaDueAt
+        : slaBase + (priority === 'high' || priority === 'urgent' ? HIGH_PRIORITY_SLA_MS : DEFAULT_SLA_MS)
+      : null;
+
   batch.set(
     convRef,
     {
       ...conv,
-      createdAt: FieldValue.serverTimestamp() as any,
+      queueStatus,
+      priority,
+      tags: existing?.tags || [],
+      assignedTo: existing?.assignedTo || null,
+      slaDueAt,
+      ...(existingSnap.exists ? {} : { createdAt: FieldValue.serverTimestamp() as any }),
     },
     { merge: true }
   );

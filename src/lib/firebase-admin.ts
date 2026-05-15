@@ -11,11 +11,36 @@ import * as path from "path";
 // 2. service-account.json file in project root
 // 3. Application Default Credentials
 
+function parseServiceAccountKey(raw: string) {
+  const trimmed = raw.trim();
+  const unwrapped =
+    trimmed.startsWith('"') && trimmed.endsWith('"') ? trimmed.slice(1, -1) : trimmed;
+  const candidates = [
+    raw,
+    trimmed,
+    unwrapped,
+    raw.replace(/\r?\n/g, '\\n'),
+    trimmed.replace(/\r?\n/g, '\\n'),
+    unwrapped.replace(/\r?\n/g, '\\n'),
+  ];
+
+  let lastError: unknown;
+  for (const candidate of candidates) {
+    try {
+      return JSON.parse(candidate);
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  throw lastError;
+}
+
 function getCredential() {
   // 1. Try explicit service account key from environment
   if (process.env.FIREBASE_SERVICE_ACCOUNT_KEY) {
     try {
-      const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_KEY);
+      const serviceAccount = parseServiceAccountKey(process.env.FIREBASE_SERVICE_ACCOUNT_KEY);
       console.log("[Firebase Admin] Using credentials from FIREBASE_SERVICE_ACCOUNT_KEY env var");
       return cert(serviceAccount);
     } catch (e) {
@@ -48,8 +73,14 @@ function getCredential() {
 let app;
 
 // Get project ID and storage bucket from environment
-const projectId = process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || process.env.FIREBASE_PROJECT_ID;
-const storageBucket = process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET || process.env.FIREBASE_STORAGE_BUCKET;
+const projectId =
+  process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID ||
+  process.env.FIREBASE_PROJECT_ID ||
+  "marketflow-9h4tg";
+const storageBucket =
+  process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET ||
+  process.env.FIREBASE_STORAGE_BUCKET ||
+  "marketflow-9h4tg.firebasestorage.app";
 
 if (getApps().length === 0) {
   const credential = getCredential();

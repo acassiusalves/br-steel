@@ -43,6 +43,15 @@ export type MlConversationSubstatus =
 
 export type MlConversationStatus = 'active' | 'blocked' | string;
 
+export type MlSupportQueueStatus =
+  | 'new'
+  | 'open'
+  | 'waiting_customer'
+  | 'resolved'
+  | 'ignored';
+
+export type MlSupportPriority = 'low' | 'normal' | 'high' | 'urgent';
+
 /** Status de moderação aplicado pelo ML em uma mensagem. */
 export type MlMessageModerationStatus =
   | 'clean'
@@ -155,6 +164,7 @@ export interface MlChatConversationDoc {
   status: MlConversationStatus;
   substatus?: MlConversationSubstatus | null;
   statusDate?: string | null;
+  conversationStatusPath?: string | null;
   /** Permite UI desabilitar input quando status_update_allowed = false. */
   statusUpdateAllowed?: boolean;
 
@@ -164,6 +174,33 @@ export interface MlChatConversationDoc {
   /** Limites informados pela API. */
   sellerMaxMessageLength?: number;
   buyerMaxMessageLength?: number;
+
+  /** Metadados internos para operação da fila de atendimento. */
+  queueStatus?: MlSupportQueueStatus;
+  priority?: MlSupportPriority;
+  tags?: string[];
+  assignedTo?: {
+    id?: string | null;
+    name?: string | null;
+    email?: string | null;
+  } | null;
+  firstUnreadAt?: number | null;
+  lastCustomerMessageAt?: number | null;
+  lastHumanReplyAt?: number | null;
+  slaDueAt?: number | null;
+  ai?: {
+    summary?: string;
+    intent?: string;
+    urgency?: MlSupportPriority;
+    confidence?: number;
+    suggestedReply?: string;
+    nextAction?: string;
+    risks?: string[];
+    needsHumanReview?: boolean;
+    status?: 'ready' | 'needs_review' | 'error';
+    lastError?: string | null;
+    updatedAt?: number;
+  };
 
   /** Última sincronização com o ML. */
   syncedAt: number;
