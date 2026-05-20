@@ -18,6 +18,11 @@ import {
     listMlMcpTools as _listMlMcpTools,
     type MlMcpCallResult,
 } from '@/services/ml-mcp';
+import {
+    getGeminiCredentialsAdmin,
+    saveGeminiCredentialsAdmin,
+    type GeminiCredentialsPublic,
+} from '@/services/gemini-config';
 
 
 // Bling API actions
@@ -34,6 +39,15 @@ type BlingCredentials = {
 
 const credentialsDocRef = doc(db, "appConfig", "blingCredentials");
 const syncProgressDocRef = doc(db, "appConfig", "syncProgress");
+
+// Gemini / IA
+export async function getGeminiCredentials(): Promise<GeminiCredentialsPublic> {
+    return getGeminiCredentialsAdmin();
+}
+
+export async function saveGeminiCredentials(partial: { apiKey?: string }): Promise<void> {
+    await saveGeminiCredentialsAdmin(partial);
+}
 
 // --- Sync Progress Management ---
 export type SyncProgress = {

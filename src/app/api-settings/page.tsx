@@ -6,12 +6,12 @@ import { Suspense } from 'react';
 import DashboardLayout from '@/components/dashboard-layout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Loader2, Copy, Save, CheckCircle, XCircle, Plug, Sheet, Database, Trash2 } from 'lucide-react';
+import { Loader2, Copy, Save, CheckCircle, XCircle, Plug, Sheet, Database, Trash2, KeyRound } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useToast } from '@/hooks/use-toast';
-import { getBlingCredentials, saveBlingCredentials, disconnectBling, countImportedOrders, smartSyncOrders, fullSyncOrders, deleteAllSalesOrders, getMercadoLivreCredentials, saveMercadoLivreCredentials, disconnectMercadoLivre, pingMlConnection, startMlOAuth, listMlAccounts, setPrimaryMlAccount, deleteMlAccount, getMlAppConfigStatus, type SyncProgress, type MlAccountSummary } from '@/app/actions';
+import { getBlingCredentials, saveBlingCredentials, disconnectBling, countImportedOrders, smartSyncOrders, fullSyncOrders, deleteAllSalesOrders, getMercadoLivreCredentials, saveMercadoLivreCredentials, disconnectMercadoLivre, pingMlConnection, startMlOAuth, listMlAccounts, setPrimaryMlAccount, deleteMlAccount, getMlAppConfigStatus, getGeminiCredentials, saveGeminiCredentials, type SyncProgress, type MlAccountSummary } from '@/app/actions';
 import { format, startOfMonth, endOfMonth, subDays } from 'date-fns';
 import { Calendar as CalendarIcon } from 'lucide-react';
 import type { DateRange } from 'react-day-picker';
@@ -71,6 +71,12 @@ function ApiSettingsContent() {
   const [mlAccountActionId, setMlAccountActionId] = React.useState<string | null>(null);
   const [mlAppConfig, setMlAppConfig] = React.useState<{ configured: boolean; source: string; appIdMasked?: string } | null>(null);
 
+  // Gemini IA states
+  const [geminiCredentials, setGeminiCredentials] = React.useState({ apiKey: '' });
+  const [geminiStatus, setGeminiStatus] = React.useState<ApiStatus>('unchecked');
+  const [geminiSource, setGeminiSource] = React.useState<'firestore' | 'env' | 'none'>('none');
+  const [isGeminiSaving, setIsGeminiSaving] = React.useState(false);
+
   const { toast } = useToast();
   
   const refreshMlAccounts = React.useCallback(async () => {
@@ -85,12 +91,13 @@ function ApiSettingsContent() {
   const loadInitialData = React.useCallback(async () => {
     setIsLoading(true);
     try {
-        const [savedCreds, count, mlCreds, accounts, appCfg] = await Promise.all([
+        const [savedCreds, count, mlCreds, accounts, appCfg, geminiCreds] = await Promise.all([
             getBlingCredentials(),
             countImportedOrders(),
             getMercadoLivreCredentials(),
             listMlAccounts(),
             getMlAppConfigStatus(),
+            getGeminiCredentials(),
         ]);
         setMlAccounts(accounts);
         setMlAppConfig(appCfg);
@@ -102,6 +109,9 @@ function ApiSettingsContent() {
         setMlCredentials(prev => ({ ...prev, appId: mlCreds.appId || '', clientSecret: mlCreds.clientSecret || '' }));
         setMlStatus(mlCreds.connected ? 'valid' : 'unchecked');
         setMlUserId(mlCreds.userId);
+        setGeminiCredentials({ apiKey: geminiCreds.apiKey || '' });
+        setGeminiStatus(geminiCreds.configured ? 'valid' : 'unchecked');
+        setGeminiSource(geminiCreds.source);
 
         // ...e revalida em background contra a API do ML (refresh + /users/me).
         // Não faz await — não bloqueia o load principal.
@@ -350,6 +360,40 @@ function ApiSettingsContent() {
     const { id, value } = e.target;
     const field = id.replace('ml-', '');
     setMlCredentials(prev => ({ ...prev, [field]: value }));
+  };
+
+  const handleGeminiInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setGeminiCredentials({ apiKey: e.target.value });
+  };
+
+  const handleGeminiSaveCredentials = async () => {
+    const apiKey = geminiCredentials.apiKey.trim();
+    if (!apiKey || apiKey === '********') {
+      toast({
+        variant: 'destructive',
+        title: 'Chave Gemini faltando',
+        description: 'Informe uma nova chave Gemini antes de salvar.',
+      });
+      return;
+    }
+
+    setIsGeminiSaving(true);
+    try {
+      await saveGeminiCredentials({ apiKey });
+      toast({
+        title: 'Chave Gemini salva',
+        description: 'O Atendimento passará a usar esta chave para gerar respostas com IA.',
+      });
+      await loadInitialData();
+    } catch (error: any) {
+      toast({
+        variant: 'destructive',
+        title: 'Erro ao salvar Gemini',
+        description: error?.message || 'Não foi possível salvar a chave.',
+      });
+    } finally {
+      setIsGeminiSaving(false);
+    }
   };
 
   const handleMlSaveCredentials = async () => {
@@ -1108,6 +1152,67 @@ function ApiSettingsContent() {
                     </p>
                   )}
                 </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Gemini IA Card */}
+        <Card>
+          <CardHeader>
+            <div className="flex justify-between items-start gap-4">
+              <div>
+                <CardTitle>Gemini IA</CardTitle>
+                <CardDescription>
+                  Chave usada pelo Atendimento para gerar respostas sugeridas.
+                </CardDescription>
+              </div>
+              <ApiStatusBadge status={geminiStatus} />
+            </div>
+          </CardHeader>
+          <CardContent>
+            {isLoading ? (
+              <div className="flex items-center justify-center p-8">
+                <Loader2 className="m-auto h-8 w-8 animate-spin" />
+              </div>
+            ) : (
+              <div className="flex max-w-lg flex-col items-start gap-4">
+                <div className="w-full space-y-2">
+                  <Label htmlFor="gemini-api-key">API Key</Label>
+                  <Input
+                    id="gemini-api-key"
+                    type="password"
+                    placeholder={geminiCredentials.apiKey === '********' ? '********' : 'Cole sua chave Gemini aqui'}
+                    value={geminiCredentials.apiKey}
+                    onChange={handleGeminiInputChange}
+                    autoComplete="off"
+                  />
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button onClick={handleGeminiSaveCredentials} disabled={isGeminiSaving}>
+                    {isGeminiSaving ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        Salvando...
+                      </>
+                    ) : (
+                      <>
+                        <KeyRound className="mr-2 h-4 w-4" />
+                        Salvar Chave Gemini
+                      </>
+                    )}
+                  </Button>
+                  {geminiSource !== 'none' && (
+                    <Badge variant="outline">
+                      Origem: {geminiSource === 'firestore' ? 'Conexão API' : 'variável de ambiente'}
+                    </Badge>
+                  )}
+                </div>
+
+                <p className="text-sm text-muted-foreground">
+                  A chave fica armazenada no servidor e aparece mascarada depois de salva.
+                </p>
               </div>
             )}
           </CardContent>

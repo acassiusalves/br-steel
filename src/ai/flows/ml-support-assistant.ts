@@ -1,6 +1,7 @@
 import { z } from 'genkit';
 import { ai } from '@/ai/genkit';
 import { ML_MESSAGE_MAX_LENGTH } from '@/lib/ml-chat-types';
+import { getGeminiApiKeyAdmin } from '@/services/gemini-config';
 
 export const MlSupportAssistantInputSchema = z.object({
   conversation: z.object({
@@ -69,6 +70,7 @@ export const mlSupportAssistantFlow = ai.defineFlow(
       })
       .join('\n');
 
+    const apiKey = await getGeminiApiKeyAdmin().catch(() => '');
     const { output } = await ai.generate({
       model: 'googleai/gemini-2.5-flash',
       system: SYSTEM_PROMPT,
@@ -90,7 +92,10 @@ ${transcript || 'Sem mensagens disponíveis.'}
 
 Retorne JSON estruturado. A resposta sugerida deve ser segura para o atendente revisar e enviar.`,
       output: { schema: MlSupportAssistantOutputSchema },
-      config: { temperature: 0.2 },
+      config: {
+        temperature: 0.2,
+        ...(apiKey ? { apiKey } : {}),
+      },
     });
 
     if (!output) {
