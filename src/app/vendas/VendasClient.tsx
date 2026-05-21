@@ -5,6 +5,7 @@ import DashboardLayout from '@/components/dashboard-layout';
 import SalesDashboard from '@/components/sales-dashboard';
 import SalesListPage from '@/components/sales-list-page';
 import SalesAbcCurve from '@/components/sales-abc-curve';
+import SalesRecurrencePage from '@/components/sales-recurrence-page';
 import { useSearchParams } from 'next/navigation';
 
 
@@ -16,6 +17,7 @@ export default function VendasClient() {
   const content =
     tab === 'dashboard' ? <SalesDashboard />
     : tab === 'curva-abc' ? <SalesAbcCurve />
+    : tab === 'recorrencia' ? <SalesRecurrencePage />
     : <SalesListPage />;
 
   return (

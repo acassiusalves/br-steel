@@ -23,6 +23,7 @@ import {
   BarChart3,
   BookOpen,
   MessageCircle,
+  RefreshCw,
 } from "lucide-react";
 import * as React from "react";
 
@@ -58,6 +59,7 @@ const allNavItems = [
             { href: "/vendas?tab=dashboard", icon: LayoutDashboard, label: "Dashboard" },
             { href: "/vendas?tab=listagem", icon: ShoppingCart, label: "Listagem" },
             { href: "/vendas?tab=curva-abc", icon: BarChart3, label: "Curva ABC" },
+            { href: "/vendas?tab=recorrencia", icon: RefreshCw, label: "Recorrência" },
         ]
     },
     {
