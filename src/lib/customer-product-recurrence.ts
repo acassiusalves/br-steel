@@ -51,6 +51,48 @@ export interface RecurrenceOpportunity {
   suggestedAction: string;
 }
 
+export interface CustomerTopProduct {
+  productKey: string;
+  productName: string;
+  skus: string[];
+  totalQuantity: number;
+  totalRevenue: number;
+}
+
+export interface CustomerRecurrenceRow {
+  key: string;
+  customerId: string;
+  customerName: string;
+  customerDocument?: string;
+  customerType?: string;
+  marketplaceNames: string[];
+  states: string[];
+  orderIds: string[];
+  orderCount: number;
+  distinctPurchaseDates: number;
+  totalQuantity: number;
+  totalRevenue: number;
+  averageOrderValue: number;
+  productCount: number;
+  skuCount: number;
+  topProducts: CustomerTopProduct[];
+  firstPurchaseDate: string | null;
+  lastPurchaseDate: string | null;
+  intervalsDays: number[];
+  averageIntervalDays: number | null;
+  medianIntervalDays: number | null;
+  intervalVariation: number | null;
+  nextExpectedDate: string | null;
+  daysSinceLastPurchase: number | null;
+  daysUntilNextExpected: number | null;
+  opportunityStatus: OpportunityStatus;
+  confidence: ConfidenceLevel;
+  confidenceScore: number;
+  priority: PriorityLevel;
+  priorityScore: number;
+  suggestedAction: string;
+}
+
 export interface RecurrenceSummary {
   ordersRead: number;
   ordersAnalyzed: number;
@@ -76,6 +118,7 @@ export interface RecurrenceSummary {
 export interface RecurrenceResult {
   summary: RecurrenceSummary;
   opportunities: RecurrenceOpportunity[];
+  customersByDocument: CustomerRecurrenceRow[];
 }
 
 type PairAggregate = {
@@ -103,9 +146,29 @@ type ProductAggregate = {
   revenue: number;
 };
 
+type CustomerProductAggregate = {
+  productKey: string;
+  productName: string;
+  skus: Set<string>;
+  totalQuantity: number;
+  totalRevenue: number;
+};
+
 type CustomerAggregate = {
+  key: string;
   customerId: string;
+  customerName: string;
+  customerDocument?: string;
+  customerType?: string;
+  marketplaceNames: Set<string>;
+  states: Set<string>;
+  orderIds: Set<string>;
   purchaseDates: Set<string>;
+  totalQuantity: number;
+  totalRevenue: number;
+  productKeys: Set<string>;
+  skus: Set<string>;
+  products: Map<string, CustomerProductAggregate>;
 };
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
@@ -178,13 +241,29 @@ function getOrderDate(order: SaleOrder): string | null {
   return order.data.slice(0, 10);
 }
 
+function normalizeDocument(document?: string): string | null {
+  const digits = String(document || '').replace(/\D/g, '');
+  return digits || null;
+}
+
 function getCustomerId(order: SaleOrder): string {
-  return String(
-    order.contato?.id ||
-      order.contato?.numeroDocumento ||
-      order.contato?.nome ||
-      'SEM_CLIENTE'
+  return (
+    normalizeDocument(order.contato?.numeroDocumento) ||
+    String(order.contato?.id || order.contato?.nome || 'SEM_CLIENTE')
   );
+}
+
+function getItemRevenue(item: SaleOrder['itens'][number]): number {
+  const quantity = Number(item.quantidade) || 0;
+  const unitPrice = Number(item.valor) || 0;
+  const discount = Number(item.desconto) || 0;
+  return Math.max(0, quantity * unitPrice - discount);
+}
+
+function getOrderRevenue(order: SaleOrder): number {
+  const orderTotal = Number(order.total);
+  if (Number.isFinite(orderTotal) && orderTotal > 0) return orderTotal;
+  return (order.itens || []).reduce((sum, item) => sum + getItemRevenue(item), 0);
 }
 
 function classifyProducts(products: Map<string, ProductAggregate>): Map<string, AbcClass> {
@@ -337,16 +416,36 @@ export function computeCustomerProductRecurrence(
     }
 
     ordersAnalyzed += 1;
-    totalRevenue += Number(order.total) || 0;
+    const orderRevenue = getOrderRevenue(order);
+    totalRevenue += orderRevenue;
     if (!minDate || orderDate < minDate) minDate = orderDate;
     if (!maxDate || orderDate > maxDate) maxDate = orderDate;
 
     const customerId = getCustomerId(order);
     const customer = customers.get(customerId) || {
+      key: customerId,
       customerId,
+      customerName: order.contato?.nome || 'Cliente sem nome',
+      customerDocument: order.contato?.numeroDocumento,
+      customerType: order.contato?.tipoPessoa,
+      marketplaceNames: new Set<string>(),
+      states: new Set<string>(),
+      orderIds: new Set<string>(),
       purchaseDates: new Set<string>(),
+      totalQuantity: 0,
+      totalRevenue: 0,
+      productKeys: new Set<string>(),
+      skus: new Set<string>(),
+      products: new Map<string, CustomerProductAggregate>(),
     };
+    if (order.contato?.numeroDocumento && !customer.customerDocument) {
+      customer.customerDocument = order.contato.numeroDocumento;
+    }
+    customer.marketplaceNames.add(getMarketplaceName(order));
+    if (order.transporte?.etiqueta?.uf) customer.states.add(order.transporte.etiqueta.uf);
+    customer.orderIds.add(String(order.id));
     customer.purchaseDates.add(orderDate);
+    customer.totalRevenue += orderRevenue;
     customers.set(customerId, customer);
 
     for (const item of order.itens) {
@@ -357,13 +456,26 @@ export function computeCustomerProductRecurrence(
       const productName = group?.canonicalName || item.descricao || sku;
       const key = `${customerId}::${productKey}`;
       const quantity = Number(item.quantidade) || 0;
-      const unitPrice = Number(item.valor) || 0;
-      const discount = Number(item.desconto) || 0;
-      const itemRevenue = Math.max(0, quantity * unitPrice - discount);
+      const itemRevenue = getItemRevenue(item);
 
       const product = products.get(productKey) || { productKey, revenue: 0 };
       product.revenue += itemRevenue;
       products.set(productKey, product);
+
+      customer.totalQuantity += quantity;
+      customer.productKeys.add(productKey);
+      customer.skus.add(sku);
+      const customerProduct = customer.products.get(productKey) || {
+        productKey,
+        productName,
+        skus: new Set<string>(),
+        totalQuantity: 0,
+        totalRevenue: 0,
+      };
+      customerProduct.skus.add(sku);
+      customerProduct.totalQuantity += quantity;
+      customerProduct.totalRevenue += itemRevenue;
+      customer.products.set(productKey, customerProduct);
 
       const pair = pairs.get(key) || {
         key,
@@ -482,6 +594,94 @@ export function computeCustomerProductRecurrence(
       return b.totalRevenue - a.totalRevenue;
     });
 
+  const customersByDocument = Array.from(customers.values())
+    .map((customer): CustomerRecurrenceRow => {
+      const dates = Array.from(customer.purchaseDates).sort();
+      const intervalsDays = dates
+        .slice(1)
+        .map((date, index) => daysBetween(dates[index], date))
+        .filter((days) => days >= 0);
+      const avgInterval = average(intervalsDays);
+      const medianInterval = median(intervalsDays);
+      const variation = coefficientOfVariation(intervalsDays);
+      const lastPurchaseDate = dates.at(-1) || null;
+      const nextExpectedDate =
+        lastPurchaseDate && medianInterval && medianInterval > 0
+          ? addDays(lastPurchaseDate, Math.round(medianInterval))
+          : null;
+      const daysSinceLastPurchase = lastPurchaseDate
+        ? daysBetween(lastPurchaseDate, currentDate)
+        : null;
+      const daysUntilNextExpected = nextExpectedDate
+        ? daysBetween(currentDate, nextExpectedDate)
+        : null;
+      const opportunityStatus = getOpportunityStatus(
+        daysUntilNextExpected,
+        lookaheadDays
+      );
+      const { confidence, confidenceScore } = getConfidence(
+        dates.length,
+        medianInterval,
+        variation
+      );
+      const { priority, priorityScore } = getPriority(
+        confidenceScore,
+        customer.totalRevenue,
+        opportunityStatus,
+        daysUntilNextExpected
+      );
+      const topProducts = Array.from(customer.products.values())
+        .sort((a, b) => b.totalRevenue - a.totalRevenue)
+        .slice(0, 5)
+        .map((product) => ({
+          productKey: product.productKey,
+          productName: product.productName,
+          skus: Array.from(product.skus).sort(),
+          totalQuantity: round(product.totalQuantity, 2),
+          totalRevenue: round(product.totalRevenue, 2),
+        }));
+
+      return {
+        key: customer.key,
+        customerId: customer.customerId,
+        customerName: customer.customerName,
+        customerDocument: customer.customerDocument,
+        customerType: customer.customerType,
+        marketplaceNames: Array.from(customer.marketplaceNames).sort(),
+        states: Array.from(customer.states).sort(),
+        orderIds: Array.from(customer.orderIds),
+        orderCount: customer.orderIds.size,
+        distinctPurchaseDates: dates.length,
+        totalQuantity: round(customer.totalQuantity, 2),
+        totalRevenue: round(customer.totalRevenue, 2),
+        averageOrderValue: round(customer.totalRevenue / Math.max(1, customer.orderIds.size), 2),
+        productCount: customer.productKeys.size,
+        skuCount: customer.skus.size,
+        topProducts,
+        firstPurchaseDate: dates[0] || null,
+        lastPurchaseDate,
+        intervalsDays,
+        averageIntervalDays: avgInterval === null ? null : round(avgInterval, 1),
+        medianIntervalDays: medianInterval === null ? null : round(medianInterval, 1),
+        intervalVariation: variation === null ? null : round(variation, 2),
+        nextExpectedDate,
+        daysSinceLastPurchase,
+        daysUntilNextExpected,
+        opportunityStatus,
+        confidence,
+        confidenceScore,
+        priority,
+        priorityScore,
+        suggestedAction: getSuggestedAction(opportunityStatus, confidence, priority),
+      };
+    })
+    .filter((row) => row.distinctPurchaseDates >= minDistinctPurchaseDates)
+    .sort((a, b) => {
+      if (b.totalRevenue !== a.totalRevenue) return b.totalRevenue - a.totalRevenue;
+      if (b.priorityScore !== a.priorityScore) return b.priorityScore - a.priorityScore;
+      return b.orderCount - a.orderCount;
+    });
+
   const recurringCustomers = Array.from(customers.values()).filter(
     (customer) => customer.purchaseDates.size >= 2
   ).length;
@@ -530,5 +730,6 @@ export function computeCustomerProductRecurrence(
       },
     },
     opportunities,
+    customersByDocument,
   };
 }

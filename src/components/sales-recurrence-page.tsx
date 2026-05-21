@@ -2,6 +2,7 @@
 
 import * as React from 'react';
 import {
+  Building2,
   Calendar as CalendarIcon,
   ChevronLeft,
   ChevronRight,
@@ -11,6 +12,7 @@ import {
   FileDown,
   Filter,
   Loader2,
+  Package,
   RefreshCw,
   Search,
   Target,
@@ -66,6 +68,9 @@ import { useToast } from '@/hooks/use-toast';
 
 type RecurrenceData = Awaited<ReturnType<typeof getCustomerProductRecurrenceData>>;
 type Opportunity = RecurrenceData['opportunities'][number];
+type CustomerRow = RecurrenceData['customersByDocument'][number];
+type RecurrenceWindow = Pick<Opportunity, 'daysUntilNextExpected'>;
+type ViewMode = 'product' | 'customer';
 type StatusFilter = OpportunityStatus | 'all';
 type ConfidenceFilter = ConfidenceLevel | 'all';
 type PriorityFilter = PriorityLevel | 'all';
@@ -168,13 +173,19 @@ const StatCard = ({
   </Card>
 );
 
-function formatNextWindow(row: Opportunity): string {
+function formatNextWindow(row: RecurrenceWindow): string {
   if (row.daysUntilNextExpected === null) return 'Sem previsão';
   if (row.daysUntilNextExpected < 0) {
     return `${Math.abs(row.daysUntilNextExpected)} dias atrasada`;
   }
   if (row.daysUntilNextExpected === 0) return 'Vence hoje';
   return `Em ${row.daysUntilNextExpected} dias`;
+}
+
+function getTopProductsTitle(row: CustomerRow): string {
+  return row.topProducts
+    .map((product) => `${product.productName} - ${formatCurrency(product.totalRevenue)}`)
+    .join(' | ');
 }
 
 function getDateButtonLabel(date: DateRange | undefined): string {
@@ -198,6 +209,7 @@ export default function SalesRecurrencePage() {
   const [confidenceFilter, setConfidenceFilter] =
     React.useState<ConfidenceFilter>('all');
   const [priorityFilter, setPriorityFilter] = React.useState<PriorityFilter>('all');
+  const [viewMode, setViewMode] = React.useState<ViewMode>('product');
   const [searchTerm, setSearchTerm] = React.useState('');
   const [currentPage, setCurrentPage] = React.useState(1);
   const [rowsPerPage, setRowsPerPage] = React.useState(20);
@@ -234,7 +246,11 @@ export default function SalesRecurrencePage() {
     fetchData();
   }, [fetchData]);
 
-  const filteredRows = React.useMemo(() => {
+  React.useEffect(() => {
+    setCurrentPage(1);
+  }, [viewMode]);
+
+  const filteredOpportunityRows = React.useMemo(() => {
     let rows = data?.opportunities || [];
 
     if (statusFilter !== 'all') {
@@ -254,9 +270,11 @@ export default function SalesRecurrencePage() {
       rows = rows.filter((row) => {
         return (
           row.customerName.toLowerCase().includes(search) ||
+          (row.customerDocument || '').toLowerCase().includes(search) ||
           row.productName.toLowerCase().includes(search) ||
           row.skus.some((sku) => sku.toLowerCase().includes(search)) ||
-          row.marketplaceNames.some((name) => name.toLowerCase().includes(search))
+          row.marketplaceNames.some((name) => name.toLowerCase().includes(search)) ||
+          row.states.some((state) => state.toLowerCase().includes(search))
         );
       });
     }
@@ -264,11 +282,57 @@ export default function SalesRecurrencePage() {
     return rows;
   }, [data, statusFilter, confidenceFilter, priorityFilter, searchTerm]);
 
-  const totalPages = Math.max(1, Math.ceil(filteredRows.length / rowsPerPage));
+  const filteredCustomerRows = React.useMemo(() => {
+    let rows = data?.customersByDocument || [];
+
+    if (statusFilter !== 'all') {
+      rows = rows.filter((row) => row.opportunityStatus === statusFilter);
+    }
+
+    if (confidenceFilter !== 'all') {
+      rows = rows.filter((row) => row.confidence === confidenceFilter);
+    }
+
+    if (priorityFilter !== 'all') {
+      rows = rows.filter((row) => row.priority === priorityFilter);
+    }
+
+    if (searchTerm.trim()) {
+      const search = searchTerm.trim().toLowerCase();
+      rows = rows.filter((row) => {
+        return (
+          row.customerName.toLowerCase().includes(search) ||
+          (row.customerDocument || '').toLowerCase().includes(search) ||
+          row.marketplaceNames.some((name) => name.toLowerCase().includes(search)) ||
+          row.states.some((state) => state.toLowerCase().includes(search)) ||
+          row.topProducts.some((product) =>
+            product.productName.toLowerCase().includes(search) ||
+            product.skus.some((sku) => sku.toLowerCase().includes(search))
+          )
+        );
+      });
+    }
+
+    return rows;
+  }, [data, statusFilter, confidenceFilter, priorityFilter, searchTerm]);
+
+  const activeRowsCount =
+    viewMode === 'customer' ? filteredCustomerRows.length : filteredOpportunityRows.length;
+  const totalPages = Math.max(1, Math.ceil(activeRowsCount / rowsPerPage));
   const safeCurrentPage = Math.min(currentPage, totalPages);
-  const paginatedRows = filteredRows.slice(
+  const paginatedOpportunityRows = filteredOpportunityRows.slice(
     (safeCurrentPage - 1) * rowsPerPage,
     safeCurrentPage * rowsPerPage
+  );
+  const paginatedCustomerRows = filteredCustomerRows.slice(
+    (safeCurrentPage - 1) * rowsPerPage,
+    safeCurrentPage * rowsPerPage
+  );
+  const visibleRowsCount =
+    viewMode === 'customer' ? paginatedCustomerRows.length : paginatedOpportunityRows.length;
+  const filteredCustomerRevenue = filteredCustomerRows.reduce(
+    (sum, row) => sum + row.totalRevenue,
+    0
   );
 
   const setDatePreset = (preset: 'last90' | 'last6Months' | 'last12Months' | 'thisMonth' | 'lastMonth') => {
@@ -288,7 +352,12 @@ export default function SalesRecurrencePage() {
   };
 
   const handleExport = () => {
-    if (!filteredRows.length) {
+    const hasRows =
+      viewMode === 'customer'
+        ? filteredCustomerRows.length > 0
+        : filteredOpportunityRows.length > 0;
+
+    if (!hasRows) {
       toast({
         variant: 'destructive',
         title: 'Nenhum dado para exportar',
@@ -297,34 +366,70 @@ export default function SalesRecurrencePage() {
       return;
     }
 
-    const rows = filteredRows.map((row) => ({
-      Cliente: row.customerName,
-      Documento: row.customerDocument || '',
-      Produto: row.productName,
-      SKUs: row.skus.join(' | '),
-      ABC: row.productAbcClass || '',
-      Canal: row.marketplaceNames.join(' | '),
-      UF: row.states.join(' | '),
-      Pedidos: row.orderCount,
-      'Datas distintas': row.distinctPurchaseDates,
-      Quantidade: row.totalQuantity,
-      Faturamento: row.totalRevenue,
-      'Ticket medio': row.averageOrderValue,
-      'Primeira compra': row.firstPurchaseDate || '',
-      'Ultima compra': row.lastPurchaseDate || '',
-      'Intervalo mediano': row.medianIntervalDays || '',
-      'Proxima prevista': row.nextExpectedDate || '',
-      'Dias ate previsao': row.daysUntilNextExpected ?? '',
-      Status: statusLabels[row.opportunityStatus],
-      Confianca: confidenceLabels[row.confidence],
-      Prioridade: priorityLabels[row.priority],
-      Acao: row.suggestedAction,
-    }));
+    const rows =
+      viewMode === 'customer'
+        ? filteredCustomerRows.map((row) => ({
+            Cliente: row.customerName,
+            Documento: row.customerDocument || '',
+            Canal: row.marketplaceNames.join(' | '),
+            UF: row.states.join(' | '),
+            Pedidos: row.orderCount,
+            'Datas distintas': row.distinctPurchaseDates,
+            Quantidade: row.totalQuantity,
+            'Produtos distintos': row.productCount,
+            'SKUs distintos': row.skuCount,
+            Faturamento: row.totalRevenue,
+            'Ticket medio': row.averageOrderValue,
+            'Primeira compra': row.firstPurchaseDate || '',
+            'Ultima compra': row.lastPurchaseDate || '',
+            'Intervalo mediano': row.medianIntervalDays || '',
+            'Proxima prevista': row.nextExpectedDate || '',
+            'Dias ate previsao': row.daysUntilNextExpected ?? '',
+            Status: statusLabels[row.opportunityStatus],
+            Confianca: confidenceLabels[row.confidence],
+            Prioridade: priorityLabels[row.priority],
+            'Principais produtos': row.topProducts
+              .map((product) => `${product.productName} (${formatCurrency(product.totalRevenue)})`)
+              .join(' | '),
+            Acao: row.suggestedAction,
+          }))
+        : filteredOpportunityRows.map((row) => ({
+            Cliente: row.customerName,
+            Documento: row.customerDocument || '',
+            Produto: row.productName,
+            SKUs: row.skus.join(' | '),
+            ABC: row.productAbcClass || '',
+            Canal: row.marketplaceNames.join(' | '),
+            UF: row.states.join(' | '),
+            Pedidos: row.orderCount,
+            'Datas distintas': row.distinctPurchaseDates,
+            Quantidade: row.totalQuantity,
+            Faturamento: row.totalRevenue,
+            'Ticket medio': row.averageOrderValue,
+            'Primeira compra': row.firstPurchaseDate || '',
+            'Ultima compra': row.lastPurchaseDate || '',
+            'Intervalo mediano': row.medianIntervalDays || '',
+            'Proxima prevista': row.nextExpectedDate || '',
+            'Dias ate previsao': row.daysUntilNextExpected ?? '',
+            Status: statusLabels[row.opportunityStatus],
+            Confianca: confidenceLabels[row.confidence],
+            Prioridade: priorityLabels[row.priority],
+            Acao: row.suggestedAction,
+          }));
 
     const worksheet = XLSX.utils.json_to_sheet(rows);
     const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, 'Recorrencia');
-    XLSX.writeFile(workbook, 'recorrencia-clientes-produtos.xlsx');
+    XLSX.utils.book_append_sheet(
+      workbook,
+      worksheet,
+      viewMode === 'customer' ? 'Clientes CNPJ' : 'Recorrencia'
+    );
+    XLSX.writeFile(
+      workbook,
+      viewMode === 'customer'
+        ? 'recorrencia-clientes-cnpj.xlsx'
+        : 'recorrencia-clientes-produtos.xlsx'
+    );
   };
 
   const summary = data?.summary;
@@ -337,6 +442,28 @@ export default function SalesRecurrencePage() {
           <p className="text-muted-foreground">
             Priorize clientes com padrão de recompra para condições especiais.
           </p>
+          <div className="mt-3 inline-flex rounded-md border bg-background p-1">
+            <Button
+              type="button"
+              size="sm"
+              variant={viewMode === 'product' ? 'default' : 'ghost'}
+              className="h-8"
+              onClick={() => setViewMode('product')}
+            >
+              <Package className="mr-2 h-4 w-4" />
+              Cliente-produto
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant={viewMode === 'customer' ? 'default' : 'ghost'}
+              className="h-8"
+              onClick={() => setViewMode('customer')}
+            >
+              <Building2 className="mr-2 h-4 w-4" />
+              Por CNPJ
+            </Button>
+          </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <Popover>
@@ -391,7 +518,7 @@ export default function SalesRecurrencePage() {
             )}
             Filtrar
           </Button>
-          <Button variant="outline" onClick={handleExport} disabled={isLoading || !filteredRows.length}>
+          <Button variant="outline" onClick={handleExport} disabled={isLoading || !activeRowsCount}>
             <FileDown className="mr-2 h-4 w-4" />
             Exportar
           </Button>
@@ -407,10 +534,14 @@ export default function SalesRecurrencePage() {
           isLoading={isLoading}
         />
         <StatCard
-          title="Pares recorrentes"
-          value={summary?.recurringPairs || 0}
-          secondary={`${formatInteger(summary?.strongRecurringPairs || 0)} cliente-produto fortes`}
-          icon={RefreshCw}
+          title={viewMode === 'customer' ? 'CNPJs na lista' : 'Pares recorrentes'}
+          value={viewMode === 'customer' ? filteredCustomerRows.length : summary?.recurringPairs || 0}
+          secondary={
+            viewMode === 'customer'
+              ? `${formatCurrency(filteredCustomerRevenue)} em compras`
+              : `${formatInteger(summary?.strongRecurringPairs || 0)} cliente-produto fortes`
+          }
+          icon={viewMode === 'customer' ? Building2 : RefreshCw}
           isLoading={isLoading}
         />
         <StatCard
@@ -428,9 +559,13 @@ export default function SalesRecurrencePage() {
           isLoading={isLoading}
         />
         <StatCard
-          title="Receita potencial"
-          value={summary?.potentialRevenue || 0}
-          secondary="ticket médio das oportunidades"
+          title={viewMode === 'customer' ? 'Faturamento filtrado' : 'Receita potencial'}
+          value={viewMode === 'customer' ? filteredCustomerRevenue : summary?.potentialRevenue || 0}
+          secondary={
+            viewMode === 'customer'
+              ? 'clientes visíveis na lista'
+              : 'ticket médio das oportunidades'
+          }
           icon={TrendingUp}
           isLoading={isLoading}
           valueFormatter={formatCurrency}
@@ -441,10 +576,16 @@ export default function SalesRecurrencePage() {
         <CardHeader>
           <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
             <div>
-              <CardTitle>Oportunidades de recompra</CardTitle>
+              <CardTitle>
+                {viewMode === 'customer'
+                  ? 'Faturamento por CNPJ'
+                  : 'Oportunidades de recompra'}
+              </CardTitle>
               <CardDescription>
                 {summary
-                  ? `${formatInteger(summary.ordersAnalyzed)} pedidos analisados, ${formatInteger(summary.ignoredCancelled)} cancelados e ${formatInteger(summary.ignoredReturns)} devoluções ignoradas.`
+                  ? viewMode === 'customer'
+                    ? `${formatInteger(filteredCustomerRows.length)} clientes agrupados por documento, considerando ${formatInteger(summary.ordersAnalyzed)} pedidos analisados.`
+                    : `${formatInteger(summary.ordersAnalyzed)} pedidos analisados, ${formatInteger(summary.ignoredCancelled)} cancelados e ${formatInteger(summary.ignoredReturns)} devoluções ignoradas.`
                   : 'Carregando análise de recorrência.'}
               </CardDescription>
             </div>
@@ -452,7 +593,11 @@ export default function SalesRecurrencePage() {
               <div className="relative sm:col-span-2 lg:col-span-1">
                 <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
                 <Input
-                  placeholder="Cliente, produto, SKU..."
+                  placeholder={
+                    viewMode === 'customer'
+                      ? 'Cliente, CNPJ, produto...'
+                      : 'Cliente, produto, SKU...'
+                  }
                   className="pl-8"
                   value={searchTerm}
                   onChange={(event) => {
@@ -511,134 +656,276 @@ export default function SalesRecurrencePage() {
         <CardContent>
           <div className="w-full overflow-x-auto">
             <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="min-w-[240px]">Cliente</TableHead>
-                  <TableHead className="min-w-[160px]">Estado / Canal</TableHead>
-                  <TableHead className="min-w-[300px]">Produto / SKU</TableHead>
-                  <TableHead className="min-w-[140px]">Pedidos</TableHead>
-                  <TableHead className="min-w-[160px] text-right">Valor total comprado</TableHead>
-                  <TableHead className="min-w-[150px]">Próxima compra</TableHead>
-                  <TableHead>Confiança</TableHead>
-                  <TableHead>Prioridade</TableHead>
-                  <TableHead className="min-w-[260px]">Ação sugerida</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {isLoading ? (
-                  <TableRow>
-                    <TableCell colSpan={9} className="h-24 text-center">
-                      <Loader2 className="mx-auto h-6 w-6 animate-spin text-muted-foreground" />
-                    </TableCell>
-                  </TableRow>
-                ) : paginatedRows.length ? (
-                  paginatedRows.map((row) => (
-                    <TableRow key={row.key}>
-                      <TableCell>
-                        <div className="space-y-1">
-                          <p className="font-medium leading-tight">{row.customerName}</p>
-                          <p className="text-xs text-muted-foreground">
-                            {row.customerDocument || 'Documento N/A'}
-                          </p>
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <div className="space-y-1 text-sm">
-                          <p className="font-medium">
-                            {row.states.length ? row.states.join(', ') : 'UF N/A'}
-                          </p>
-                          <p
-                            className="max-w-[180px] truncate text-xs text-muted-foreground"
-                            title={row.marketplaceNames.join(' | ')}
-                          >
-                            {row.marketplaceNames.length
-                              ? row.marketplaceNames.join(' | ')
-                              : 'Canal N/A'}
-                          </p>
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <div className="space-y-1">
-                          <div className="flex flex-wrap items-center gap-1">
-                            {row.productAbcClass ? (
-                              <Badge variant="outline" className={abcStyles[row.productAbcClass]}>
-                                ABC {row.productAbcClass}
-                              </Badge>
-                            ) : null}
-                            {row.isGroup ? <Badge variant="secondary">Grupo</Badge> : null}
-                          </div>
-                          <p className="font-medium leading-tight">{row.productName}</p>
-                          <p className="max-w-[360px] truncate text-xs text-muted-foreground" title={row.skus.join(' | ')}>
-                            {row.skus.join(' | ')}
-                          </p>
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <div className="space-y-1 whitespace-nowrap text-sm">
-                          <p className="font-medium">{row.orderCount} pedidos</p>
-                          <p className="text-xs text-muted-foreground">
-                            {row.distinctPurchaseDates} datas de compra
-                          </p>
-                          <p className="text-xs text-muted-foreground">
-                            {formatInteger(row.totalQuantity)} unidades
-                          </p>
-                          <p className="text-xs text-muted-foreground">
-                            Mediana: {row.medianIntervalDays ? `${row.medianIntervalDays} dias` : 'N/A'}
-                          </p>
-                        </div>
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <div className="space-y-1 whitespace-nowrap">
-                          <p className="font-medium">{formatCurrency(row.totalRevenue)}</p>
-                          <p className="text-xs text-muted-foreground">
-                            Ticket médio {formatCurrency(row.averageOrderValue)}
-                          </p>
-                          <p className="text-xs text-muted-foreground">
-                            Preço médio un. {formatCurrency(row.averageUnitPrice)}
-                          </p>
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <div className="space-y-1 whitespace-nowrap">
-                          <Badge variant="outline" className={statusStyles[row.opportunityStatus]}>
-                            {statusLabels[row.opportunityStatus]}
-                          </Badge>
-                          <p className="text-xs text-muted-foreground">
-                            Última: {formatDate(row.lastPurchaseDate)}
-                          </p>
-                          <p className="text-xs text-muted-foreground">
-                            Próxima: {formatDate(row.nextExpectedDate)}
-                          </p>
-                          <p className="text-xs font-medium">{formatNextWindow(row)}</p>
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <div className="space-y-1 whitespace-nowrap">
-                          <Badge variant="secondary">{confidenceLabels[row.confidence]}</Badge>
-                          <p className="text-xs text-muted-foreground">{row.confidenceScore}/100</p>
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <div className="space-y-1 whitespace-nowrap">
-                          <Badge className={priorityStyles[row.priority]}>
-                            {priorityLabels[row.priority]}
-                          </Badge>
-                          <p className="text-xs text-muted-foreground">{row.priorityScore}/100</p>
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <p className="text-sm leading-snug">{row.suggestedAction}</p>
-                      </TableCell>
+              {viewMode === 'customer' ? (
+                <>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="min-w-[240px]">Cliente / CNPJ</TableHead>
+                      <TableHead className="min-w-[160px]">Estado / Canal</TableHead>
+                      <TableHead className="min-w-[140px]">Pedidos</TableHead>
+                      <TableHead className="min-w-[170px] text-right">Faturamento total</TableHead>
+                      <TableHead className="min-w-[260px]">Produtos comprados</TableHead>
+                      <TableHead className="min-w-[150px]">Próxima compra</TableHead>
+                      <TableHead>Confiança</TableHead>
+                      <TableHead>Prioridade</TableHead>
+                      <TableHead className="min-w-[260px]">Ação sugerida</TableHead>
                     </TableRow>
-                  ))
-                ) : (
-                  <TableRow>
-                    <TableCell colSpan={9} className="h-24 text-center">
-                      Nenhuma oportunidade encontrada com os filtros atuais.
-                    </TableCell>
-                  </TableRow>
-                )}
-              </TableBody>
+                  </TableHeader>
+                  <TableBody>
+                    {isLoading ? (
+                      <TableRow>
+                        <TableCell colSpan={9} className="h-24 text-center">
+                          <Loader2 className="mx-auto h-6 w-6 animate-spin text-muted-foreground" />
+                        </TableCell>
+                      </TableRow>
+                    ) : paginatedCustomerRows.length ? (
+                      paginatedCustomerRows.map((row) => (
+                        <TableRow key={row.key}>
+                          <TableCell>
+                            <div className="space-y-1">
+                              <div className="flex flex-wrap items-center gap-1">
+                                <Badge variant="secondary">
+                                  {row.customerDocument
+                                    ? row.customerType === 'F'
+                                      ? 'CPF'
+                                      : 'CNPJ'
+                                    : 'Sem documento'}
+                                </Badge>
+                              </div>
+                              <p className="font-medium leading-tight">{row.customerName}</p>
+                              <p className="text-xs text-muted-foreground">
+                                {row.customerDocument || 'Documento N/A'}
+                              </p>
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <div className="space-y-1 text-sm">
+                              <p className="font-medium">
+                                {row.states.length ? row.states.join(', ') : 'UF N/A'}
+                              </p>
+                              <p
+                                className="max-w-[180px] truncate text-xs text-muted-foreground"
+                                title={row.marketplaceNames.join(' | ')}
+                              >
+                                {row.marketplaceNames.length
+                                  ? row.marketplaceNames.join(' | ')
+                                  : 'Canal N/A'}
+                              </p>
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <div className="space-y-1 whitespace-nowrap text-sm">
+                              <p className="font-medium">{row.orderCount} pedidos</p>
+                              <p className="text-xs text-muted-foreground">
+                                {row.distinctPurchaseDates} datas de compra
+                              </p>
+                              <p className="text-xs text-muted-foreground">
+                                {formatInteger(row.totalQuantity)} unidades
+                              </p>
+                              <p className="text-xs text-muted-foreground">
+                                Mediana: {row.medianIntervalDays ? `${row.medianIntervalDays} dias` : 'N/A'}
+                              </p>
+                            </div>
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <div className="space-y-1 whitespace-nowrap">
+                              <p className="font-medium">{formatCurrency(row.totalRevenue)}</p>
+                              <p className="text-xs text-muted-foreground">
+                                Ticket médio {formatCurrency(row.averageOrderValue)}
+                              </p>
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <div className="space-y-1">
+                              <p className="font-medium">
+                                {row.productCount} produtos / {row.skuCount} SKUs
+                              </p>
+                              <div className="space-y-1" title={getTopProductsTitle(row)}>
+                                {row.topProducts.slice(0, 3).map((product) => (
+                                  <p
+                                    key={product.productKey}
+                                    className="max-w-[300px] truncate text-xs text-muted-foreground"
+                                  >
+                                    {product.productName} - {formatCurrency(product.totalRevenue)}
+                                  </p>
+                                ))}
+                              </div>
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <div className="space-y-1 whitespace-nowrap">
+                              <Badge variant="outline" className={statusStyles[row.opportunityStatus]}>
+                                {statusLabels[row.opportunityStatus]}
+                              </Badge>
+                              <p className="text-xs text-muted-foreground">
+                                Última: {formatDate(row.lastPurchaseDate)}
+                              </p>
+                              <p className="text-xs text-muted-foreground">
+                                Próxima: {formatDate(row.nextExpectedDate)}
+                              </p>
+                              <p className="text-xs font-medium">{formatNextWindow(row)}</p>
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <div className="space-y-1 whitespace-nowrap">
+                              <Badge variant="secondary">{confidenceLabels[row.confidence]}</Badge>
+                              <p className="text-xs text-muted-foreground">{row.confidenceScore}/100</p>
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <div className="space-y-1 whitespace-nowrap">
+                              <Badge className={priorityStyles[row.priority]}>
+                                {priorityLabels[row.priority]}
+                              </Badge>
+                              <p className="text-xs text-muted-foreground">{row.priorityScore}/100</p>
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <p className="text-sm leading-snug">{row.suggestedAction}</p>
+                          </TableCell>
+                        </TableRow>
+                      ))
+                    ) : (
+                      <TableRow>
+                        <TableCell colSpan={9} className="h-24 text-center">
+                          Nenhum cliente encontrado com os filtros atuais.
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </TableBody>
+                </>
+              ) : (
+                <>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="min-w-[240px]">Cliente</TableHead>
+                      <TableHead className="min-w-[160px]">Estado / Canal</TableHead>
+                      <TableHead className="min-w-[300px]">Produto / SKU</TableHead>
+                      <TableHead className="min-w-[140px]">Pedidos</TableHead>
+                      <TableHead className="min-w-[160px] text-right">Valor total comprado</TableHead>
+                      <TableHead className="min-w-[150px]">Próxima compra</TableHead>
+                      <TableHead>Confiança</TableHead>
+                      <TableHead>Prioridade</TableHead>
+                      <TableHead className="min-w-[260px]">Ação sugerida</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {isLoading ? (
+                      <TableRow>
+                        <TableCell colSpan={9} className="h-24 text-center">
+                          <Loader2 className="mx-auto h-6 w-6 animate-spin text-muted-foreground" />
+                        </TableCell>
+                      </TableRow>
+                    ) : paginatedOpportunityRows.length ? (
+                      paginatedOpportunityRows.map((row) => (
+                        <TableRow key={row.key}>
+                          <TableCell>
+                            <div className="space-y-1">
+                              <p className="font-medium leading-tight">{row.customerName}</p>
+                              <p className="text-xs text-muted-foreground">
+                                {row.customerDocument || 'Documento N/A'}
+                              </p>
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <div className="space-y-1 text-sm">
+                              <p className="font-medium">
+                                {row.states.length ? row.states.join(', ') : 'UF N/A'}
+                              </p>
+                              <p
+                                className="max-w-[180px] truncate text-xs text-muted-foreground"
+                                title={row.marketplaceNames.join(' | ')}
+                              >
+                                {row.marketplaceNames.length
+                                  ? row.marketplaceNames.join(' | ')
+                                  : 'Canal N/A'}
+                              </p>
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <div className="space-y-1">
+                              <div className="flex flex-wrap items-center gap-1">
+                                {row.productAbcClass ? (
+                                  <Badge variant="outline" className={abcStyles[row.productAbcClass]}>
+                                    ABC {row.productAbcClass}
+                                  </Badge>
+                                ) : null}
+                                {row.isGroup ? <Badge variant="secondary">Grupo</Badge> : null}
+                              </div>
+                              <p className="font-medium leading-tight">{row.productName}</p>
+                              <p className="max-w-[360px] truncate text-xs text-muted-foreground" title={row.skus.join(' | ')}>
+                                {row.skus.join(' | ')}
+                              </p>
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <div className="space-y-1 whitespace-nowrap text-sm">
+                              <p className="font-medium">{row.orderCount} pedidos</p>
+                              <p className="text-xs text-muted-foreground">
+                                {row.distinctPurchaseDates} datas de compra
+                              </p>
+                              <p className="text-xs text-muted-foreground">
+                                {formatInteger(row.totalQuantity)} unidades
+                              </p>
+                              <p className="text-xs text-muted-foreground">
+                                Mediana: {row.medianIntervalDays ? `${row.medianIntervalDays} dias` : 'N/A'}
+                              </p>
+                            </div>
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <div className="space-y-1 whitespace-nowrap">
+                              <p className="font-medium">{formatCurrency(row.totalRevenue)}</p>
+                              <p className="text-xs text-muted-foreground">
+                                Ticket médio {formatCurrency(row.averageOrderValue)}
+                              </p>
+                              <p className="text-xs text-muted-foreground">
+                                Preço médio un. {formatCurrency(row.averageUnitPrice)}
+                              </p>
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <div className="space-y-1 whitespace-nowrap">
+                              <Badge variant="outline" className={statusStyles[row.opportunityStatus]}>
+                                {statusLabels[row.opportunityStatus]}
+                              </Badge>
+                              <p className="text-xs text-muted-foreground">
+                                Última: {formatDate(row.lastPurchaseDate)}
+                              </p>
+                              <p className="text-xs text-muted-foreground">
+                                Próxima: {formatDate(row.nextExpectedDate)}
+                              </p>
+                              <p className="text-xs font-medium">{formatNextWindow(row)}</p>
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <div className="space-y-1 whitespace-nowrap">
+                              <Badge variant="secondary">{confidenceLabels[row.confidence]}</Badge>
+                              <p className="text-xs text-muted-foreground">{row.confidenceScore}/100</p>
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <div className="space-y-1 whitespace-nowrap">
+                              <Badge className={priorityStyles[row.priority]}>
+                                {priorityLabels[row.priority]}
+                              </Badge>
+                              <p className="text-xs text-muted-foreground">{row.priorityScore}/100</p>
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <p className="text-sm leading-snug">{row.suggestedAction}</p>
+                          </TableCell>
+                        </TableRow>
+                      ))
+                    ) : (
+                      <TableRow>
+                        <TableCell colSpan={9} className="h-24 text-center">
+                          Nenhuma oportunidade encontrada com os filtros atuais.
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </TableBody>
+                </>
+              )}
             </Table>
           </div>
         </CardContent>
@@ -646,7 +933,8 @@ export default function SalesRecurrencePage() {
 
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="text-sm text-muted-foreground">
-          Mostrando {formatInteger(paginatedRows.length)} de {formatInteger(filteredRows.length)} oportunidades.
+          Mostrando {formatInteger(visibleRowsCount)} de {formatInteger(activeRowsCount)}{' '}
+          {viewMode === 'customer' ? 'clientes agrupados por CNPJ' : 'oportunidades'}.
         </div>
         <div className="flex flex-wrap items-center gap-3">
           <div className="flex items-center gap-2">
