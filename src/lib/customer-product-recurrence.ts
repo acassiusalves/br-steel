@@ -10,6 +10,7 @@ export interface RecurrenceOptions {
   minDistinctPurchaseDates?: number;
   lookaheadDays?: number;
   includeReturns?: boolean;
+  onlyWithInvoice?: boolean;
   skuGroups?: SkuGroupLookup;
 }
 
@@ -98,6 +99,7 @@ export interface RecurrenceSummary {
   ordersAnalyzed: number;
   ignoredCancelled: number;
   ignoredReturns: number;
+  ignoredWithoutInvoice: number;
   customers: number;
   recurringCustomers: number;
   strongRecurringCustomers: number;
@@ -227,6 +229,10 @@ function isCancelled(order: SaleOrder): boolean {
 function isReturn(order: SaleOrder): boolean {
   const status = (order.situacao?.nome || '').toLowerCase();
   return status.includes('devolucao') || status.includes('devolução');
+}
+
+function hasInvoice(order: SaleOrder): boolean {
+  return Boolean(order.notaFiscal?.id);
 }
 
 function getMarketplaceName(order: SaleOrder): string {
@@ -396,6 +402,7 @@ export function computeCustomerProductRecurrence(
   const customers = new Map<string, CustomerAggregate>();
   let ignoredCancelled = 0;
   let ignoredReturns = 0;
+  let ignoredWithoutInvoice = 0;
   let ordersAnalyzed = 0;
   let totalRevenue = 0;
   let minDate: string | null = null;
@@ -412,6 +419,11 @@ export function computeCustomerProductRecurrence(
 
     if (!options.includeReturns && isReturn(order)) {
       ignoredReturns += 1;
+      continue;
+    }
+
+    if (options.onlyWithInvoice && !hasInvoice(order)) {
+      ignoredWithoutInvoice += 1;
       continue;
     }
 
@@ -713,6 +725,7 @@ export function computeCustomerProductRecurrence(
       ordersAnalyzed,
       ignoredCancelled,
       ignoredReturns,
+      ignoredWithoutInvoice,
       customers: customers.size,
       recurringCustomers,
       strongRecurringCustomers,

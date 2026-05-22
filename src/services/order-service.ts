@@ -40,15 +40,37 @@ export async function getExistingOrderIds(orderIds: (string|number)[]): Promise<
  * Obtém os IDs de todos os pedidos no Firestore que já possuem a propriedade `itens`.
  * @returns Um Set com os IDs dos pedidos que já têm detalhes.
  */
-export async function getImportedOrderIdsWithDetails(): Promise<Set<string>> {
+export async function getImportedOrderIdsWithDetails(options: {
+    requireInvoiceDetails?: boolean;
+    requireInvoiceXml?: boolean;
+} = {}): Promise<Set<string>> {
     try {
         const ordersCollection = collection(db, 'salesOrders');
         const q = query(ordersCollection); // Query for all documents
         const snapshot = await getDocs(q);
         const ids = new Set<string>();
         snapshot.forEach(doc => {
-            // Adiciona o ID se o campo 'itens' existir e não for um array vazio
-            if (doc.data().itens && Array.isArray(doc.data().itens) && doc.data().itens.length > 0) {
+            const orderData = doc.data();
+            const hasItems = orderData.itens && Array.isArray(orderData.itens) && orderData.itens.length > 0;
+            if (!hasItems) {
+                return;
+            }
+
+            const invoiceId = Number(orderData.notaFiscal?.id || 0);
+            const hasInvoice = Number.isFinite(invoiceId) && invoiceId > 0;
+            const hasInvoiceDetails = Boolean(orderData.notaFiscal?.hasFiscalDetails);
+            const hasInvoiceXml = Boolean(orderData.notaFiscal?.xmlAvailable);
+
+            if (options.requireInvoiceXml && hasInvoice && !hasInvoiceXml) {
+                return;
+            }
+
+            if (options.requireInvoiceDetails && hasInvoice && !hasInvoiceDetails) {
+                return;
+            }
+
+            // Adiciona o ID se o campo 'itens' existir e as exigencias fiscais ja estiverem atendidas.
+            if (hasItems) {
                 ids.add(doc.id);
             }
         });
@@ -95,15 +117,21 @@ export async function getLastImportedOrderDate(): Promise<Date | null> {
  * @param orders - Array de pedidos básicos do Bling
  * @returns Array apenas com pedidos que precisam de atualização de detalhes.
  */
-export async function filterNewOrders(orders: any[]): Promise<any[]> {
+export async function filterNewOrders(orders: any[], options: {
+    requireInvoiceDetails?: boolean;
+    requireInvoiceXml?: boolean;
+} = {}): Promise<any[]> {
     if (!orders || orders.length === 0) {
         return [];
     }
 
-    const existingCompleteIdsSet = await getImportedOrderIdsWithDetails();
+    const existingCompleteIdsSet = await getImportedOrderIdsWithDetails(options);
     
     console.log(`📊 Total de pedidos encontrados na API: ${orders.length}`);
     console.log(`📋 Pedidos já completos no banco: ${existingCompleteIdsSet.size}`);
+    if (options.requireInvoiceDetails || options.requireInvoiceXml) {
+        console.log(`📋 Critério fiscal: detalhes=${Boolean(options.requireInvoiceDetails)}, xml=${Boolean(options.requireInvoiceXml)}`);
+    }
     
     const ordersToProcess = orders.filter(order => 
         !existingCompleteIdsSet.has(String(order.id))
@@ -206,5 +234,3 @@ export async function saveSalesOrders(orders: any[]): Promise<{ count: number }>
     const result = await saveSalesOrdersOptimized(orders);
     return { count: result.count };
 }
-
-    

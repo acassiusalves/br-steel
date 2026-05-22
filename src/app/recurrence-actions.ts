@@ -23,6 +23,7 @@ export type CustomerProductRecurrenceRequest = {
   minDistinctPurchaseDates?: number;
   lookaheadDays?: number;
   includeReturns?: boolean;
+  onlyWithInvoice?: boolean;
 };
 
 export async function getCustomerProductRecurrenceData(
@@ -56,6 +57,7 @@ export async function getCustomerProductRecurrenceData(
     minDistinctPurchaseDates: input.minDistinctPurchaseDates,
     lookaheadDays: input.lookaheadDays,
     includeReturns: input.includeReturns,
+    onlyWithInvoice: input.onlyWithInvoice,
     skuGroups: groupIndex.skuToGroup,
   });
 }

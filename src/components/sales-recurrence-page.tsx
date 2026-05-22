@@ -71,6 +71,7 @@ type Opportunity = RecurrenceData['opportunities'][number];
 type CustomerRow = RecurrenceData['customersByDocument'][number];
 type RecurrenceWindow = Pick<Opportunity, 'daysUntilNextExpected'>;
 type ViewMode = 'product' | 'customer';
+type InvoiceFilter = 'all' | 'with_invoice';
 type StatusFilter = OpportunityStatus | 'all';
 type ConfidenceFilter = ConfidenceLevel | 'all';
 type PriorityFilter = PriorityLevel | 'all';
@@ -205,6 +206,7 @@ export default function SalesRecurrencePage() {
   });
   const [minDates, setMinDates] = React.useState('2');
   const [lookaheadDays, setLookaheadDays] = React.useState('30');
+  const [invoiceFilter, setInvoiceFilter] = React.useState<InvoiceFilter>('all');
   const [statusFilter, setStatusFilter] = React.useState<StatusFilter>('all');
   const [confidenceFilter, setConfidenceFilter] =
     React.useState<ConfidenceFilter>('all');
@@ -225,6 +227,7 @@ export default function SalesRecurrencePage() {
         to: date.to,
         minDistinctPurchaseDates: Number(minDates),
         lookaheadDays: Number(lookaheadDays),
+        onlyWithInvoice: invoiceFilter === 'with_invoice',
       };
       const result = await getCustomerProductRecurrenceData(request);
       setData(result);
@@ -240,7 +243,7 @@ export default function SalesRecurrencePage() {
     } finally {
       setIsLoading(false);
     }
-  }, [date, minDates, lookaheadDays, toast]);
+  }, [date, minDates, lookaheadDays, invoiceFilter, toast]);
 
   React.useEffect(() => {
     fetchData();
@@ -369,6 +372,8 @@ export default function SalesRecurrencePage() {
     const rows =
       viewMode === 'customer'
         ? filteredCustomerRows.map((row) => ({
+            'Filtro nota fiscal':
+              invoiceFilter === 'with_invoice' ? 'Apenas pedidos com NF' : 'Todos pedidos',
             Cliente: row.customerName,
             Documento: row.customerDocument || '',
             Canal: row.marketplaceNames.join(' | '),
@@ -394,6 +399,8 @@ export default function SalesRecurrencePage() {
             Acao: row.suggestedAction,
           }))
         : filteredOpportunityRows.map((row) => ({
+            'Filtro nota fiscal':
+              invoiceFilter === 'with_invoice' ? 'Apenas pedidos com NF' : 'Todos pedidos',
             Cliente: row.customerName,
             Documento: row.customerDocument || '',
             Produto: row.productName,
@@ -584,12 +591,12 @@ export default function SalesRecurrencePage() {
               <CardDescription>
                 {summary
                   ? viewMode === 'customer'
-                    ? `${formatInteger(filteredCustomerRows.length)} clientes agrupados por documento, considerando ${formatInteger(summary.ordersAnalyzed)} pedidos analisados.`
-                    : `${formatInteger(summary.ordersAnalyzed)} pedidos analisados, ${formatInteger(summary.ignoredCancelled)} cancelados e ${formatInteger(summary.ignoredReturns)} devoluções ignoradas.`
+                    ? `${formatInteger(filteredCustomerRows.length)} clientes agrupados por documento, considerando ${formatInteger(summary.ordersAnalyzed)} pedidos analisados${invoiceFilter === 'with_invoice' ? ` e ${formatInteger(summary.ignoredWithoutInvoice)} sem NF ignorados` : ''}.`
+                    : `${formatInteger(summary.ordersAnalyzed)} pedidos analisados, ${formatInteger(summary.ignoredCancelled)} cancelados, ${formatInteger(summary.ignoredReturns)} devoluções ignoradas${invoiceFilter === 'with_invoice' ? ` e ${formatInteger(summary.ignoredWithoutInvoice)} sem NF ignorados` : ''}.`
                   : 'Carregando análise de recorrência.'}
               </CardDescription>
             </div>
-            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
+            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-6">
               <div className="relative sm:col-span-2 lg:col-span-1">
                 <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
                 <Input
@@ -648,6 +655,15 @@ export default function SalesRecurrencePage() {
                   <SelectItem value="3">3+ datas</SelectItem>
                   <SelectItem value="4">4+ datas</SelectItem>
                   <SelectItem value="5">5+ datas</SelectItem>
+                </SelectContent>
+              </Select>
+              <Select value={invoiceFilter} onValueChange={(value) => { setInvoiceFilter(value as InvoiceFilter); setCurrentPage(1); }}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Nota fiscal" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Todos pedidos</SelectItem>
+                  <SelectItem value="with_invoice">Apenas com NF</SelectItem>
                 </SelectContent>
               </Select>
             </div>

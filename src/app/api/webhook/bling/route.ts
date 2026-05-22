@@ -4,6 +4,7 @@ import { doc, setDoc, getDoc, collection, addDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { saveSalesOrders } from '@/services/order-service';
 import { invalidateStockCache } from '@/app/actions';
+import { enrichOrderWithInvoice } from '@/services/bling-invoice-service';
 
 // Bling API configuration
 const BLING_API_BASE = 'https://api.bling.com.br/Api/v3';
@@ -492,6 +493,28 @@ export async function POST(request: Request) {
 
       // Enriquecer com nome da situação (API v3 não retorna o nome)
       orderDetails = await enrichOrderWithSituacaoNome(orderDetails);
+
+      const invoiceEnrichment = await enrichOrderWithInvoice(
+        orderDetails,
+        (url) => blingFetch(url),
+        {
+          fetchXml: process.env.BLING_FETCH_INVOICE_XML_ON_WEBHOOK !== '0',
+          skipExistingXml: true,
+          source: 'bling-webhook',
+        }
+      );
+      orderDetails = invoiceEnrichment.order;
+
+      if (
+        invoiceEnrichment.stats.invoiceDetailsFetched > 0 ||
+        invoiceEnrichment.stats.invoiceXmlFetched > 0 ||
+        invoiceEnrichment.stats.invoiceErrors > 0 ||
+        invoiceEnrichment.stats.invoiceXmlErrors > 0
+      ) {
+        console.log(
+          `📄 [WEBHOOK] NF-e: detalhes=${invoiceEnrichment.stats.invoiceDetailsFetched}, xml=${invoiceEnrichment.stats.invoiceXmlFetched}, erros=${invoiceEnrichment.stats.invoiceErrors + invoiceEnrichment.stats.invoiceXmlErrors}`
+        );
+      }
 
       // Save order to Firestore with webhook source flag
       const orderWithSource = {

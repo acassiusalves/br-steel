@@ -792,6 +792,26 @@ export interface BlingPedido {
   };
   notaFiscal?: {
     id: number;
+    numero?: string;
+    serie?: number;
+    situacao?: number;
+    tipo?: number;
+    finalidade?: number;
+    chaveAcesso?: string;
+    dataEmissao?: string;
+    dataOperacao?: string;
+    valorNota?: number;
+    valorFrete?: number;
+    linkDanfe?: string;
+    linkPDF?: string;
+    numeroPedidoLoja?: string;
+    hasFiscalDetails?: boolean;
+    fiscalDetailsFetchedAt?: string;
+    fiscalDetailsError?: string;
+    fiscalDocumentRef?: string;
+    xmlAvailable?: boolean;
+    xmlFetchedAt?: string;
+    xmlFetchError?: string;
   };
   tributacao?: {
     totalICMS?: number;
@@ -2250,4 +2270,3 @@ export interface MlSearchResult {
     brand?: string;
     model?: string;
 }
-

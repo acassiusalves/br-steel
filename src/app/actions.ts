@@ -9,6 +9,11 @@ import { db } from '@/lib/firebase';
 
 import { saveSalesOrders, filterNewOrders, getLastImportedOrderDate, orderExists, saveSalesOrdersOptimized, getImportedOrderIdsWithDetails } from '@/services/order-service';
 import { updateSupplyBySku } from '@/services/supply-service';
+import {
+    createInvoiceEnrichmentStats,
+    enrichOrderWithInvoice,
+    mergeInvoiceEnrichmentStats,
+} from '@/services/bling-invoice-service';
 import type { SaleOrder } from '@/types/sale-order';
 import type { Supply } from '@/types/supply';
 import { seedUsers as seedUsersService, getUsers as getUsersService, addUser as addUserService, deleteUser as deleteUserService } from '@/services/user-service';
@@ -60,6 +65,11 @@ export type SyncProgress = {
     updatedAt: string;
     phase: 'listing' | 'filtering' | 'fetching_details' | 'saving' | 'completed' | 'error';
     error?: string;
+};
+
+export type OrderSyncOptions = {
+    includeInvoiceDetails?: boolean;
+    fetchInvoiceXml?: boolean;
 };
 
 export async function updateSyncProgress(progress: Partial<SyncProgress>): Promise<void> {
@@ -352,12 +362,16 @@ async function getBlingSalesOrdersOptimized({
     from,
     to,
     forceFullSync = false,
-    useIntelligentDates = true
+    useIntelligentDates = true,
+    includeInvoiceDetails = false,
+    fetchInvoiceXml = false
 }: {
     from?: Date;
     to?: Date;
     forceFullSync?: boolean;
     useIntelligentDates?: boolean;
+    includeInvoiceDetails?: boolean;
+    fetchInvoiceXml?: boolean;
 }) {
     console.log('═══════════════════════════════════════════════════════════');
     console.log('🚀 [SYNC] INICIANDO SINCRONIZAÇÃO DE PEDIDOS');
@@ -448,7 +462,15 @@ async function getBlingSalesOrdersOptimized({
             });
             return {
                 data: [],
-                summary: { total: 0, new: 0, existing: 0, processed: 0, created: 0, updated: 0 }
+                summary: {
+                    total: 0,
+                    new: 0,
+                    existing: 0,
+                    processed: 0,
+                    created: 0,
+                    updated: 0,
+                    ...createInvoiceEnrichmentStats(),
+                }
             };
         }
 
@@ -463,7 +485,10 @@ async function getBlingSalesOrdersOptimized({
             phase: 'filtering',
         });
 
-        const ordersToProcess = await filterNewOrders(allOrders);
+        const ordersToProcess = await filterNewOrders(allOrders, {
+            requireInvoiceDetails: includeInvoiceDetails,
+            requireInvoiceXml: fetchInvoiceXml,
+        });
         console.log(`📊 [SYNC] Pedidos novos/atualizados para processar: ${ordersToProcess.length}`);
         console.log(`📊 [SYNC] Pedidos já existentes no banco: ${allOrders.length - ordersToProcess.length}`);
 
@@ -477,7 +502,15 @@ async function getBlingSalesOrdersOptimized({
             });
             return {
                 data: allOrders,
-                summary: { total: allOrders.length, new: 0, existing: allOrders.length, processed: 0, created: 0, updated: 0 }
+                summary: {
+                    total: allOrders.length,
+                    new: 0,
+                    existing: allOrders.length,
+                    processed: 0,
+                    created: 0,
+                    updated: 0,
+                    ...createInvoiceEnrichmentStats(),
+                }
             };
         }
 
@@ -499,6 +532,7 @@ async function getBlingSalesOrdersOptimized({
         const ordersWithDetails = [];
         let processedCount = 0;
         let errorCount = 0;
+        const invoiceStats = createInvoiceEnrichmentStats();
         const totalToProcess = ordersToFetchDetails.length;
 
         for (const order of ordersToFetchDetails) {
@@ -520,7 +554,19 @@ async function getBlingSalesOrdersOptimized({
 
                 const detailsData = await blingFetchWithRefresh(`https://api.bling.com.br/Api/v3/pedidos/vendas/${order.id}`);
                 if (detailsData && detailsData.data) {
-                    ordersWithDetails.push(detailsData.data);
+                    let orderData = detailsData.data;
+
+                    if (includeInvoiceDetails) {
+                        const enriched = await enrichOrderWithInvoice(orderData, blingFetchWithRefresh, {
+                            fetchXml: fetchInvoiceXml,
+                            skipExistingXml: true,
+                            source: 'api-settings-sync',
+                        });
+                        orderData = enriched.order;
+                        mergeInvoiceEnrichmentStats(invoiceStats, enriched.stats);
+                    }
+
+                    ordersWithDetails.push(orderData);
                     processedCount++;
                 } else {
                     console.warn(`⚠️ [SYNC] Pedido ${order.id}: resposta sem dados, usando original`);
@@ -538,6 +584,11 @@ async function getBlingSalesOrdersOptimized({
         console.log(`💾 [SYNC] FASE 4: Salvando ${ordersWithDetails.length} pedidos no Firebase...`);
         console.log(`💾 [SYNC] Detalhes obtidos com sucesso: ${processedCount}`);
         console.log(`💾 [SYNC] Erros ao obter detalhes: ${errorCount}`);
+        if (includeInvoiceDetails) {
+            console.log(`💾 [SYNC] NFs consultadas: ${invoiceStats.invoiceDetailsFetched}`);
+            console.log(`💾 [SYNC] XMLs baixados: ${invoiceStats.invoiceXmlFetched}`);
+            console.log(`💾 [SYNC] Erros fiscais: ${invoiceStats.invoiceErrors + invoiceStats.invoiceXmlErrors}`);
+        }
         console.log('───────────────────────────────────────────────────────────');
 
         await updateSyncProgress({
@@ -574,7 +625,8 @@ async function getBlingSalesOrdersOptimized({
                 errors: errorCount,
                 saved: saveResult.count,
                 created: saveResult.created,
-                updated: saveResult.updated
+                updated: saveResult.updated,
+                ...invoiceStats,
             }
         };
 
@@ -597,24 +649,28 @@ async function getBlingSalesOrdersOptimized({
 }
 
 
-export async function smartSyncOrders(from?: Date, to?: Date) {
+export async function smartSyncOrders(from?: Date, to?: Date, options: OrderSyncOptions = {}) {
     console.log('🧠 Iniciando sincronização inteligente...');
     const result = await getBlingSalesOrdersOptimized({ 
         from,
         to,
         forceFullSync: false,
-        useIntelligentDates: !from 
+        useIntelligentDates: !from,
+        includeInvoiceDetails: options.includeInvoiceDetails,
+        fetchInvoiceXml: options.fetchInvoiceXml,
     });
     return result;
 }
 
-export async function fullSyncOrders(from?: Date, to?: Date) {
+export async function fullSyncOrders(from?: Date, to?: Date, options: OrderSyncOptions = {}) {
     console.log('🔄 Iniciando sincronização completa...');
     const result = await getBlingSalesOrdersOptimized({ 
         from, 
         to, 
         forceFullSync: true,
-        useIntelligentDates: false 
+        useIntelligentDates: false,
+        includeInvoiceDetails: options.includeInvoiceDetails,
+        fetchInvoiceXml: options.fetchInvoiceXml,
     });
     return result;
 }
@@ -628,7 +684,12 @@ export async function getBlingOrderDetails(orderId: string): Promise<any> {
     try {
         const data = await blingFetchWithRefresh(url);
         if (data && data.data) {
-           await saveSalesOrders([data.data]);
+           const enriched = await enrichOrderWithInvoice(data.data, blingFetchWithRefresh, {
+             fetchXml: false,
+             skipExistingXml: true,
+             source: 'order-detail-refresh',
+           });
+           await saveSalesOrders([enriched.order]);
         }
         return data;
     } catch (error: any) {

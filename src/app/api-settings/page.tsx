@@ -6,12 +6,12 @@ import { Suspense } from 'react';
 import DashboardLayout from '@/components/dashboard-layout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Loader2, Copy, Save, CheckCircle, XCircle, Plug, Sheet, Database, Trash2, KeyRound } from 'lucide-react';
+import { Loader2, Copy, Save, CheckCircle, XCircle, Plug, Sheet, Database, Trash2, KeyRound, FileText } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useToast } from '@/hooks/use-toast';
-import { getBlingCredentials, saveBlingCredentials, disconnectBling, countImportedOrders, smartSyncOrders, fullSyncOrders, deleteAllSalesOrders, getMercadoLivreCredentials, saveMercadoLivreCredentials, disconnectMercadoLivre, pingMlConnection, startMlOAuth, listMlAccounts, setPrimaryMlAccount, deleteMlAccount, getMlAppConfigStatus, getGeminiCredentials, saveGeminiCredentials, type SyncProgress, type MlAccountSummary } from '@/app/actions';
+import { getBlingCredentials, saveBlingCredentials, disconnectBling, countImportedOrders, smartSyncOrders, fullSyncOrders, deleteAllSalesOrders, getMercadoLivreCredentials, saveMercadoLivreCredentials, disconnectMercadoLivre, pingMlConnection, startMlOAuth, listMlAccounts, setPrimaryMlAccount, deleteMlAccount, getMlAppConfigStatus, getGeminiCredentials, saveGeminiCredentials, type SyncProgress, type MlAccountSummary, type OrderSyncOptions } from '@/app/actions';
 import { format, startOfMonth, endOfMonth, subDays } from 'date-fns';
 import { Calendar as CalendarIcon } from 'lucide-react';
 import type { DateRange } from 'react-day-picker';
@@ -19,6 +19,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Calendar } from '@/components/ui/calendar';
 import { Separator } from '@/components/ui/separator';
 import { Progress } from '@/components/ui/progress';
+import { Switch } from '@/components/ui/switch';
 import { cn } from '@/lib/utils';
 import { ptBR } from 'date-fns/locale';
 import { Badge } from '@/components/ui/badge';
@@ -58,6 +59,8 @@ function ApiSettingsContent() {
   const [importSummary, setImportSummary] = React.useState<any>(null);
   const [syncStatusMessage, setSyncStatusMessage] = React.useState<string>('');
   const [syncProgressData, setSyncProgressData] = React.useState<SyncProgress | null>(null);
+  const [includeInvoiceDetails, setIncludeInvoiceDetails] = React.useState(true);
+  const [fetchInvoiceXml, setFetchInvoiceXml] = React.useState(false);
 
   // Mercado Livre states
   const [mlCredentials, setMlCredentials] = React.useState({ appId: '', clientSecret: '' });
@@ -285,7 +288,11 @@ function ApiSettingsContent() {
       }, 500);
 
       try {
-          const result = await syncFunction(date?.from, date?.to);
+          const syncOptions: OrderSyncOptions = {
+              includeInvoiceDetails,
+              fetchInvoiceXml: includeInvoiceDetails && fetchInvoiceXml,
+          };
+          const result = await syncFunction(date?.from, date?.to, syncOptions);
 
           clearInterval(progressInterval);
 
@@ -314,7 +321,7 @@ function ApiSettingsContent() {
           } else {
               toast({
                   title: "Sincronização Concluída!",
-                  description: `${result.summary.created} novos, ${result.summary.updated} atualizados. Total: ${totalCount}`,
+                  description: `${result.summary.created} novos, ${result.summary.updated} atualizados. NFs: ${result.summary.invoiceDetailsFetched || 0}. Total: ${totalCount}`,
               });
           }
 
@@ -731,6 +738,43 @@ function ApiSettingsContent() {
                   )}
               </div>
 
+              <div className="rounded-md border p-3 space-y-3">
+                  <div className="flex items-start justify-between gap-3">
+                      <div className="space-y-1">
+                          <Label htmlFor="include-invoice-details" className="flex items-center gap-2">
+                              <FileText className="h-4 w-4" />
+                              Dados da NF-e
+                          </Label>
+                          <p className="text-xs text-muted-foreground">
+                              Consulta a nota fiscal vinculada ao pedido e salva chave de acesso, numero, serie, emissao, situacao e valor.
+                          </p>
+                      </div>
+                      <Switch
+                          id="include-invoice-details"
+                          checked={includeInvoiceDetails}
+                          disabled={isImporting}
+                          onCheckedChange={(checked) => {
+                              setIncludeInvoiceDetails(checked);
+                              if (!checked) setFetchInvoiceXml(false);
+                          }}
+                      />
+                  </div>
+                  <div className="flex items-start justify-between gap-3">
+                      <div className="space-y-1">
+                          <Label htmlFor="fetch-invoice-xml">Baixar XML da NF-e</Label>
+                          <p className="text-xs text-muted-foreground">
+                              Salva o XML em fiscalDocuments para futuras analises fiscais. Pode deixar a sincronizacao mais lenta.
+                          </p>
+                      </div>
+                      <Switch
+                          id="fetch-invoice-xml"
+                          checked={fetchInvoiceXml}
+                          disabled={isImporting || !includeInvoiceDetails}
+                          onCheckedChange={setFetchInvoiceXml}
+                      />
+                  </div>
+              </div>
+
               <div className="flex flex-col gap-4">
                   <div className="flex gap-2">
                       {syncMode === 'smart' ? (
@@ -782,7 +826,7 @@ function ApiSettingsContent() {
                   )}
 
                   {importSummary && (
-                      <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-sm">
+                      <div className="grid grid-cols-2 md:grid-cols-6 gap-2 text-sm">
                           <div className="bg-blue-50 p-2 rounded text-center">
                               <div className="font-bold text-blue-600">{importSummary.total}</div>
                               <div className="text-blue-500">Total Encontrado</div>
@@ -798,6 +842,14 @@ function ApiSettingsContent() {
                           <div className="bg-purple-50 p-2 rounded text-center">
                               <div className="font-bold text-purple-600">{importSummary.created || 0}</div>
                               <div className="text-purple-500">Importados</div>
+                          </div>
+                          <div className="bg-slate-50 p-2 rounded text-center">
+                              <div className="font-bold text-slate-600">{importSummary.invoiceDetailsFetched || 0}</div>
+                              <div className="text-slate-500">NFs Consultadas</div>
+                          </div>
+                          <div className="bg-indigo-50 p-2 rounded text-center">
+                              <div className="font-bold text-indigo-600">{importSummary.invoiceXmlFetched || 0}</div>
+                              <div className="text-indigo-500">XMLs Baixados</div>
                           </div>
                       </div>
                   )}
