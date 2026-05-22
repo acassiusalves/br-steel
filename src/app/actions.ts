@@ -44,6 +44,8 @@ type BlingCredentials = {
 
 const credentialsDocRef = doc(db, "appConfig", "blingCredentials");
 const syncProgressDocRef = doc(db, "appConfig", "syncProgress");
+const MAX_INVOICE_DETAILS_PER_SYNC = 60;
+const MAX_INVOICE_XML_PER_SYNC = 20;
 
 // Gemini / IA
 export async function getGeminiCredentials(): Promise<GeminiCredentialsPublic> {
@@ -514,15 +516,31 @@ async function getBlingSalesOrdersOptimized({
             };
         }
 
-        const ordersToFetchDetails = forceFullSync ? allOrders : ordersToProcess;
+        const shouldForceEveryOrder = forceFullSync && !includeInvoiceDetails && !fetchInvoiceXml;
+        const allOrdersToFetchDetails = shouldForceEveryOrder ? allOrders : ordersToProcess;
+        const invoiceBatchLimit = fetchInvoiceXml
+            ? MAX_INVOICE_XML_PER_SYNC
+            : includeInvoiceDetails
+                ? MAX_INVOICE_DETAILS_PER_SYNC
+                : null;
+        const ordersToFetchDetails = invoiceBatchLimit
+            ? allOrdersToFetchDetails.slice(0, invoiceBatchLimit)
+            : allOrdersToFetchDetails;
+        const deferredOrders = Math.max(0, allOrdersToFetchDetails.length - ordersToFetchDetails.length);
+
+        if (deferredOrders > 0) {
+            console.log(`📄 [SYNC] Lote fiscal limitado a ${ordersToFetchDetails.length} pedidos. Pendentes para próximas execuções: ${deferredOrders}`);
+        }
 
         console.log('───────────────────────────────────────────────────────────');
         console.log(`📦 [SYNC] FASE 3: Buscando detalhes de ${ordersToFetchDetails.length} pedidos...`);
-        console.log(`📦 [SYNC] Modo: ${forceFullSync ? 'COMPLETO (todos)' : 'INCREMENTAL (apenas novos)'}`);
+        console.log(`📦 [SYNC] Modo: ${shouldForceEveryOrder ? 'COMPLETO (todos)' : forceFullSync ? 'COMPLETO COM FILTRO FISCAL' : 'INCREMENTAL (apenas novos)'}`);
         console.log('───────────────────────────────────────────────────────────');
 
         await updateSyncProgress({
-            currentStep: `Buscando detalhes de ${ordersToFetchDetails.length} pedidos...`,
+            currentStep: deferredOrders > 0
+                ? `Buscando lote de ${ordersToFetchDetails.length} pedidos (${deferredOrders} pendentes)...`
+                : `Buscando detalhes de ${ordersToFetchDetails.length} pedidos...`,
             totalOrders: ordersToFetchDetails.length,
             currentOrder: 0,
             percentage: 15,
@@ -620,7 +638,9 @@ async function getBlingSalesOrdersOptimized({
             summary: {
                 total: allOrders.length,
                 new: ordersToFetchDetails.length,
-                existing: allOrders.length - ordersToFetchDetails.length,
+                existing: allOrders.length - allOrdersToFetchDetails.length,
+                pending: deferredOrders,
+                matchedForProcessing: allOrdersToFetchDetails.length,
                 processed: processedCount,
                 errors: errorCount,
                 saved: saveResult.count,

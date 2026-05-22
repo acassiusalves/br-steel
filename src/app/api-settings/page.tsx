@@ -59,7 +59,7 @@ function ApiSettingsContent() {
   const [importSummary, setImportSummary] = React.useState<any>(null);
   const [syncStatusMessage, setSyncStatusMessage] = React.useState<string>('');
   const [syncProgressData, setSyncProgressData] = React.useState<SyncProgress | null>(null);
-  const [includeInvoiceDetails, setIncludeInvoiceDetails] = React.useState(true);
+  const [includeInvoiceDetails, setIncludeInvoiceDetails] = React.useState(false);
   const [fetchInvoiceXml, setFetchInvoiceXml] = React.useState(false);
 
   // Mercado Livre states
@@ -316,12 +316,14 @@ function ApiSettingsContent() {
           if (result.summary.created === 0 && result.summary.updated === 0) {
               toast({
                   title: "Tudo Atualizado!",
-                  description: `Nenhum pedido novo para importar. Total de ${totalCount} na base.`,
+                  description: result.summary.pending > 0
+                      ? `${result.summary.pending} pedidos ficaram para o próximo lote fiscal. Total de ${totalCount} na base.`
+                      : `Nenhum pedido novo para importar. Total de ${totalCount} na base.`,
               });
           } else {
               toast({
                   title: "Sincronização Concluída!",
-                  description: `${result.summary.created} novos, ${result.summary.updated} atualizados. NFs: ${result.summary.invoiceDetailsFetched || 0}. Total: ${totalCount}`,
+                  description: `${result.summary.created} novos, ${result.summary.updated} atualizados. NFs: ${result.summary.invoiceDetailsFetched || 0}. Pendentes: ${result.summary.pending || 0}. Total: ${totalCount}`,
               });
           }
 
@@ -746,7 +748,7 @@ function ApiSettingsContent() {
                               Dados da NF-e
                           </Label>
                           <p className="text-xs text-muted-foreground">
-                              Consulta a nota fiscal vinculada ao pedido e salva chave de acesso, numero, serie, emissao, situacao e valor.
+                              Consulta ate 60 notas por execucao e salva chave de acesso, numero, serie, emissao, situacao e valor.
                           </p>
                       </div>
                       <Switch
@@ -763,7 +765,7 @@ function ApiSettingsContent() {
                       <div className="space-y-1">
                           <Label htmlFor="fetch-invoice-xml">Baixar XML da NF-e</Label>
                           <p className="text-xs text-muted-foreground">
-                              Salva o XML em fiscalDocuments para futuras analises fiscais. Pode deixar a sincronizacao mais lenta.
+                              Salva ate 20 XMLs por execucao em fiscalDocuments. Use em lotes pequenos para evitar timeout.
                           </p>
                       </div>
                       <Switch
@@ -833,7 +835,7 @@ function ApiSettingsContent() {
                           </div>
                           <div className="bg-green-50 p-2 rounded text-center">
                               <div className="font-bold text-green-600">{importSummary.new}</div>
-                              <div className="text-green-500">Novos</div>
+                              <div className="text-green-500">Processados</div>
                           </div>
                           <div className="bg-yellow-50 p-2 rounded text-center">
                               <div className="font-bold text-yellow-600">{importSummary.existing}</div>
@@ -851,6 +853,11 @@ function ApiSettingsContent() {
                               <div className="font-bold text-indigo-600">{importSummary.invoiceXmlFetched || 0}</div>
                               <div className="text-indigo-500">XMLs Baixados</div>
                           </div>
+                          {(importSummary.pending || 0) > 0 && (
+                              <div className="col-span-2 md:col-span-6 rounded-md border border-amber-200 bg-amber-50 p-2 text-amber-700">
+                                  {importSummary.pending} pedidos ainda precisam ser processados em proximos lotes fiscais. Rode a sincronizacao novamente para continuar.
+                              </div>
+                          )}
                       </div>
                   )}
               </div>

@@ -498,7 +498,7 @@ export async function POST(request: Request) {
         orderDetails,
         (url) => blingFetch(url),
         {
-          fetchXml: process.env.BLING_FETCH_INVOICE_XML_ON_WEBHOOK !== '0',
+          fetchXml: process.env.BLING_FETCH_INVOICE_XML_ON_WEBHOOK === '1',
           skipExistingXml: true,
           source: 'bling-webhook',
         }
