@@ -13,6 +13,7 @@ import { getPackMessages } from '@/services/ml/messaging';
 import { getMlToken } from '@/services/mercadolivre';
 import { getPrimaryMlAccountIdAdmin } from '@/services/firestore-admin';
 import { adminDb } from '@/lib/firebase-admin';
+import { buildConversationSupportContext } from '@/services/ml/support-context';
 import type {
   MlChatConversationDoc,
   MlChatMessageDoc,
@@ -42,10 +43,11 @@ async function loadConversationPayload(packId: string, accountId?: string | null
     return { status: 404, body: { ok: false, error: 'Conversa não encontrada' } };
   }
 
-  const conversation = {
-    ...toFirestoreJson(convSnap.data() as MlChatConversationDoc),
+  const rawConversation = {
+    ...(convSnap.data() as MlChatConversationDoc),
     packId: convSnap.id,
   };
+  const conversation = toFirestoreJson(rawConversation);
 
   if (accountId && conversation.accountId && String(accountId) !== String(conversation.accountId)) {
     return {
@@ -64,10 +66,11 @@ async function loadConversationPayload(packId: string, accountId?: string | null
     ...toFirestoreJson(d.data() as MlChatMessageDoc),
     id: (d.data() as MlChatMessageDoc).id || d.id,
   }));
+  const supportContext = await buildConversationSupportContext(rawConversation);
 
   return {
     status: 200,
-    body: { ok: true, conversation, messages },
+    body: { ok: true, conversation, messages, supportContext: toFirestoreJson(supportContext) },
   };
 }
 

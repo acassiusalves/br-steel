@@ -11,6 +11,7 @@ import {
   syncQuestion,
   updateQuestionDoc,
 } from '@/services/ml/questions';
+import { buildQuestionSupportContext } from '@/services/ml/support-context';
 import type { MlQuestionQueueStatus } from '@/lib/ml-question-types';
 
 export const dynamic = 'force-dynamic';
@@ -35,7 +36,12 @@ export async function GET(
     if (!question) {
       return NextResponse.json({ ok: false, error: 'Pergunta não encontrada' }, { status: 404 });
     }
-    return NextResponse.json({ ok: true, question: toFirestoreJson(question) });
+    const supportContext = await buildQuestionSupportContext(question);
+    return NextResponse.json({
+      ok: true,
+      question: toFirestoreJson(question),
+      supportContext: toFirestoreJson(supportContext),
+    });
   } catch (e: any) {
     return NextResponse.json({ ok: false, error: e?.message || String(e) }, { status: 500 });
   }
@@ -87,7 +93,12 @@ export async function PATCH(
     if (!question) {
       return NextResponse.json({ ok: false, error: 'Pergunta não encontrada' }, { status: 404 });
     }
-    return NextResponse.json({ ok: true, question: toFirestoreJson(question) });
+    const supportContext = await buildQuestionSupportContext(question);
+    return NextResponse.json({
+      ok: true,
+      question: toFirestoreJson(question),
+      supportContext: toFirestoreJson(supportContext),
+    });
   } catch (e: any) {
     return NextResponse.json({ ok: false, error: e?.message || String(e) }, { status: 500 });
   }

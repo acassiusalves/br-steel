@@ -52,6 +52,15 @@ export type MlSupportQueueStatus =
 
 export type MlSupportPriority = 'low' | 'normal' | 'high' | 'urgent';
 
+export interface MlChatOrderItemContext {
+  itemId?: string | null;
+  title?: string | null;
+  sellerSku?: string | null;
+  quantity?: number | null;
+  unitPrice?: number | null;
+  totalAmount?: number | null;
+}
+
 /** Status de moderação aplicado pelo ML em uma mensagem. */
 export type MlMessageModerationStatus =
   | 'clean'
@@ -151,8 +160,15 @@ export interface MlChatConversationDoc {
 
   /** Lista de orders associadas ao pacote. */
   orderIds?: string[];
+  /** Itens associados ao pedido/pacote, quando resolvidos pela API de orders. */
+  items?: MlChatOrderItemContext[];
   /** Títulos dos itens associados ao pedido/pacote, quando resolvidos. */
   itemTitles?: string[];
+  /** IDs dos anúncios associados ao pedido/pacote, quando resolvidos. */
+  itemIds?: string[];
+  orderTotalAmount?: number | null;
+  orderStatus?: string | null;
+  orderCreatedAt?: string | null;
 
   /** Última mensagem - usado para listagem ordenada. */
   lastMessageAt?: number | null; // ms epoch
@@ -200,6 +216,17 @@ export interface MlChatConversationDoc {
     risks?: string[];
     needsHumanReview?: boolean;
     status?: 'ready' | 'needs_review' | 'error';
+    contextUsed?: {
+      productTitle?: string | null;
+      itemId?: string | null;
+      sellerSku?: string | null;
+      stock?: number | null;
+      status?: string | null;
+      orderTotalAmount?: number | null;
+      matchedBy?: string | null;
+      alerts?: string[];
+      generatedAt?: number;
+    };
     lastError?: string | null;
     updatedAt?: number;
   };

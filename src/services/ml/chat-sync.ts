@@ -46,8 +46,22 @@ type OrderContext = {
   buyerHint?: { id?: string | number | null; name?: string | null; email?: string | null };
   orderIds?: string[];
   shippingId?: string | number | null;
+  itemIds?: string[];
   itemTitles?: string[];
+  items?: Array<{
+    itemId?: string | null;
+    title?: string | null;
+    sellerSku?: string | null;
+    quantity?: number | null;
+    unitPrice?: number | null;
+    totalAmount?: number | null;
+  }>;
+  orderTotalAmount?: number | null;
+  orderStatus?: string | null;
+  orderCreatedAt?: string | null;
 };
+
+type OrderContextItem = NonNullable<OrderContext['items']>[number];
 
 function cleanString(value: unknown): string | null {
   const text = String(value ?? '').trim();
@@ -69,13 +83,28 @@ async function loadOrderContext(opts: {
 }): Promise<OrderContext | null> {
   try {
     const order = await getOrderDetails({ orderId: opts.packId, token: opts.token });
-    const itemTitles = Array.from(
-      new Set(
-        (order?.order_items || [])
-          .map((entry: any) => cleanString(entry?.item?.title))
-          .filter(Boolean)
-      )
-    ).slice(0, 5) as string[];
+    const orderItems = Array.isArray(order?.order_items) ? order.order_items : [];
+    const items: OrderContextItem[] = orderItems
+      .map((entry: any) => {
+        const quantity = Number(entry?.quantity ?? entry?.item?.quantity);
+        const unitPrice = Number(entry?.unit_price ?? entry?.full_unit_price ?? entry?.item?.unit_price);
+        return {
+          itemId: cleanString(entry?.item?.id),
+          title: cleanString(entry?.item?.title),
+          sellerSku:
+            cleanString(entry?.item?.seller_sku) ||
+            cleanString(entry?.item?.seller_custom_field) ||
+            cleanString(entry?.item?.seller_custom_id),
+          quantity: Number.isFinite(quantity) ? quantity : null,
+          unitPrice: Number.isFinite(unitPrice) ? unitPrice : null,
+          totalAmount: Number.isFinite(quantity) && Number.isFinite(unitPrice)
+            ? quantity * unitPrice
+            : null,
+        };
+      })
+      .filter((item: any) => item.itemId || item.title || item.sellerSku);
+    const itemTitles = Array.from(new Set(items.map((item: OrderContextItem) => item.title).filter(Boolean))).slice(0, 5) as string[];
+    const itemIds = Array.from(new Set(items.map((item: OrderContextItem) => item.itemId).filter(Boolean))).slice(0, 10) as string[];
 
     return {
       buyerHint: {
@@ -85,7 +114,12 @@ async function loadOrderContext(opts: {
       },
       orderIds: order?.id ? [String(order.id)] : [],
       shippingId: order?.shipping?.id ?? order?.shipping?.shipment_id ?? null,
+      itemIds,
       itemTitles,
+      items,
+      orderTotalAmount: Number.isFinite(Number(order?.total_amount)) ? Number(order.total_amount) : null,
+      orderStatus: cleanString(order?.status),
+      orderCreatedAt: cleanString(order?.date_created),
     };
   } catch (e: any) {
     const status = Number(e?.status || 0);
@@ -143,7 +177,17 @@ function buildConversationDocs(args: {
   sellerId: number;
   resp: MlMessagesPackResponse;
   buyerHint?: { id?: string | number | null; name?: string | null; email?: string | null };
-  orderHint?: Pick<OrderContext, 'orderIds' | 'shippingId' | 'itemTitles'> | null;
+  orderHint?: Pick<
+    OrderContext,
+    | 'orderIds'
+    | 'shippingId'
+    | 'itemIds'
+    | 'itemTitles'
+    | 'items'
+    | 'orderTotalAmount'
+    | 'orderStatus'
+    | 'orderCreatedAt'
+  > | null;
 }): { conv: Partial<MlChatConversationDoc>; messages: MlChatMessageDoc[] } {
   const { packId, accountId, sellerId, resp, buyerHint, orderHint } = args;
   const now = Date.now();
@@ -227,7 +271,12 @@ function buildConversationDocs(args: {
     claimId: (cs.claim_id ?? cs.claim_ids?.[0]) ?? null,
     shippingId: cs.shipping_id ?? orderHint?.shippingId ?? null,
     orderIds: orderHint?.orderIds || [],
+    items: (orderHint as OrderContext | null)?.items || [],
+    itemIds: (orderHint as OrderContext | null)?.itemIds || [],
     itemTitles: orderHint?.itemTitles || [],
+    orderTotalAmount: (orderHint as OrderContext | null)?.orderTotalAmount ?? null,
+    orderStatus: (orderHint as OrderContext | null)?.orderStatus ?? null,
+    orderCreatedAt: (orderHint as OrderContext | null)?.orderCreatedAt ?? null,
     lastMessageAt: last?.sortKey || null,
     lastMessagePreview: last?.text?.slice(0, 160) || '',
     lastMessageDirection: last?.direction,

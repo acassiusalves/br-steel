@@ -8,6 +8,8 @@ import {
   CheckCheck,
   CircleHelp,
   Clock,
+  ExternalLink,
+  Eye,
   Loader2,
   MessageSquare,
   Paperclip,
@@ -15,7 +17,9 @@ import {
   RefreshCw,
   Search,
   Send,
+  ShieldAlert,
   Sparkles,
+  ShoppingCart,
   UserCheck,
 } from 'lucide-react';
 
@@ -57,6 +61,7 @@ import {
   type MlQuestionDoc,
   type MlQuestionQueueStatus,
 } from '@/lib/ml-question-types';
+import type { MlSupportContext } from '@/services/ml/support-context';
 import { describeSubstatus } from '@/lib/ml-chat-substatus';
 import { listMlAccounts, type MlAccountSummary } from '@/app/actions';
 import { useAuth } from '@/contexts/AuthContext';
@@ -79,6 +84,7 @@ type ConversationDetailResponse = {
   error?: string;
   conversation?: MlChatConversationDoc;
   messages?: MlChatMessageDoc[];
+  supportContext?: MlSupportContext | null;
 };
 
 type QuestionListResponse = {
@@ -94,6 +100,7 @@ type QuestionDetailResponse = {
   ok?: boolean;
   error?: string;
   question?: MlQuestionDoc;
+  supportContext?: MlSupportContext | null;
 };
 
 async function readApiJson<T>(response: Response): Promise<T> {
@@ -163,6 +170,28 @@ function formatDateTime(epoch?: number | null) {
     hour: '2-digit',
     minute: '2-digit',
   });
+}
+
+function formatMoney(value?: number | null) {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return 'N/A';
+  return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value);
+}
+
+function formatNumber(value?: number | null) {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return 'N/A';
+  return new Intl.NumberFormat('pt-BR').format(value);
+}
+
+function formatPercent(value?: number | null, decimals = 0) {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return 'N/A';
+  return `${value.toFixed(decimals).replace('.', ',')}%`;
+}
+
+function formatIsoDate(value?: string | null) {
+  if (!value) return 'N/A';
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return value;
+  return date.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
 }
 
 function validateAttachment(file: File): string | null {
@@ -419,6 +448,11 @@ function ConversationList(props: {
                       )}
                     </div>
                   </div>
+                  {c.itemTitles?.[0] && (
+                    <div className="truncate text-[11px] text-foreground">
+                      {c.itemTitles[0]}
+                    </div>
+                  )}
                   <div className="flex flex-wrap items-center gap-1">
                     <Badge variant={queueStatusVariant(queueStatus)} className="h-5 px-1.5 text-[10px]">
                       {QUEUE_STATUS_LABELS[queueStatus]}
@@ -639,6 +673,7 @@ function ConversationPanel(props: {
   const { toast } = useToast();
   const [conv, setConv] = React.useState<MlChatConversationDoc | null>(null);
   const [messages, setMessages] = React.useState<MlChatMessageDoc[]>([]);
+  const [supportContext, setSupportContext] = React.useState<MlSupportContext | null>(null);
   const [loading, setLoading] = React.useState(false);
   const [sending, setSending] = React.useState(false);
   const [refreshing, setRefreshing] = React.useState(false);
@@ -663,6 +698,7 @@ function ConversationPanel(props: {
       const json = await readApiJson<ConversationDetailResponse>(response);
       setConv(json.conversation || null);
       setMessages(json.messages || []);
+      setSupportContext(json.supportContext || null);
       setTimeout(() => {
         if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
       }, 60);
@@ -674,6 +710,7 @@ function ConversationPanel(props: {
   React.useEffect(() => {
     setConv(null);
     setMessages([]);
+    setSupportContext(null);
     setText('');
     setAttachments([]);
     if (!props.packId || !props.accountId) {
@@ -695,6 +732,7 @@ function ConversationPanel(props: {
         if (cancelled) return;
         setConv(json.conversation || null);
         setMessages(json.messages || []);
+        setSupportContext(json.supportContext || null);
         setTimeout(() => {
           if (!cancelled && scrollRef.current) {
             scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
@@ -729,6 +767,7 @@ function ConversationPanel(props: {
       const j = await readApiJson<ConversationDetailResponse>(r);
       setConv(j.conversation || null);
       setMessages(j.messages || messages);
+      setSupportContext(j.supportContext || null);
     } catch (e: any) {
       toast({ variant: 'destructive', title: 'Erro', description: e?.message || String(e) });
     } finally {
@@ -759,6 +798,7 @@ function ConversationPanel(props: {
       const j = await readApiJson<ConversationDetailResponse>(r);
       setConv(j.conversation || null);
       setMessages(j.messages || messages);
+      setSupportContext(j.supportContext || null);
       toast({ title: 'Conversa marcada como lida' });
     } catch (e: any) {
       toast({ variant: 'destructive', title: 'Erro', description: e?.message || String(e) });
@@ -1068,6 +1108,7 @@ function ConversationPanel(props: {
 
         <SupportSidePanel
           conv={conv}
+          supportContext={supportContext}
           aiLoading={aiLoading}
           onGenerateAi={handleGenerateAi}
           onUseAiReply={handleUseAiReply}
@@ -1086,6 +1127,7 @@ function QuestionPanel(props: {
 }) {
   const { toast } = useToast();
   const [question, setQuestion] = React.useState<MlQuestionDoc | null>(null);
+  const [supportContext, setSupportContext] = React.useState<MlSupportContext | null>(null);
   const [loading, setLoading] = React.useState(false);
   const [refreshing, setRefreshing] = React.useState(false);
   const [stateSaving, setStateSaving] = React.useState(false);
@@ -1104,6 +1146,7 @@ function QuestionPanel(props: {
       );
       const json = await readApiJson<QuestionDetailResponse>(response);
       setQuestion(json.question || null);
+      setSupportContext(json.supportContext || null);
       setLoading(false);
     },
     [props.accountId, props.questionId]
@@ -1111,6 +1154,7 @@ function QuestionPanel(props: {
 
   React.useEffect(() => {
     setQuestion(null);
+    setSupportContext(null);
     setText('');
     if (!props.questionId || !props.accountId) {
       setLoading(false);
@@ -1130,6 +1174,7 @@ function QuestionPanel(props: {
         const json = await readApiJson<QuestionDetailResponse>(response);
         if (cancelled) return;
         setQuestion(json.question || null);
+        setSupportContext(json.supportContext || null);
       } catch (e: any) {
         if (!cancelled) {
           toast({ variant: 'destructive', title: 'Erro', description: e?.message || String(e) });
@@ -1158,6 +1203,7 @@ function QuestionPanel(props: {
       });
       const json = await readApiJson<QuestionDetailResponse>(response);
       setQuestion(json.question || null);
+      setSupportContext(json.supportContext || null);
       props.onChanged();
     } catch (e: any) {
       toast({ variant: 'destructive', title: 'Erro', description: e?.message || String(e) });
@@ -1207,6 +1253,7 @@ function QuestionPanel(props: {
       });
       const json = await readApiJson<QuestionDetailResponse>(response);
       setQuestion(json.question || null);
+      setSupportContext(json.supportContext || null);
       setText('');
       props.onChanged();
       toast({ title: 'Pergunta respondida' });
@@ -1367,6 +1414,8 @@ function QuestionPanel(props: {
 
         <aside className="min-h-0 overflow-y-auto border-t bg-muted/20 p-3 lg:border-l lg:border-t-0">
           <div className="space-y-5">
+            <ProductSupportPanel supportContext={supportContext} />
+
             <section className="space-y-2">
               <div className="text-xs font-semibold uppercase text-muted-foreground">Contexto</div>
               <div className="grid gap-2 text-xs">
@@ -1391,8 +1440,135 @@ function QuestionPanel(props: {
   );
 }
 
+function alertClass(severity: MlSupportContext['alerts'][number]['severity']) {
+  if (severity === 'critical') return 'border-destructive/40 bg-destructive/10 text-destructive';
+  if (severity === 'warning') return 'border-amber-300 bg-amber-50 text-amber-900';
+  if (severity === 'positive') return 'border-emerald-300 bg-emerald-50 text-emerald-900';
+  return 'border-blue-200 bg-blue-50 text-blue-900';
+}
+
+function ProductSupportPanel({ supportContext }: { supportContext: MlSupportContext | null }) {
+  const listing = supportContext?.listing || null;
+  const primaryTitle = listing?.title || supportContext?.items[0]?.title || 'Produto nao identificado';
+
+  return (
+    <section className="space-y-3">
+      <div className="flex items-center justify-between gap-2">
+        <div className="inline-flex items-center gap-2 text-xs font-semibold uppercase text-muted-foreground">
+          <Package className="h-4 w-4" />
+          Produto
+        </div>
+        {supportContext?.matchedBy && (
+          <Badge variant="outline" className="h-5 px-1.5 text-[10px]">
+            {supportContext.matchedBy === 'itemId' ? 'cruzado por MLB' : supportContext.matchedBy === 'sku' ? 'cruzado por SKU' : 'dados do ML'}
+          </Badge>
+        )}
+      </div>
+
+      <div className="rounded-md border bg-background p-3">
+        <div className="flex gap-3">
+          <div className="flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-md border bg-muted">
+            {listing?.thumbnail ? (
+              <img src={listing.thumbnail} alt={primaryTitle} className="h-full w-full object-contain" />
+            ) : (
+              <Package className="h-7 w-7 text-muted-foreground" />
+            )}
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="line-clamp-3 text-sm font-medium">{primaryTitle}</div>
+            <div className="mt-1 flex flex-wrap gap-1.5 text-[11px] text-muted-foreground">
+              {listing?.itemId || supportContext?.primaryItemId ? <span className="font-mono">{listing?.itemId || supportContext?.primaryItemId}</span> : null}
+              {listing?.sellerSku ? <span>SKU {listing.sellerSku}</span> : null}
+              {listing?.status ? <span>{listing.status}</span> : null}
+            </div>
+            {listing?.permalink ? (
+              <Button asChild variant="outline" size="sm" className="mt-2 h-7 w-full gap-1 text-xs">
+                <a href={listing.permalink} target="_blank" rel="noreferrer">
+                  Abrir anúncio
+                  <ExternalLink className="h-3 w-3" />
+                </a>
+              </Button>
+            ) : null}
+          </div>
+        </div>
+
+        <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
+          <InfoBox label="Preço" value={formatMoney(listing?.price)} />
+          <InfoBox label="Estoque ML" value={formatNumber(listing?.availableQuantity)} />
+          <InfoBox label="Vendidos" value={formatNumber(listing?.soldQuantity)} />
+          <InfoBox label="Visitas 30d" value={formatNumber(listing?.visitsLast30Days)} />
+          <InfoBox label="Qualidade" value={formatPercent(listing?.qualityScore)} />
+          <InfoBox label="Ads ROAS" value={typeof listing?.adsRoas === 'number' ? listing.adsRoas.toFixed(2).replace('.', ',') : 'N/A'} />
+        </div>
+
+        {listing?.adsCost || listing?.adsClicks || listing?.adsPrints ? (
+          <div className="mt-3 grid grid-cols-3 gap-2 text-xs">
+            <InfoBox label="Ads invest." value={formatMoney(listing.adsCost)} />
+            <InfoBox label="Cliques" value={formatNumber(listing.adsClicks)} />
+            <InfoBox label="CTR" value={formatPercent(listing.adsCtr, 1)} />
+          </div>
+        ) : null}
+      </div>
+
+      {supportContext?.items.length ? (
+        <div className="space-y-2">
+          <div className="inline-flex items-center gap-2 text-xs font-semibold uppercase text-muted-foreground">
+            <ShoppingCart className="h-4 w-4" />
+            Itens do pedido
+          </div>
+          <div className="space-y-2">
+            {supportContext.items.slice(0, 4).map((item, index) => (
+              <div key={`${item.itemId || item.sellerSku || index}`} className="rounded-md border bg-background p-2 text-xs">
+                <div className="line-clamp-2 font-medium">{item.title || item.listing?.title || item.itemId || 'Item'}</div>
+                <div className="mt-1 flex flex-wrap gap-2 text-muted-foreground">
+                  {item.sellerSku ? <span>SKU {item.sellerSku}</span> : null}
+                  {item.quantity !== null ? <span>Qtd. {formatNumber(item.quantity)}</span> : null}
+                  {item.unitPrice !== null ? <span>{formatMoney(item.unitPrice)}</span> : null}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
+      {supportContext?.order && (
+        <section className="space-y-2">
+          <div className="inline-flex items-center gap-2 text-xs font-semibold uppercase text-muted-foreground">
+            <Eye className="h-4 w-4" />
+            Pedido e envio
+          </div>
+          <div className="grid gap-2 text-xs">
+            <InfoRow label="Pack" value={supportContext.order.packId || 'N/A'} />
+            <InfoRow label="Pedido" value={supportContext.order.orderIds[0] || 'N/A'} />
+            <InfoRow label="Envio" value={supportContext.order.shippingId || 'N/A'} />
+            <InfoRow label="Claim" value={supportContext.order.claimId || 'N/A'} />
+            <InfoRow label="Total" value={formatMoney(supportContext.order.totalAmount)} />
+            <InfoRow label="Criado" value={formatIsoDate(supportContext.order.createdAt)} />
+          </div>
+        </section>
+      )}
+
+      <div className="space-y-2">
+        <div className="inline-flex items-center gap-2 text-xs font-semibold uppercase text-muted-foreground">
+          <ShieldAlert className="h-4 w-4" />
+          Alertas
+        </div>
+        <div className="space-y-2">
+          {(supportContext?.alerts || []).slice(0, 4).map((alert) => (
+            <div key={alert.id} className={cn('rounded-md border p-2 text-xs', alertClass(alert.severity))}>
+              <div className="font-medium">{alert.title}</div>
+              <div className="mt-1 opacity-80">{alert.description}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function SupportSidePanel(props: {
   conv: MlChatConversationDoc | null;
+  supportContext: MlSupportContext | null;
   aiLoading: boolean;
   onGenerateAi: () => void;
   onUseAiReply: () => void;
@@ -1403,6 +1579,8 @@ function SupportSidePanel(props: {
   return (
     <aside className="min-h-0 overflow-y-auto border-t bg-muted/20 p-3 lg:border-l lg:border-t-0">
       <div className="space-y-5">
+        <ProductSupportPanel supportContext={props.supportContext} />
+
         <section className="space-y-2">
           <div className="text-xs font-semibold uppercase text-muted-foreground">Contexto</div>
           <div className="grid gap-2 text-xs">
@@ -1459,6 +1637,23 @@ function SupportSidePanel(props: {
                 <InfoBox label="Intenção" value={ai.intent || 'N/A'} />
                 <InfoBox label="Confiança" value={`${Math.round((ai.confidence || 0) * 100)}%`} />
               </div>
+              {ai.contextUsed && (
+                <div className="rounded-md border bg-background p-3 text-xs">
+                  <div className="mb-2 font-medium">Contexto usado</div>
+                  <div className="grid gap-1">
+                    <InfoRow label="Produto" value={ai.contextUsed.productTitle || 'N/A'} />
+                    <InfoRow label="Item" value={ai.contextUsed.itemId || 'N/A'} />
+                    <InfoRow label="SKU" value={ai.contextUsed.sellerSku || 'N/A'} />
+                    <InfoRow label="Estoque" value={formatNumber(ai.contextUsed.stock)} />
+                    <InfoRow label="Total pedido" value={formatMoney(ai.contextUsed.orderTotalAmount)} />
+                  </div>
+                  {ai.contextUsed.alerts && ai.contextUsed.alerts.length > 0 && (
+                    <div className="mt-2 text-[11px] text-amber-700">
+                      Alertas: {ai.contextUsed.alerts.join(', ')}
+                    </div>
+                  )}
+                </div>
+              )}
               {ai.risks && ai.risks.length > 0 && (
                 <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-xs text-amber-800">
                   <div className="mb-1 font-medium">Cuidados</div>

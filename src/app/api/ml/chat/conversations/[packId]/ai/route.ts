@@ -11,9 +11,28 @@ import { mlSupportAssistantFlow } from '@/ai/flows/ml-support-assistant';
 import { getPrimaryMlAccountIdAdmin } from '@/services/firestore-admin';
 import type { MlChatConversationDoc, MlChatMessageDoc } from '@/lib/ml-chat-types';
 import { requirePagePermission } from '@/lib/server-auth';
+import { buildConversationSupportContext, type MlSupportContext } from '@/services/ml/support-context';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
+
+function buildAiContextUsed(supportContext: MlSupportContext) {
+  const listing = supportContext.listing;
+  return {
+    productTitle: listing?.title || supportContext.items[0]?.title || null,
+    itemId: listing?.itemId || supportContext.primaryItemId || null,
+    sellerSku: listing?.sellerSku || supportContext.items[0]?.sellerSku || null,
+    stock: listing?.availableQuantity ?? null,
+    status: listing?.status || null,
+    orderTotalAmount: supportContext.order.totalAmount ?? null,
+    matchedBy: supportContext.matchedBy || null,
+    alerts: supportContext.alerts
+      .filter((alert) => alert.severity !== 'positive')
+      .slice(0, 4)
+      .map((alert) => alert.title),
+    generatedAt: Date.now(),
+  };
+}
 
 export async function POST(
   request: Request,
@@ -46,6 +65,7 @@ export async function POST(
   }
 
   try {
+    const supportContext = await buildConversationSupportContext(conv);
     const msgSnap = await convRef
       .collection('messages')
       .orderBy('sortKey', 'desc')
@@ -73,6 +93,7 @@ export async function POST(
         queueStatus: conv.queueStatus || null,
         priority: conv.priority || null,
       },
+      supportContext,
       messages,
     });
 
@@ -81,6 +102,7 @@ export async function POST(
         ai: {
           ...suggestion,
           status: suggestion.needsHumanReview ? 'needs_review' : 'ready',
+          contextUsed: buildAiContextUsed(supportContext),
           lastError: null,
           updatedAt: Date.now(),
         },

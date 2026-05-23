@@ -15,6 +15,67 @@ export const MlSupportAssistantInputSchema = z.object({
     queueStatus: z.string().nullable().optional(),
     priority: z.string().nullable().optional(),
   }),
+  supportContext: z
+    .object({
+      matchedBy: z.string().nullable().optional(),
+      listing: z
+        .object({
+          itemId: z.string().nullable().optional(),
+          title: z.string().nullable().optional(),
+          sellerSku: z.string().nullable().optional(),
+          status: z.string().nullable().optional(),
+          price: z.number().nullable().optional(),
+          availableQuantity: z.number().nullable().optional(),
+          soldQuantity: z.number().nullable().optional(),
+          visitsLast30Days: z.number().nullable().optional(),
+          qualityScore: z.number().nullable().optional(),
+          logisticType: z.string().nullable().optional(),
+          freeShipping: z.boolean().nullable().optional(),
+          adsCost: z.number().nullable().optional(),
+          adsRoas: z.number().nullable().optional(),
+          adsAcos: z.number().nullable().optional(),
+          adsClicks: z.number().nullable().optional(),
+          adsCtr: z.number().nullable().optional(),
+        })
+        .nullable()
+        .optional(),
+      items: z
+        .array(
+          z.object({
+            itemId: z.string().nullable().optional(),
+            title: z.string().nullable().optional(),
+            sellerSku: z.string().nullable().optional(),
+            quantity: z.number().nullable().optional(),
+            unitPrice: z.number().nullable().optional(),
+            totalAmount: z.number().nullable().optional(),
+          })
+        )
+        .max(8)
+        .optional(),
+      order: z
+        .object({
+          orderIds: z.array(z.string()).optional(),
+          shippingId: z.union([z.string(), z.number()]).nullable().optional(),
+          claimId: z.union([z.string(), z.number()]).nullable().optional(),
+          totalAmount: z.number().nullable().optional(),
+          status: z.string().nullable().optional(),
+          createdAt: z.string().nullable().optional(),
+        })
+        .nullable()
+        .optional(),
+      alerts: z
+        .array(
+          z.object({
+            severity: z.enum(['info', 'warning', 'critical', 'positive']),
+            title: z.string(),
+            description: z.string(),
+          })
+        )
+        .max(8)
+        .optional(),
+    })
+    .nullable()
+    .optional(),
   messages: z
     .array(
       z.object({
@@ -56,6 +117,73 @@ Regras obrigatórias:
 6. Use português do Brasil, tom profissional e direto.
 7. Se houver claim, bloqueio, moderação ou risco, marque needsHumanReview=true.`;
 
+function money(value?: number | null): string {
+  return typeof value === 'number' && Number.isFinite(value)
+    ? value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+    : 'não informado';
+}
+
+function numberText(value?: number | null): string {
+  return typeof value === 'number' && Number.isFinite(value)
+    ? value.toLocaleString('pt-BR')
+    : 'não informado';
+}
+
+function percentText(value?: number | null): string {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return 'não informado';
+  const normalized = value <= 1 ? value * 100 : value;
+  return `${normalized.toLocaleString('pt-BR', { maximumFractionDigits: 1 })}%`;
+}
+
+function buildSupportContextPrompt(input: MlSupportAssistantInput): string {
+  const context = input.supportContext;
+  if (!context) return 'Sem contexto estruturado de produto/pedido disponível.';
+
+  const listing = context.listing;
+  const itemLines = (context.items || [])
+    .slice(0, 5)
+    .map((item) => {
+      const qty = item.quantity != null ? `, qtd. ${numberText(item.quantity)}` : '';
+      const unit = item.unitPrice != null ? `, unit. ${money(item.unitPrice)}` : '';
+      return `- ${item.title || item.itemId || 'item sem titulo'}${item.sellerSku ? `, SKU ${item.sellerSku}` : ''}${qty}${unit}`;
+    })
+    .join('\n');
+  const alertLines = (context.alerts || [])
+    .map((alert) => `- ${alert.severity.toUpperCase()}: ${alert.title} - ${alert.description}`)
+    .join('\n');
+
+  return `Contexto estruturado para apoiar a resposta:
+- Cruzamento: ${context.matchedBy || 'não informado'}
+- Anúncio: ${listing?.title || 'não identificado'}
+- MLB: ${listing?.itemId || 'não informado'}
+- SKU: ${listing?.sellerSku || 'não informado'}
+- Status do anúncio: ${listing?.status || 'não informado'}
+- Preço: ${money(listing?.price)}
+- Estoque no ML: ${numberText(listing?.availableQuantity)}
+- Vendidos: ${numberText(listing?.soldQuantity)}
+- Visitas 30d: ${numberText(listing?.visitsLast30Days)}
+- Qualidade: ${percentText(listing?.qualityScore)}
+- Logística: ${listing?.logisticType || 'não informado'}
+- Frete grátis: ${listing?.freeShipping == null ? 'não informado' : listing.freeShipping ? 'sim' : 'não'}
+- Ads ROAS: ${numberText(listing?.adsRoas)}
+- Ads ACOS: ${percentText(listing?.adsAcos)}
+- Ads custo: ${money(listing?.adsCost)}
+- Ads cliques: ${numberText(listing?.adsClicks)}
+- Ads CTR: ${percentText(listing?.adsCtr)}
+- Pedido: ${(context.order?.orderIds || []).join(', ') || 'não informado'}
+- Status do pedido: ${context.order?.status || 'não informado'}
+- Total do pedido: ${money(context.order?.totalAmount)}
+- Envio: ${context.order?.shippingId || input.conversation.shippingId || 'não informado'}
+- Claim: ${context.order?.claimId || input.conversation.claimId || 'não informado'}
+- Criado em: ${context.order?.createdAt || 'não informado'}
+
+Itens:
+${itemLines || '- não informado'}
+
+Alertas operacionais:
+${alertLines || '- sem alertas relevantes'}`;
+}
+
 export const mlSupportAssistantFlow = ai.defineFlow(
   {
     name: 'mlSupportAssistantFlow',
@@ -71,6 +199,7 @@ export const mlSupportAssistantFlow = ai.defineFlow(
       .join('\n');
 
     const apiKey = await getGeminiApiKeyAdmin().catch(() => '');
+    const supportContextPrompt = buildSupportContextPrompt(input);
     const { output } = await ai.generate({
       model: 'googleai/gemini-2.5-flash',
       system: SYSTEM_PROMPT,
@@ -86,6 +215,15 @@ Contexto:
 - Status interno: ${input.conversation.queueStatus || 'não informado'}
 - Prioridade interna: ${input.conversation.priority || 'não informado'}
 - Limite de mensagem: ${input.conversation.sellerMaxMessageLength || ML_MESSAGE_MAX_LENGTH}
+
+${supportContextPrompt}
+
+Orientação de uso do contexto:
+- Use dados do produto/pedido apenas quando eles forem relevantes para a dúvida do cliente.
+- Se o atendimento for sobre entrega, priorize dados de pedido, envio, claim e status; não cite estoque/status do anúncio se isso puder confundir uma compra já feita.
+- Se o anúncio estiver pausado, sem estoque ou com alerta crítico, trate como cuidado interno. Não afirme disponibilidade sem confirmar.
+- Se não houver envio/rastreio no contexto, não invente prazo.
+- Métricas de visitas, qualidade e Ads são para orientar o atendente; só cite ao cliente se a pergunta for sobre anúncio/produto e fizer sentido.
 
 Histórico:
 ${transcript || 'Sem mensagens disponíveis.'}
