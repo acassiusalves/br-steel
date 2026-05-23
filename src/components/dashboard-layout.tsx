@@ -90,6 +90,7 @@ const allNavItems = [
         label: "Marketplace",
         subItems: [
             { href: "/anuncios-mercado-livre", icon: Store, label: "Anúncios ML" },
+            { href: "/analise-ads", icon: BarChart3, label: "Análise Ads" },
             { href: "/buscar-mercado-livre", icon: Search, label: "Buscar ML" },
         ]
     },

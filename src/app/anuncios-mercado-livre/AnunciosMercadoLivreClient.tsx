@@ -1,6 +1,7 @@
 'use client';
 
 import * as React from 'react';
+import Link from 'next/link';
 import {
   AlertTriangle,
   Activity,
@@ -14,6 +15,7 @@ import {
   Layers,
   ListChecks,
   Loader2,
+  Megaphone,
   MoreHorizontal,
   PackageSearch,
   PauseCircle,
@@ -148,8 +150,27 @@ const emptyResult: MlListingsListResult = {
     conversionRate30Days: null,
     gmvEstimated: 0,
     averagePrice: null,
+    adsListings: 0,
+    adsClicks: 0,
+    adsPrints: 0,
+    adsCost: 0,
+    adsTotalAmount: 0,
+    adsUnitsQuantity: 0,
+    adsRoas: null,
+    adsAcos: null,
+    adsCtr: null,
+    adsCvr: null,
+    adsLowRoas: 0,
+    adsHighAcos: 0,
+    adsLowCtr: 0,
+    adsLowCvr: 0,
+    adsHighSpendNoSales: 0,
   },
   syncState: null,
+  adsSyncState: null,
+  adsCampaigns: [],
+  adsCampaignDetails: [],
+  adsRecommendations: [],
 };
 
 function formatMoney(value: number | null | undefined) {
@@ -165,6 +186,11 @@ function formatNumber(value: number | null | undefined) {
 function formatPercent(value: number | null | undefined, decimals = 1) {
   if (typeof value !== 'number' || !Number.isFinite(value)) return '-';
   return `${value.toFixed(decimals).replace('.', ',')}%`;
+}
+
+function formatDecimal(value: number | null | undefined, decimals = 2) {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return '-';
+  return value.toFixed(decimals).replace('.', ',');
 }
 
 function formatDate(value: string | null | undefined) {
@@ -366,6 +392,7 @@ function ListingBadges({ row }: { row: MlListingCacheRow }) {
       {row.catalogProductId || row.catalogListing ? <Badge variant="outline" className="gap-1"><Layers className="h-3 w-3" />Catalogo</Badge> : null}
       {row.listingTypeId ? <Badge variant="outline">{listingTypeLabel(row.listingTypeId)}</Badge> : null}
       {row.freeShipping ? <Badge variant="outline">Frete gratis</Badge> : null}
+      {row.adsCampaignId ? <Badge variant="outline" className="gap-1"><Megaphone className="h-3 w-3" />Ads</Badge> : null}
       {row.priceAutomationActive ? <Badge variant="outline" className="gap-1"><ShieldAlert className="h-3 w-3" />Auto preco</Badge> : null}
       {isSpecialLogisticsListing(row) ? <Badge variant="outline">Full/Flex</Badge> : null}
       {problems > 0 ? <Badge variant="destructive" className="gap-1"><AlertTriangle className="h-3 w-3" />{problems} alerta(s)</Badge> : null}
@@ -635,6 +662,30 @@ function ConversionCell({ row }: { row: MlListingCacheRow }) {
     <div className="space-y-1 text-right">
       <div className="font-medium">{conversion === null ? '-' : formatPercent(conversion)}</div>
       <div className="text-xs text-muted-foreground">{formatNumber(visits)} visitas</div>
+    </div>
+  );
+}
+
+function AdsCell({ row }: { row: MlListingCacheRow }) {
+  const hasAds = Boolean(row.adsCampaignId || (row.adsCost ?? 0) > 0 || (row.adsPrints ?? 0) > 0);
+  if (!hasAds) {
+    return <div className="text-right text-muted-foreground">-</div>;
+  }
+
+  const warning =
+    (row.adsCost ?? 0) >= 50 && (row.adsUnitsQuantity ?? 0) === 0
+      ? 'sem venda'
+      : (row.adsRoas ?? 0) > 0 && (row.adsRoas ?? 0) < 3
+        ? 'ROAS baixo'
+        : (row.adsAcos ?? 0) > 30
+          ? 'ACOS alto'
+          : null;
+
+  return (
+    <div className="space-y-1 text-right">
+      <div className="font-medium">ROAS {formatDecimal(row.adsRoas)}</div>
+      <div className="text-xs text-muted-foreground">{formatMoney(row.adsCost)} invest.</div>
+      {warning ? <Badge variant="destructive" className="text-[10px]">{warning}</Badge> : null}
     </div>
   );
 }
@@ -1048,6 +1099,7 @@ function ListingTable({
           <TableHead className="text-right">Estoque</TableHead>
           <TableHead className="text-right">Vendidos</TableHead>
           <TableHead className="text-right">Conversao</TableHead>
+          <TableHead className="text-right">Ads 30d</TableHead>
           <TableHead className="text-right">Qualidade</TableHead>
           <TableHead className="text-right">Acoes</TableHead>
         </TableRow>
@@ -1055,14 +1107,14 @@ function ListingTable({
       <TableBody>
         {isLoading ? (
           <TableRow>
-            <TableCell colSpan={8} className="h-28 text-center text-muted-foreground">
+            <TableCell colSpan={9} className="h-28 text-center text-muted-foreground">
               <Loader2 className="mx-auto mb-2 h-5 w-5 animate-spin" />
               Carregando anuncios...
             </TableCell>
           </TableRow>
         ) : rows.length === 0 ? (
           <TableRow>
-            <TableCell colSpan={8} className="h-28 text-center text-muted-foreground">
+            <TableCell colSpan={9} className="h-28 text-center text-muted-foreground">
               Nenhum anuncio encontrado com os filtros atuais.
             </TableCell>
           </TableRow>
@@ -1094,6 +1146,7 @@ function ListingTable({
               <TableCell className="text-right">{formatNumber(row.availableQuantity)}</TableCell>
               <TableCell className="text-right">{formatNumber(row.soldQuantity)}</TableCell>
               <TableCell className="text-right"><ConversionCell row={row} /></TableCell>
+              <TableCell className="text-right"><AdsCell row={row} /></TableCell>
               <TableCell className="text-right"><QualityCell row={row} /></TableCell>
               <TableCell className="text-right">
                 <ListingActionMenu
@@ -1515,6 +1568,12 @@ export default function AnunciosMercadoLivreClient() {
                 ))}
               </SelectContent>
             </Select>
+            <Button asChild variant="outline" className="gap-2">
+              <Link href="/analise-ads">
+                <Megaphone className="h-4 w-4" />
+                Analise Ads
+              </Link>
+            </Button>
             <Button onClick={handleSync} disabled={isSyncing} className="gap-2">
               {isSyncing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
               {isSyncing ? 'Sincronizando...' : 'Sincronizar'}

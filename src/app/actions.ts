@@ -48,6 +48,10 @@ import {
     type MlListingsSyncReport,
 } from '@/services/ml-listings-cache';
 import {
+    syncMercadoLivreAdsAnalyticsCache,
+    type MlAdsSyncReport,
+} from '@/services/ml-ads-analytics-cache';
+import {
     AUTH_COOKIE_NAME,
     verifySessionToken,
     type SessionUser,
@@ -1619,6 +1623,12 @@ export async function syncMercadoLivreListings(
     accountId?: string | null
 ): Promise<MlListingsSyncReport> {
     return syncMercadoLivreListingsCache({ accountId });
+}
+
+export async function syncMercadoLivreAdsAnalytics(
+    accountId?: string | null
+): Promise<MlAdsSyncReport> {
+    return syncMercadoLivreAdsAnalyticsCache({ accountId });
 }
 
 export async function getMercadoLivreListingDetails(input: {

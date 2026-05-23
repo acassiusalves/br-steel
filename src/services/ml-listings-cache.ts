@@ -3,6 +3,16 @@ import type { MercadoLivreCredentials } from '@/lib/types';
 import type { DocumentData } from 'firebase-admin/firestore';
 import { getMlToken } from '@/services/mercadolivre';
 import { getPrimaryMlAccountIdAdmin, saveMlCredentialsAdmin } from '@/services/firestore-admin';
+import {
+  loadMercadoLivreAdsCampaignDailyRows,
+  loadMercadoLivreAdsCampaignSummaries,
+  loadMercadoLivreAdsListingsMap,
+  loadMercadoLivreAdsSyncState,
+  type MlAdsCampaignDailyRow,
+  type MlAdsCampaignSummary,
+  type MlAdsListingRow,
+  type MlAdsSyncState,
+} from '@/services/ml-ads-analytics-cache';
 
 const ML_API_BASE = 'https://api.mercadolibre.com';
 const LISTINGS_COLLECTION = 'anuncios';
@@ -25,7 +35,14 @@ export type MlListingsAnalysisFilter =
   | 'low_conversion'
   | 'low_quality'
   | 'price_automation'
-  | 'special_logistics';
+  | 'special_logistics'
+  | 'with_ads'
+  | 'without_ads'
+  | 'ads_low_roas'
+  | 'ads_high_acos'
+  | 'ads_low_ctr'
+  | 'ads_low_cvr'
+  | 'ads_high_spend_no_sales';
 export type MlListingUpdateAction = 'price' | 'stock' | 'status' | 'title' | 'description' | 'attributes';
 export type MlListingEditableStatus = 'active' | 'paused' | 'closed';
 
@@ -101,6 +118,37 @@ export type MlListingCacheRow = {
   priceAutomationSyncedAt?: string | null;
   analyticsSyncedAt?: string | null;
   analyticsError?: string | null;
+  adsCampaignId?: number | null;
+  adsCampaignName?: string | null;
+  adsAdGroupId?: number | null;
+  adsUserProductId?: string | null;
+  adsUserProductName?: string | null;
+  adsStatus?: string | null;
+  adsRecommended?: boolean | null;
+  adsBuyBoxWinner?: boolean | null;
+  adsImageQuality?: string | null;
+  adsClicks?: number | null;
+  adsPrints?: number | null;
+  adsCtr?: number | null;
+  adsCost?: number | null;
+  adsCpc?: number | null;
+  adsAcos?: number | null;
+  adsCvr?: number | null;
+  adsRoas?: number | null;
+  adsSov?: number | null;
+  adsDirectAmount?: number | null;
+  adsIndirectAmount?: number | null;
+  adsTotalAmount?: number | null;
+  adsDirectUnitsQuantity?: number | null;
+  adsIndirectUnitsQuantity?: number | null;
+  adsUnitsQuantity?: number | null;
+  adsAdvertisingItemsQuantity?: number | null;
+  adsOrganicUnitsQuantity?: number | null;
+  adsOrganicUnitsAmount?: number | null;
+  adsOrganicItemsQuantity?: number | null;
+  adsDateFrom?: string | null;
+  adsDateTo?: string | null;
+  adsSyncedAt?: string | null;
   rawItem?: Record<string, unknown>;
 };
 
@@ -121,6 +169,11 @@ export type MlListingGroup = {
   totalSold: number;
   totalVisitsLast30Days: number;
   averageQualityScore: number | null;
+  adsListings: number;
+  adsCost: number;
+  adsTotalAmount: number;
+  adsRoas: number | null;
+  adsAcos: number | null;
   priceAutomationListings: number;
   lowConversionListings: number;
   hasProblems: boolean;
@@ -152,6 +205,110 @@ export type MlListingsSyncState = {
   durationMs: number | null;
   analyticsSynced: number;
   analyticsFailed: number;
+};
+
+export type MlAdsRecommendation = {
+  id: string;
+  type:
+    | 'increase_budget'
+    | 'reduce_spend'
+    | 'improve_listing'
+    | 'pause_review'
+    | 'ads_candidate';
+  severity: 'positive' | 'warning' | 'critical';
+  title: string;
+  description: string;
+  itemId: string | null;
+  campaignId: number | null;
+  campaignName: string | null;
+  metricLabel: string;
+  metricValue: number | null;
+};
+
+export type MlAdsCampaignListingSummary = {
+  id: string;
+  itemId: string;
+  accountId: string;
+  accountName: string | null;
+  title: string | null;
+  sellerSku: string | null;
+  status: string | null;
+  price: number | null;
+  availableQuantity: number | null;
+  soldQuantity: number | null;
+  permalink: string | null;
+  thumbnail: string | null;
+  visitsLast30Days: number | null;
+  qualityScore: number | null;
+  adsStatus: string | null;
+  adsAdGroupId: number | null;
+  adsUserProductId: string | null;
+  adsUserProductName: string | null;
+  adsRecommended: boolean | null;
+  adsBuyBoxWinner: boolean | null;
+  adsImageQuality: string | null;
+  adsCost: number;
+  adsTotalAmount: number;
+  adsUnitsQuantity: number;
+  adsClicks: number;
+  adsPrints: number;
+  adsCtr: number | null;
+  adsCvr: number | null;
+  adsRoas: number | null;
+  adsAcos: number | null;
+  adsCpc: number | null;
+  adsSov: number | null;
+};
+
+export type MlAdsCampaignAdGroupSummary = {
+  key: string;
+  label: string;
+  adGroupId: number | null;
+  userProductId: string | null;
+  listingsCount: number;
+  activeListings: number;
+  cost: number;
+  totalAmount: number;
+  unitsQuantity: number;
+  clicks: number;
+  prints: number;
+  ctr: number | null;
+  cvr: number | null;
+  roas: number | null;
+  acos: number | null;
+  topItemId: string | null;
+  thumbnail: string | null;
+};
+
+export type MlAdsCampaignDailyPoint = {
+  date: string;
+  cost: number;
+  totalAmount: number;
+  unitsQuantity: number;
+  clicks: number;
+  prints: number;
+  ctr: number | null;
+  cvr: number | null;
+  cpc: number | null;
+  roas: number | null;
+  acos: number | null;
+  sov: number | null;
+};
+
+export type MlAdsCampaignDetail = MlAdsCampaignSummary & {
+  localListingsCount: number;
+  activeListings: number;
+  pausedListings: number;
+  visitsLast30Days: number;
+  averageQualityScore: number | null;
+  highSpendNoSales: number;
+  lowRoasListings: number;
+  highAcosListings: number;
+  lowCtrListings: number;
+  lowCvrListings: number;
+  history: MlAdsCampaignDailyPoint[];
+  adGroups: MlAdsCampaignAdGroupSummary[];
+  listings: MlAdsCampaignListingSummary[];
 };
 
 export type MlListingsListResult = {
@@ -188,8 +345,27 @@ export type MlListingsListResult = {
     conversionRate30Days: number | null;
     gmvEstimated: number;
     averagePrice: number | null;
+    adsListings: number;
+    adsClicks: number;
+    adsPrints: number;
+    adsCost: number;
+    adsTotalAmount: number;
+    adsUnitsQuantity: number;
+    adsRoas: number | null;
+    adsAcos: number | null;
+    adsCtr: number | null;
+    adsCvr: number | null;
+    adsLowRoas: number;
+    adsHighAcos: number;
+    adsLowCtr: number;
+    adsLowCvr: number;
+    adsHighSpendNoSales: number;
   };
   syncState: MlListingsSyncState | null;
+  adsSyncState: MlAdsSyncState | null;
+  adsCampaigns: MlAdsCampaignSummary[];
+  adsCampaignDetails: MlAdsCampaignDetail[];
+  adsRecommendations: MlAdsRecommendation[];
 };
 
 export type MlListingsSyncReport = MlListingsSyncState & {
@@ -388,6 +564,30 @@ function isLowConversion(row: MlListingCacheRow) {
   const visits = row.visitsLast30Days ?? 0;
   const sold = row.soldQuantity ?? 0;
   return visits >= 20 && sold === 0;
+}
+
+function hasAds(row: MlListingCacheRow) {
+  return Boolean(row.adsCampaignId || (row.adsCost ?? 0) > 0 || (row.adsPrints ?? 0) > 0 || (row.adsClicks ?? 0) > 0);
+}
+
+function isAdsLowRoas(row: MlListingCacheRow) {
+  return hasAds(row) && (row.adsCost ?? 0) > 0 && (row.adsRoas ?? 0) > 0 && (row.adsRoas ?? 0) < 3;
+}
+
+function isAdsHighAcos(row: MlListingCacheRow) {
+  return hasAds(row) && (row.adsTotalAmount ?? 0) > 0 && (row.adsAcos ?? 0) > 30;
+}
+
+function isAdsLowCtr(row: MlListingCacheRow) {
+  return hasAds(row) && (row.adsPrints ?? 0) >= 1000 && (row.adsCtr ?? 0) < 0.2;
+}
+
+function isAdsLowCvr(row: MlListingCacheRow) {
+  return hasAds(row) && (row.adsClicks ?? 0) >= 50 && (row.adsCvr ?? 0) < 1;
+}
+
+function isAdsHighSpendNoSales(row: MlListingCacheRow) {
+  return hasAds(row) && (row.adsCost ?? 0) >= 50 && (row.adsUnitsQuantity ?? 0) === 0;
 }
 
 function firstImageUrl(raw: Record<string, unknown>): string | null {
@@ -725,6 +925,50 @@ function fromFirestoreRow(data: DocumentData, id: string): MlListingCacheRow {
     analyticsError: data.analyticsError ?? null,
     rawItem: asRecord(data.rawItem),
   };
+}
+
+function applyAdsToListing(row: MlListingCacheRow, ad: MlAdsListingRow | undefined): MlListingCacheRow {
+  if (!ad) return row;
+  return {
+    ...row,
+    adsCampaignId: ad.campaignId,
+    adsCampaignName: ad.campaignName,
+    adsAdGroupId: ad.adGroupId,
+    adsUserProductId: ad.userProductId,
+    adsUserProductName: ad.userProductName,
+    adsStatus: ad.status,
+    adsRecommended: ad.recommended,
+    adsBuyBoxWinner: ad.buyBoxWinner,
+    adsImageQuality: ad.imageQuality,
+    adsClicks: ad.metrics.clicks,
+    adsPrints: ad.metrics.prints,
+    adsCtr: ad.metrics.ctr,
+    adsCost: ad.metrics.cost,
+    adsCpc: ad.metrics.cpc,
+    adsAcos: ad.metrics.acos,
+    adsCvr: ad.metrics.cvr,
+    adsRoas: ad.metrics.roas,
+    adsSov: ad.metrics.sov,
+    adsDirectAmount: ad.metrics.directAmount,
+    adsIndirectAmount: ad.metrics.indirectAmount,
+    adsTotalAmount: ad.metrics.totalAmount,
+    adsDirectUnitsQuantity: ad.metrics.directUnitsQuantity,
+    adsIndirectUnitsQuantity: ad.metrics.indirectUnitsQuantity,
+    adsUnitsQuantity: ad.metrics.unitsQuantity,
+    adsAdvertisingItemsQuantity: ad.metrics.advertisingItemsQuantity,
+    adsOrganicUnitsQuantity: ad.metrics.organicUnitsQuantity,
+    adsOrganicUnitsAmount: ad.metrics.organicUnitsAmount,
+    adsOrganicItemsQuantity: ad.metrics.organicItemsQuantity,
+    adsDateFrom: ad.dateFrom,
+    adsDateTo: ad.dateTo,
+    adsSyncedAt: ad.syncedAt,
+  };
+}
+
+async function enrichListingsWithAds(rows: MlListingCacheRow[], accountId?: string | null) {
+  if (rows.length === 0) return rows;
+  const adsByListing = await loadMercadoLivreAdsListingsMap(accountId);
+  return rows.map((row) => applyAdsToListing(row, adsByListing.get(`${row.accountId}:${row.itemId}`)));
 }
 
 async function readJson(response: Response): Promise<unknown> {
@@ -1590,7 +1834,12 @@ export async function getMercadoLivreListingDetailsCache(input: {
     sellerId: account.sellerId,
     savedAt: listing.savedAt || new Date().toISOString(),
   });
-  const currentListing = liveListing ? preserveAnalyticsFields(liveListing, listing) : listing;
+  const currentListingBase = liveListing ? preserveAnalyticsFields(liveListing, listing) : listing;
+  const adsByListing = await loadMercadoLivreAdsListingsMap(accountId);
+  const currentListing = applyAdsToListing(
+    currentListingBase,
+    adsByListing.get(`${currentListingBase.accountId}:${currentListingBase.itemId}`),
+  );
   const categoryId = asString(liveRaw.category_id) || currentListing.categoryId;
   const categoryAttributes = categoryId
     ? await fetchCategoryAttributesFromMl({
@@ -2080,6 +2329,13 @@ function matchesAnalysisFilter(row: MlListingCacheRow, filter?: MlListingsAnalys
   if (filter === 'low_quality') return score !== null && score < 60;
   if (filter === 'price_automation') return row.priceAutomationActive === true;
   if (filter === 'special_logistics') return isSpecialLogistics(row);
+  if (filter === 'with_ads') return hasAds(row);
+  if (filter === 'without_ads') return !hasAds(row);
+  if (filter === 'ads_low_roas') return isAdsLowRoas(row);
+  if (filter === 'ads_high_acos') return isAdsHighAcos(row);
+  if (filter === 'ads_low_ctr') return isAdsLowCtr(row);
+  if (filter === 'ads_low_cvr') return isAdsLowCvr(row);
+  if (filter === 'ads_high_spend_no_sales') return isAdsHighSpendNoSales(row);
   return true;
 }
 
@@ -2131,6 +2387,12 @@ function calculateSummary(rows: MlListingCacheRow[]) {
     const sold = row.soldQuantity || 0;
     return sum + price * sold;
   }, 0);
+  const adsListings = rows.filter(hasAds).length;
+  const adsClicks = rows.reduce((sum, row) => sum + (row.adsClicks || 0), 0);
+  const adsPrints = rows.reduce((sum, row) => sum + (row.adsPrints || 0), 0);
+  const adsCost = rows.reduce((sum, row) => sum + (row.adsCost || 0), 0);
+  const adsTotalAmount = rows.reduce((sum, row) => sum + (row.adsTotalAmount || 0), 0);
+  const adsUnitsQuantity = rows.reduce((sum, row) => sum + (row.adsUnitsQuantity || 0), 0);
 
   return {
     total: rows.length,
@@ -2151,6 +2413,21 @@ function calculateSummary(rows: MlListingCacheRow[]) {
     conversionRate30Days: visitsLast30Days > 0 ? (totalSold / visitsLast30Days) * 100 : null,
     gmvEstimated,
     averagePrice,
+    adsListings,
+    adsClicks,
+    adsPrints,
+    adsCost,
+    adsTotalAmount,
+    adsUnitsQuantity,
+    adsRoas: adsCost > 0 ? adsTotalAmount / adsCost : null,
+    adsAcos: adsTotalAmount > 0 ? (adsCost / adsTotalAmount) * 100 : null,
+    adsCtr: adsPrints > 0 ? (adsClicks / adsPrints) * 100 : null,
+    adsCvr: adsClicks > 0 ? (adsUnitsQuantity / adsClicks) * 100 : null,
+    adsLowRoas: rows.filter(isAdsLowRoas).length,
+    adsHighAcos: rows.filter(isAdsHighAcos).length,
+    adsLowCtr: rows.filter(isAdsLowCtr).length,
+    adsLowCvr: rows.filter(isAdsLowCvr).length,
+    adsHighSpendNoSales: rows.filter(isAdsHighSpendNoSales).length,
   };
 }
 
@@ -2185,6 +2462,8 @@ function groupListings(rows: MlListingCacheRow[], groupBy: MlListingsGroupBy): M
         .filter((value): value is number => typeof value === 'number');
       const first = listings[0];
       const accountNames = Array.from(new Set(listings.map((row) => row.accountName || row.accountId))).sort();
+      const adsCost = listings.reduce((sum, row) => sum + (row.adsCost || 0), 0);
+      const adsTotalAmount = listings.reduce((sum, row) => sum + (row.adsTotalAmount || 0), 0);
       return {
         groupKey,
         groupBy,
@@ -2204,6 +2483,11 @@ function groupListings(rows: MlListingCacheRow[], groupBy: MlListingsGroupBy): M
         averageQualityScore: qualityScores.length
           ? qualityScores.reduce((sum, score) => sum + score, 0) / qualityScores.length
           : null,
+        adsListings: listings.filter(hasAds).length,
+        adsCost,
+        adsTotalAmount,
+        adsRoas: adsCost > 0 ? adsTotalAmount / adsCost : null,
+        adsAcos: adsTotalAmount > 0 ? (adsCost / adsTotalAmount) * 100 : null,
         priceAutomationListings: listings.filter((row) => row.priceAutomationActive === true).length,
         lowConversionListings: listings.filter(isLowConversion).length,
         hasProblems: listings.some(rowHasProblem),
@@ -2217,6 +2501,273 @@ function sortListings(a: MlListingCacheRow, b: MlListingCacheRow) {
   const aDate = a.lastUpdated || a.savedAt || '';
   const bDate = b.lastUpdated || b.savedAt || '';
   return bDate.localeCompare(aDate);
+}
+
+function adsCampaignKey(accountId: string, campaignId: number) {
+  return `${accountId}:${campaignId}`;
+}
+
+function summarizeAdsRows(rows: MlListingCacheRow[]) {
+  const cost = rows.reduce((sum, row) => sum + (row.adsCost || 0), 0);
+  const totalAmount = rows.reduce((sum, row) => sum + (row.adsTotalAmount || 0), 0);
+  const unitsQuantity = rows.reduce((sum, row) => sum + (row.adsUnitsQuantity || 0), 0);
+  const clicks = rows.reduce((sum, row) => sum + (row.adsClicks || 0), 0);
+  const prints = rows.reduce((sum, row) => sum + (row.adsPrints || 0), 0);
+
+  return {
+    cost,
+    totalAmount,
+    unitsQuantity,
+    clicks,
+    prints,
+    ctr: prints > 0 ? (clicks / prints) * 100 : null,
+    cvr: clicks > 0 ? (unitsQuantity / clicks) * 100 : null,
+    roas: cost > 0 ? totalAmount / cost : null,
+    acos: totalAmount > 0 ? (cost / totalAmount) * 100 : null,
+  };
+}
+
+function toAdsCampaignListingSummary(row: MlListingCacheRow): MlAdsCampaignListingSummary {
+  return {
+    id: row.id,
+    itemId: row.itemId,
+    accountId: row.accountId,
+    accountName: row.accountName,
+    title: row.title,
+    sellerSku: row.sellerSku,
+    status: row.status,
+    price: row.price,
+    availableQuantity: row.availableQuantity,
+    soldQuantity: row.soldQuantity,
+    permalink: row.permalink,
+    thumbnail: row.thumbnail,
+    visitsLast30Days: row.visitsLast30Days ?? null,
+    qualityScore: qualityScore(row),
+    adsStatus: row.adsStatus ?? null,
+    adsAdGroupId: row.adsAdGroupId ?? null,
+    adsUserProductId: row.adsUserProductId ?? null,
+    adsUserProductName: row.adsUserProductName ?? null,
+    adsRecommended: row.adsRecommended ?? null,
+    adsBuyBoxWinner: row.adsBuyBoxWinner ?? null,
+    adsImageQuality: row.adsImageQuality ?? null,
+    adsCost: row.adsCost || 0,
+    adsTotalAmount: row.adsTotalAmount || 0,
+    adsUnitsQuantity: row.adsUnitsQuantity || 0,
+    adsClicks: row.adsClicks || 0,
+    adsPrints: row.adsPrints || 0,
+    adsCtr: row.adsCtr ?? null,
+    adsCvr: row.adsCvr ?? null,
+    adsRoas: row.adsRoas ?? null,
+    adsAcos: row.adsAcos ?? null,
+    adsCpc: row.adsCpc ?? null,
+    adsSov: row.adsSov ?? null,
+  };
+}
+
+function buildAdsCampaignAdGroups(rows: MlListingCacheRow[]): MlAdsCampaignAdGroupSummary[] {
+  const groups = new Map<string, MlListingCacheRow[]>();
+
+  rows.forEach((row) => {
+    const key = row.adsAdGroupId
+      ? `adgroup:${row.adsAdGroupId}`
+      : row.adsUserProductId
+        ? `product:${row.adsUserProductId}`
+        : `listing:${row.itemId}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key)!.push(row);
+  });
+
+  return Array.from(groups.entries())
+    .map(([key, listings]) => {
+      const sorted = listings.slice().sort((a, b) => (b.adsCost || 0) - (a.adsCost || 0));
+      const first = sorted[0];
+      const metrics = summarizeAdsRows(listings);
+      return {
+        key,
+        label: first.adsUserProductName || first.sellerSku || first.title || first.itemId,
+        adGroupId: first.adsAdGroupId ?? null,
+        userProductId: first.adsUserProductId ?? null,
+        listingsCount: listings.length,
+        activeListings: listings.filter((row) => row.status === 'active').length,
+        topItemId: first.itemId,
+        thumbnail: first.thumbnail,
+        ...metrics,
+      };
+    })
+    .sort((a, b) => b.cost - a.cost || (b.roas || 0) - (a.roas || 0))
+    .slice(0, 12);
+}
+
+function toAdsCampaignDailyPoint(row: MlAdsCampaignDailyRow): MlAdsCampaignDailyPoint {
+  return {
+    date: row.date,
+    cost: row.metrics.cost || 0,
+    totalAmount: row.metrics.totalAmount || 0,
+    unitsQuantity: row.metrics.unitsQuantity || 0,
+    clicks: row.metrics.clicks || 0,
+    prints: row.metrics.prints || 0,
+    ctr: row.metrics.ctr,
+    cvr: row.metrics.cvr,
+    cpc: row.metrics.cpc,
+    roas: row.metrics.roas,
+    acos: row.metrics.acos,
+    sov: row.metrics.sov,
+  };
+}
+
+function buildAdsCampaignDetails(
+  rows: MlListingCacheRow[],
+  campaigns: MlAdsCampaignSummary[],
+  dailyRows: MlAdsCampaignDailyRow[],
+): MlAdsCampaignDetail[] {
+  const rowsByCampaign = new Map<string, MlListingCacheRow[]>();
+  const dailyRowsByCampaign = new Map<string, MlAdsCampaignDailyRow[]>();
+
+  rows
+    .filter((row) => hasAds(row) && row.adsCampaignId)
+    .forEach((row) => {
+      const key = adsCampaignKey(row.accountId, row.adsCampaignId!);
+      if (!rowsByCampaign.has(key)) rowsByCampaign.set(key, []);
+      rowsByCampaign.get(key)!.push(row);
+    });
+  dailyRows.forEach((row) => {
+    const key = adsCampaignKey(row.accountId, row.campaignId);
+    if (!dailyRowsByCampaign.has(key)) dailyRowsByCampaign.set(key, []);
+    dailyRowsByCampaign.get(key)!.push(row);
+  });
+
+  return campaigns.map((campaign) => {
+    const campaignRows = rowsByCampaign.get(adsCampaignKey(campaign.accountId, campaign.campaignId)) || [];
+    const campaignDailyRows = dailyRowsByCampaign.get(adsCampaignKey(campaign.accountId, campaign.campaignId)) || [];
+    const qualityScores = campaignRows
+      .map(qualityScore)
+      .filter((value): value is number => typeof value === 'number');
+
+    return {
+      ...campaign,
+      localListingsCount: campaignRows.length,
+      activeListings: campaignRows.filter((row) => row.status === 'active').length,
+      pausedListings: campaignRows.filter((row) => row.status === 'paused').length,
+      visitsLast30Days: campaignRows.reduce((sum, row) => sum + (row.visitsLast30Days || 0), 0),
+      averageQualityScore: qualityScores.length
+        ? qualityScores.reduce((sum, score) => sum + score, 0) / qualityScores.length
+        : null,
+      highSpendNoSales: campaignRows.filter(isAdsHighSpendNoSales).length,
+      lowRoasListings: campaignRows.filter(isAdsLowRoas).length,
+      highAcosListings: campaignRows.filter(isAdsHighAcos).length,
+      lowCtrListings: campaignRows.filter(isAdsLowCtr).length,
+      lowCvrListings: campaignRows.filter(isAdsLowCvr).length,
+      history: campaignDailyRows
+        .slice()
+        .sort((a, b) => a.date.localeCompare(b.date))
+        .map(toAdsCampaignDailyPoint),
+      adGroups: buildAdsCampaignAdGroups(campaignRows),
+      listings: campaignRows
+        .slice()
+        .sort((a, b) => (b.adsCost || 0) - (a.adsCost || 0) || (b.adsTotalAmount || 0) - (a.adsTotalAmount || 0))
+        .slice(0, 12)
+        .map(toAdsCampaignListingSummary),
+    };
+  });
+}
+
+function buildAdsRecommendations(rows: MlListingCacheRow[], campaigns: MlAdsCampaignSummary[]): MlAdsRecommendation[] {
+  const recommendations: MlAdsRecommendation[] = [];
+
+  campaigns
+    .filter((campaign) => (campaign.cost || 0) > 100 && campaign.roas !== null && campaign.roas < 3)
+    .slice(0, 3)
+    .forEach((campaign) => {
+      recommendations.push({
+        id: `campaign-reduce-${campaign.accountId}-${campaign.campaignId}`,
+        type: 'reduce_spend',
+        severity: 'critical',
+        title: 'Revisar investimento da campanha',
+        description: `${campaign.name || campaign.campaignId} consumiu verba com ROAS abaixo de 3.`,
+        itemId: null,
+        campaignId: campaign.campaignId,
+        campaignName: campaign.name,
+        metricLabel: 'ROAS',
+        metricValue: campaign.roas,
+      });
+    });
+
+  campaigns
+    .filter((campaign) => (campaign.cost || 0) > 50 && (campaign.sov ?? 100) < 50 && campaign.roas !== null && campaign.roas >= 7)
+    .slice(0, 3)
+    .forEach((campaign) => {
+      recommendations.push({
+        id: `campaign-increase-${campaign.accountId}-${campaign.campaignId}`,
+        type: 'increase_budget',
+        severity: 'positive',
+        title: 'Candidato a aumentar alcance',
+        description: `${campaign.name || campaign.campaignId} tem ROAS forte e SOV baixo.`,
+        itemId: null,
+        campaignId: campaign.campaignId,
+        campaignName: campaign.name,
+        metricLabel: 'ROAS',
+        metricValue: campaign.roas,
+      });
+    });
+
+  rows
+    .filter(isAdsHighSpendNoSales)
+    .sort((a, b) => (b.adsCost || 0) - (a.adsCost || 0))
+    .slice(0, 4)
+    .forEach((row) => {
+      recommendations.push({
+        id: `ad-no-sales-${row.itemId}`,
+        type: 'pause_review',
+        severity: 'critical',
+        title: 'Gasto sem venda no anúncio',
+        description: `${row.title || row.itemId} investiu em Ads sem gerar unidades no período.`,
+        itemId: row.itemId,
+        campaignId: row.adsCampaignId || null,
+        campaignName: row.adsCampaignName || null,
+        metricLabel: 'Investimento',
+        metricValue: row.adsCost ?? null,
+      });
+    });
+
+  rows
+    .filter((row) => hasAds(row) && (row.adsPrints ?? 0) >= 3000 && (row.adsCtr ?? 0) < 0.2)
+    .sort((a, b) => (b.adsPrints || 0) - (a.adsPrints || 0))
+    .slice(0, 4)
+    .forEach((row) => {
+      recommendations.push({
+        id: `ad-low-ctr-${row.itemId}`,
+        type: 'improve_listing',
+        severity: 'warning',
+        title: 'Melhorar atratividade do anúncio',
+        description: `${row.title || row.itemId} tem muitas impressões e CTR baixo.`,
+        itemId: row.itemId,
+        campaignId: row.adsCampaignId || null,
+        campaignName: row.adsCampaignName || null,
+        metricLabel: 'CTR',
+        metricValue: row.adsCtr ?? null,
+      });
+    });
+
+  rows
+    .filter((row) => !hasAds(row) && row.status === 'active' && (row.soldQuantity ?? 0) >= 10 && (row.availableQuantity ?? 0) > 0)
+    .sort((a, b) => (b.soldQuantity || 0) - (a.soldQuantity || 0))
+    .slice(0, 4)
+    .forEach((row) => {
+      recommendations.push({
+        id: `candidate-${row.itemId}`,
+        type: 'ads_candidate',
+        severity: 'positive',
+        title: 'Candidato para testar Ads',
+        description: `${row.title || row.itemId} vende bem organicamente e ainda não aparece com Ads no período.`,
+        itemId: row.itemId,
+        campaignId: null,
+        campaignName: null,
+        metricLabel: 'Vendidos',
+        metricValue: row.soldQuantity ?? null,
+      });
+    });
+
+  return recommendations.slice(0, 12);
 }
 
 function clampPaging(input: MlListingsFilters) {
@@ -2233,9 +2784,10 @@ export async function listMercadoLivreListingsCache(
     .map((docSnap) => fromFirestoreRow(docSnap.data(), docSnap.id))
     .filter((row) => row.itemId && row.accountId)
     .sort(sortListings);
+  const allRowsWithAds = await enrichListingsWithAds(allRows, filters.accountId);
 
-  const filtered = applyFilters(allRows, filters);
-  const statusRows = applyFilters(allRows, {
+  const filtered = applyFilters(allRowsWithAds, filters);
+  const statusRows = applyFilters(allRowsWithAds, {
     ...filters,
     status: [],
     problemsOnly: false,
@@ -2245,6 +2797,11 @@ export async function listMercadoLivreListingsCache(
   const groupBy = filters.groupBy || 'sku';
   const groups = groupListings(filtered, groupBy);
   const total = viewMode === 'grouped' ? groups.length : filtered.length;
+  const [adsCampaigns, adsCampaignDailyRows] = await Promise.all([
+    loadMercadoLivreAdsCampaignSummaries(filters.accountId),
+    loadMercadoLivreAdsCampaignDailyRows({ accountId: filters.accountId }),
+  ]);
+  const adsCampaignDetails = buildAdsCampaignDetails(allRowsWithAds, adsCampaigns, adsCampaignDailyRows);
 
   return {
     listings: viewMode === 'list' ? filtered.slice(offset, offset + limit) : [],
@@ -2253,5 +2810,9 @@ export async function listMercadoLivreListingsCache(
     statusSummary: buildStatusSummary(statusRows),
     summary: calculateSummary(filtered),
     syncState: await loadSyncState(filters.accountId),
+    adsSyncState: await loadMercadoLivreAdsSyncState(filters.accountId),
+    adsCampaigns,
+    adsCampaignDetails,
+    adsRecommendations: buildAdsRecommendations(allRowsWithAds, adsCampaigns),
   };
 }
