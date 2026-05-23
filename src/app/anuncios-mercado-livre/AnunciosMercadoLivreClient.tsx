@@ -398,7 +398,7 @@ function ListingActionMenu({
           </a>
         </Button>
       ) : null}
-      <DropdownMenu>
+      <DropdownMenu modal={false}>
         <DropdownMenuTrigger asChild>
           <Button size="icon" variant="ghost" title="Acoes do anuncio" disabled={disabled}>
             <MoreHorizontal className="h-4 w-4" />
