@@ -3,6 +3,7 @@
 
 import * as fs from 'fs/promises';
 import * as path from 'path';
+import { cookies } from 'next/headers';
 import { format, parseISO, startOfMonth, endOfMonth, eachMonthOfInterval, getMonth, getYear, differenceInDays } from 'date-fns';
 import { collection, getDocs, doc, writeBatch, query, where, setDoc, getDoc, deleteField, addDoc, deleteDoc, orderBy, serverTimestamp, Timestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
@@ -28,6 +29,29 @@ import {
     saveGeminiCredentialsAdmin,
     type GeminiCredentialsPublic,
 } from '@/services/gemini-config';
+import {
+    getMercadoLivreListingDetailsCache,
+    listMercadoLivreListingsCache,
+    syncMercadoLivreListingsCache,
+    updateMercadoLivreListingAttributesCache,
+    updateMercadoLivreListingDescriptionCache,
+    updateMercadoLivreListingPriceCache,
+    updateMercadoLivreListingStatusCache,
+    updateMercadoLivreListingStockCache,
+    updateMercadoLivreListingTitleCache,
+    type MlListingAttributePatch,
+    type MlListingEditableStatus,
+    type MlListingDetails,
+    type MlListingUpdateResult,
+    type MlListingsFilters,
+    type MlListingsListResult,
+    type MlListingsSyncReport,
+} from '@/services/ml-listings-cache';
+import {
+    AUTH_COOKIE_NAME,
+    verifySessionToken,
+    type SessionUser,
+} from '@/lib/server-auth';
 
 
 // Bling API actions
@@ -46,6 +70,15 @@ const credentialsDocRef = doc(db, "appConfig", "blingCredentials");
 const syncProgressDocRef = doc(db, "appConfig", "syncProgress");
 const MAX_INVOICE_DETAILS_PER_SYNC = 60;
 const MAX_INVOICE_XML_PER_SYNC = 20;
+
+async function getCurrentServerActionUser(): Promise<SessionUser> {
+    const cookieStore = await cookies();
+    const session = verifySessionToken(cookieStore.get(AUTH_COOKIE_NAME)?.value);
+    if (!session?.user) {
+        throw new Error('Sessão expirada. Faça login novamente.');
+    }
+    return session.user;
+}
 
 // Gemini / IA
 export async function getGeminiCredentials(): Promise<GeminiCredentialsPublic> {
@@ -1573,6 +1606,139 @@ export async function listMlAccounts(): Promise<MlAccountSummary[]> {
             hasRefreshToken: !!data.refreshToken,
             isPrimary: d.id === primaryId,
         };
+    });
+}
+
+export async function getMercadoLivreListings(
+    filters: MlListingsFilters = {}
+): Promise<MlListingsListResult> {
+    return listMercadoLivreListingsCache(filters);
+}
+
+export async function syncMercadoLivreListings(
+    accountId?: string | null
+): Promise<MlListingsSyncReport> {
+    return syncMercadoLivreListingsCache({ accountId });
+}
+
+export async function getMercadoLivreListingDetails(input: {
+    accountId: string;
+    itemId: string;
+}): Promise<MlListingDetails> {
+    return getMercadoLivreListingDetailsCache(input);
+}
+
+export async function updateMercadoLivreListingPrice(input: {
+    accountId: string;
+    itemId: string;
+    price: number;
+}): Promise<MlListingUpdateResult> {
+    const user = await getCurrentServerActionUser();
+    return updateMercadoLivreListingPriceCache({
+        accountId: input.accountId,
+        itemId: input.itemId,
+        price: input.price,
+        actor: {
+            userId: user.id,
+            name: user.name || null,
+            email: user.email || null,
+            role: user.role || null,
+        },
+    });
+}
+
+export async function updateMercadoLivreListingStock(input: {
+    accountId: string;
+    itemId: string;
+    availableQuantity: number;
+}): Promise<MlListingUpdateResult> {
+    const user = await getCurrentServerActionUser();
+    return updateMercadoLivreListingStockCache({
+        accountId: input.accountId,
+        itemId: input.itemId,
+        availableQuantity: input.availableQuantity,
+        actor: {
+            userId: user.id,
+            name: user.name || null,
+            email: user.email || null,
+            role: user.role || null,
+        },
+    });
+}
+
+export async function updateMercadoLivreListingStatus(input: {
+    accountId: string;
+    itemId: string;
+    status: MlListingEditableStatus;
+}): Promise<MlListingUpdateResult> {
+    const user = await getCurrentServerActionUser();
+    return updateMercadoLivreListingStatusCache({
+        accountId: input.accountId,
+        itemId: input.itemId,
+        status: input.status,
+        actor: {
+            userId: user.id,
+            name: user.name || null,
+            email: user.email || null,
+            role: user.role || null,
+        },
+    });
+}
+
+export async function updateMercadoLivreListingTitle(input: {
+    accountId: string;
+    itemId: string;
+    title: string;
+}): Promise<MlListingUpdateResult> {
+    const user = await getCurrentServerActionUser();
+    return updateMercadoLivreListingTitleCache({
+        accountId: input.accountId,
+        itemId: input.itemId,
+        title: input.title,
+        actor: {
+            userId: user.id,
+            name: user.name || null,
+            email: user.email || null,
+            role: user.role || null,
+        },
+    });
+}
+
+export async function updateMercadoLivreListingDescription(input: {
+    accountId: string;
+    itemId: string;
+    plainText: string;
+}): Promise<MlListingUpdateResult> {
+    const user = await getCurrentServerActionUser();
+    return updateMercadoLivreListingDescriptionCache({
+        accountId: input.accountId,
+        itemId: input.itemId,
+        plainText: input.plainText,
+        actor: {
+            userId: user.id,
+            name: user.name || null,
+            email: user.email || null,
+            role: user.role || null,
+        },
+    });
+}
+
+export async function updateMercadoLivreListingAttributes(input: {
+    accountId: string;
+    itemId: string;
+    attributes: MlListingAttributePatch[];
+}): Promise<MlListingUpdateResult> {
+    const user = await getCurrentServerActionUser();
+    return updateMercadoLivreListingAttributesCache({
+        accountId: input.accountId,
+        itemId: input.itemId,
+        attributes: input.attributes,
+        actor: {
+            userId: user.id,
+            name: user.name || null,
+            email: user.email || null,
+            role: user.role || null,
+        },
     });
 }
 

@@ -24,6 +24,8 @@ import {
   BookOpen,
   MessageCircle,
   RefreshCw,
+  Search,
+  Store,
 } from "lucide-react";
 import * as React from "react";
 
@@ -82,6 +84,15 @@ const allNavItems = [
     },
     { href: "/estoque", icon: Warehouse, label: "Estoque" },
     { href: "/atendimento/chat", icon: MessageCircle, label: "Atendimento" },
+    {
+        href: "/anuncios-mercado-livre",
+        icon: Store,
+        label: "Marketplace",
+        subItems: [
+            { href: "/anuncios-mercado-livre", icon: Store, label: "Anúncios ML" },
+            { href: "/buscar-mercado-livre", icon: Search, label: "Buscar ML" },
+        ]
+    },
     {
         href: "/configuracoes",
         icon: Settings,
