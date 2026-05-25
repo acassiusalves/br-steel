@@ -52,6 +52,8 @@ export interface MercadoLivreSearchCheapestShipping {
 export interface MercadoLivreSearchCategoryTrend {
   keyword: string;
   url: string | null;
+  rank?: number;
+  group?: 'growth' | 'most_wanted' | 'popular';
 }
 
 export interface MercadoLivreSearchCategoryInfo {

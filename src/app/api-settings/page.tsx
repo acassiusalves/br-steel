@@ -226,13 +226,21 @@ function ApiSettingsContent() {
     }
   };
 
-  const handleCopy = (text: string) => {
+  const handleCopy = async (text: string) => {
     if (!text) return;
-    navigator.clipboard.writeText(text);
-    toast({
-      title: "Copiado!",
-      description: "O texto foi copiado para sua área de transferência.",
-    });
+    try {
+      await navigator.clipboard.writeText(text);
+      toast({
+        title: "Copiado!",
+        description: "O texto foi copiado para sua área de transferência.",
+      });
+    } catch {
+      toast({
+        variant: 'destructive',
+        title: 'Não foi possível copiar',
+        description: 'O navegador bloqueou o acesso à área de transferência. Selecione e copie manualmente.',
+      });
+    }
   }
 
   const runSync = async (syncFunction: typeof smartSyncOrders | typeof fullSyncOrders) => {

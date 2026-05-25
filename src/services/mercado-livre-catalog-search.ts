@@ -31,6 +31,7 @@ const ML_API_BASE = 'https://api.mercadolibre.com';
 const SAVED_OFFERS_COLLECTION = 'mercadoLivreSavedOffers';
 const LISTINGS_COLLECTION = 'anuncios';
 const CATALOG_VISITS_OFFERS_LIMIT = 15;
+const SEARCH_PAGE_SIZE = 50;
 
 type SellerProfile = {
   sellerNickname: string | null;
@@ -442,7 +443,8 @@ async function fetchCatalogCompetitors(accessToken: string | null, catalogProduc
 async function mapCatalogProducts(
   products: Record<string, unknown>[],
   accessToken: string | null,
-  catalogOffersById: Map<string, Record<string, unknown>[]>
+  catalogOffersById: Map<string, Record<string, unknown>[]>,
+  loadOffers = true
 ) {
   const mapped: MercadoLivreSearchItem[] = [];
 
@@ -452,13 +454,15 @@ async function mapCatalogProducts(
 
     let offers: Record<string, unknown>[] = [];
     let total: number | null = null;
-    try {
-      const response = await fetchCatalogOffers(accessToken, catalogProductId);
-      offers = response.offers;
-      total = response.total;
-      catalogOffersById.set(catalogProductId, offers);
-    } catch (error) {
-      console.warn(`[mercado-livre-search] Falha ao carregar ofertas de ${catalogProductId}:`, error);
+    if (loadOffers) {
+      try {
+        const response = await fetchCatalogOffers(accessToken, catalogProductId);
+        offers = response.offers;
+        total = response.total;
+        catalogOffersById.set(catalogProductId, offers);
+      } catch (error) {
+        console.warn(`[mercado-livre-search] Falha ao carregar ofertas de ${catalogProductId}:`, error);
+      }
     }
 
     const winner = offers[0] || {};
@@ -780,24 +784,58 @@ async function fetchCategoryInfo(accessToken: string | null, categoryId: string)
   }
 }
 
-async function fetchCategoryTrends(accessToken: string | null, siteId: string, categoryId: string) {
+async function fetchCategoryTrends(accessToken: string | null, siteId: string, categoryId: string, limit = 50) {
   try {
     const data = await fetchMercadoLivreJsonWithPublicFallback<unknown[]>(
       `${ML_API_BASE}/trends/${encodeURIComponent(siteId)}/${encodeURIComponent(categoryId)}`,
       accessToken
     );
     return Array.isArray(data)
-      ? data.slice(0, 10).map((entry) => {
+      ? data.slice(0, limit).map((entry, index) => {
           const record = asRecord(entry);
           return {
             keyword: asTrimmedString(record.keyword) || asTrimmedString(record.name) || '',
             url: asTrimmedString(record.url),
+            rank: index + 1,
+            group: index < 10 ? 'growth' as const : index < 30 ? 'most_wanted' as const : 'popular' as const,
           };
         }).filter((entry) => Boolean(entry.keyword))
       : [];
   } catch {
     return [];
   }
+}
+
+export async function loadMercadoLivreCategoryTrends(input: {
+  accountId: string;
+  categoryId: string;
+}) {
+  const account = await getMlCredentialsByIdAdmin(input.accountId);
+  if (!account) throw new Error('Conta do Mercado Livre não encontrada.');
+
+  const siteId = getCredentialSiteId(account);
+  let accessToken: string | null = null;
+  try {
+    accessToken = await getMlToken(input.accountId);
+  } catch (error) {
+    console.warn('[mercado-livre-category-trends] Token indisponível; tentando leitura pública:', error);
+  }
+
+  const [trends, category] = await Promise.all([
+    fetchCategoryTrends(accessToken, siteId, input.categoryId),
+    fetchCategoryInfo(accessToken, input.categoryId),
+  ]);
+
+  return {
+    account: {
+      accountId: input.accountId,
+      accountName: account.accountName || account.nickname || input.accountId,
+      siteId,
+    },
+    categoryId: input.categoryId,
+    categoryInfo: category.categoryInfo,
+    trends,
+  };
 }
 
 function estimateFees(price: number | null, listingTypeId: 'gold_special' | 'gold_pro', currencyId: string | null): MercadoLivreFeeDetails | null {
@@ -954,7 +992,7 @@ async function enrichSearchResults(
       if (searchOptions.includeTrends) {
         nextItem = {
           ...nextItem,
-          categoryTrends: await fetchCategoryTrends(accessToken, siteId, referenceCategoryId),
+          categoryTrends: await fetchCategoryTrends(accessToken, siteId, referenceCategoryId, 10),
         };
       }
     }
@@ -989,6 +1027,7 @@ export async function runMercadoLivreCatalogSearch(input: {
   limit: number;
   offset: number;
   searchOptions: Required<MercadoLivreSearchOptions>;
+  lightweight?: boolean;
 }): Promise<MercadoLivreSearchResponse> {
   const account = await getMlCredentialsByIdAdmin(input.accountId);
   if (!account) throw new Error('Conta do Mercado Livre não encontrada.');
@@ -1029,22 +1068,35 @@ export async function runMercadoLivreCatalogSearch(input: {
         if (!isMercadoLivreNotFoundError(error)) throw error;
         queryStrategy = 'catalog_id';
         const product = await fetchCatalogProductDetail(accessToken, directResourceId);
-        results = await mapCatalogProducts([product], accessToken, catalogOffersById);
+        results = await mapCatalogProducts([product], accessToken, catalogOffersById, !input.lightweight);
         total = results.length;
       }
     } else {
       queryStrategy = 'catalog_search';
-      const url = new URL(`${ML_API_BASE}/products/search`);
-      url.searchParams.set('q', input.query);
-      url.searchParams.set('status', 'active');
-      url.searchParams.set('site_id', siteId);
-      url.searchParams.set('limit', String(input.limit));
-      url.searchParams.set('offset', String(input.offset));
+      let loaded = 0;
+      let pageOffset = input.offset;
 
-      const data = await fetchMercadoLivreJsonWithPublicFallback<Record<string, unknown>>(url.toString(), accessToken);
-      const products = asRecordArray(data.results);
-      results = await mapCatalogProducts(products, accessToken, catalogOffersById);
-      total = resolvePagingTotal(data, results.length);
+      while (loaded < input.limit) {
+        const pageLimit = Math.min(SEARCH_PAGE_SIZE, input.limit - loaded);
+        const url = new URL(`${ML_API_BASE}/products/search`);
+        url.searchParams.set('q', input.query);
+        url.searchParams.set('status', 'active');
+        url.searchParams.set('site_id', siteId);
+        url.searchParams.set('limit', String(pageLimit));
+        url.searchParams.set('offset', String(pageOffset));
+
+        const data = await fetchMercadoLivreJsonWithPublicFallback<Record<string, unknown>>(url.toString(), accessToken);
+        const products = asRecordArray(data.results);
+        total = resolvePagingTotal(data, results.length + products.length);
+        if (products.length === 0) break;
+
+        const mapped = await mapCatalogProducts(products, accessToken, catalogOffersById, !input.lightweight);
+        results.push(...mapped);
+        loaded += products.length;
+        pageOffset += pageLimit;
+
+        if (products.length < pageLimit || results.length >= total) break;
+      }
     }
   } else if (directResourceId) {
     queryStrategy = 'item_id';
@@ -1054,18 +1106,35 @@ export async function runMercadoLivreCatalogSearch(input: {
     results = [await loadDirectItemById(directResourceId)];
     total = results.length;
   } else {
-    const url = new URL(`${ML_API_BASE}/sites/${encodeURIComponent(siteId)}/search`);
-    url.searchParams.set('q', input.query);
-    url.searchParams.set('limit', String(input.limit));
-    url.searchParams.set('offset', String(input.offset));
+    let loaded = 0;
+    let pageOffset = input.offset;
 
-    const data = await fetchMercadoLivreJsonWithPublicFallback<Record<string, unknown>>(url.toString(), accessToken);
-    results = asRecordArray(data.results).map(mapSearchItem);
-    total = resolvePagingTotal(data, results.length);
+    while (loaded < input.limit) {
+      const pageLimit = Math.min(SEARCH_PAGE_SIZE, input.limit - loaded);
+      const url = new URL(`${ML_API_BASE}/sites/${encodeURIComponent(siteId)}/search`);
+      url.searchParams.set('q', input.query);
+      url.searchParams.set('limit', String(pageLimit));
+      url.searchParams.set('offset', String(pageOffset));
+
+      const data = await fetchMercadoLivreJsonWithPublicFallback<Record<string, unknown>>(url.toString(), accessToken);
+      const rawResults = asRecordArray(data.results);
+      total = resolvePagingTotal(data, results.length + rawResults.length);
+      if (rawResults.length === 0) break;
+
+      results.push(...rawResults.map(mapSearchItem));
+      loaded += rawResults.length;
+      pageOffset += pageLimit;
+
+      if (rawResults.length < pageLimit || results.length >= total) break;
+    }
   }
 
   const enrichedResults =
-    results.length > 0 ? await enrichSearchResults(results, accessToken, input.searchOptions, siteId) : results;
+    results.length > 0
+      ? input.lightweight
+        ? results.map(attachFees)
+        : await enrichSearchResults(results, accessToken, input.searchOptions, siteId)
+      : results;
 
   return {
     mode: input.mode,
@@ -1231,7 +1300,7 @@ export function parseSearchPayload(payload: Record<string, unknown>) {
     accountId: asTrimmedString(payload.accountId),
     query: asTrimmedString(payload.query),
     mode: parseMercadoLivreMode(payload.mode),
-    limit: clampNumber(payload.limit, 25, 1, 50),
+    limit: clampNumber(payload.limit, 50, 1, 200),
     offset: clampNumber(payload.offset, 0, 0, 1000),
     searchOptions: normalizeSearchOptions(payload.options ?? payload),
   };

@@ -9,7 +9,6 @@ import {
   BookmarkCheck,
   Box,
   CheckCircle2,
-  ChevronDown,
   CircleDollarSign,
   Clock,
   Crown,
@@ -40,6 +39,7 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Checkbox } from '@/components/ui/checkbox';
 import {
   Dialog,
   DialogContent,
@@ -48,15 +48,16 @@ import {
   DialogTitle,
   DialogTrigger,
 } from '@/components/ui/dialog';
+import { DeepSearchDialog } from '@/components/deep-search-dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Progress } from '@/components/ui/progress';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Separator } from '@/components/ui/separator';
 import { Switch } from '@/components/ui/switch';
 import DashboardLayout from '@/components/dashboard-layout';
 import { useToast } from '@/hooks/use-toast';
+import type { DeepSearchConfig } from '@/lib/deep-search-types';
 import { cn, formatCurrency } from '@/lib/utils';
 import {
   calculateMercadoLivreSearchTermMatchScore,
@@ -71,6 +72,8 @@ import type {
   MercadoLivrePublishedPresenceItem,
   MercadoLivreSavedOffer,
   MercadoLivreSearchAttribute,
+  MercadoLivreSearchCategoryInfo,
+  MercadoLivreSearchCategoryTrend,
   MercadoLivreSearchItem,
   MercadoLivreSearchMode,
   MercadoLivreSearchOptions,
@@ -123,11 +126,59 @@ type VisitsRefreshApiResponse = MercadoLivreVisitsRefreshResponse & {
   error?: string;
 };
 
+type CategoryTrendsApiResponse = {
+  ok: boolean;
+  error?: string;
+  categoryId: string;
+  categoryInfo: MercadoLivreSearchCategoryInfo | null;
+  trends: MercadoLivreSearchCategoryTrend[];
+  cached?: boolean;
+};
+
+type ResultCategorySummary = {
+  id: string;
+  name: string;
+  count: number;
+  maxVisits: number | null;
+  firstIndex: number;
+};
+
+type CategoryTrendLoadState = {
+  trends: MercadoLivreSearchCategoryTrend[];
+  categoryInfo: MercadoLivreSearchCategoryInfo | null;
+  loading: boolean;
+  error: string | null;
+};
+
+type MercadoLivreSearchSnapshot = {
+  accountId: string;
+  mode: MercadoLivreSearchMode;
+  query: string;
+  queryChips: string[];
+  limit: number;
+  offset: number;
+  searchOptions: SearchOptionsState;
+  searchState: SearchState;
+  localTerms: string[];
+  storeFilters: StoreFilter[];
+  shippingFilters: ShippingFilter[];
+  listingFilters: ListingFilter[];
+  attributeFilters: Record<string, string[]>;
+  selectedItemKeys: string[];
+  savedAt: string;
+};
+
 type AttributeFacet = {
   id: string;
   name: string;
   values: Array<{ value: string; count: number }>;
 };
+
+type TrendGroup = NonNullable<MercadoLivreSearchCategoryTrend['group']>;
+
+const ML_DEEP_SEARCH_REQUEST_KEY = 'mercadoLivreDeepSearchRequest';
+const ML_SEARCH_SNAPSHOT_KEY = 'mercadoLivreSearchSnapshot';
+const ML_RESTORE_SEARCH_ON_RETURN_KEY = 'mercadoLivreRestoreSearchOnReturn';
 
 const DEFAULT_SEARCH_OPTIONS: SearchOptionsState = {
   includeVisits: true,
@@ -142,7 +193,8 @@ const DEFAULT_SEARCH_OPTIONS: SearchOptionsState = {
   includeCategoryInfo: false,
 };
 
-const LIMIT_OPTIONS = [5, 10, 25, 50];
+const LIMIT_OPTIONS = [50, 100, 200];
+const TREND_GROUPS: TrendGroup[] = ['growth', 'most_wanted', 'popular'];
 const VISITS_WINDOW_OPTIONS: Array<{ value: MercadoLivreVisitsWindow; label: string }> = [
   { value: 1, label: 'Hoje' },
   { value: 3, label: '3 dias' },
@@ -190,6 +242,12 @@ function shippingLabel(value: ShippingFilter) {
 
 function storeLabel(value: StoreFilter) {
   return value === 'official' ? 'Loja oficial' : 'Marketplace';
+}
+
+function trendGroupLabel(value: MercadoLivreSearchCategoryTrend['group']) {
+  if (value === 'growth') return 'Crescendo';
+  if (value === 'most_wanted') return 'Mais buscadas';
+  return 'Populares';
 }
 
 function uniqueStrings(values: string[]) {
@@ -582,12 +640,49 @@ function getParentListingDescription(item: MercadoLivreSearchItem) {
   );
 }
 
+function compactSearchItemForSnapshot(item: MercadoLivreSearchItem): MercadoLivreSearchItem {
+  const catalogOffers = item.marketplaceData.catalogOffers;
+
+  return {
+    ...item,
+    marketplaceData: {
+      ...item.marketplaceData,
+      catalogOffers: catalogOffers
+        ? {
+            ...catalogOffers,
+            results: catalogOffers.results.slice(0, 10),
+          }
+        : null,
+      referenceItemDescription: null,
+      categoryAttributes: null,
+    },
+  };
+}
+
+function compactSearchStateForSnapshot(searchState: SearchState): SearchState {
+  return {
+    ...searchState,
+    results: searchState.results.map(compactSearchItemForSnapshot),
+  };
+}
+
+function saveMercadoLivreSearchSnapshot(snapshot: MercadoLivreSearchSnapshot) {
+  const compactSnapshot: MercadoLivreSearchSnapshot = {
+    ...snapshot,
+    searchState: compactSearchStateForSnapshot(snapshot.searchState),
+  };
+
+  window.sessionStorage.setItem(ML_SEARCH_SNAPSHOT_KEY, JSON.stringify(compactSnapshot));
+  window.sessionStorage.setItem(ML_RESTORE_SEARCH_ON_RETURN_KEY, 'true');
+}
+
 export default function BuscarMercadoLivreClient() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { toast } = useToast();
   const initialQuery = searchParams.get('q') || '';
   const autoSearchRef = useRef(false);
+  const restoredSearchRef = useRef(false);
 
   const [accounts, setAccounts] = useState<MercadoLivreAccountSummary[]>([]);
   const [selectedAccountId, setSelectedAccountId] = useState('');
@@ -596,7 +691,7 @@ export default function BuscarMercadoLivreClient() {
   const [query, setQuery] = useState(initialQuery);
   const [queryChips, setQueryChips] = useState<string[]>([]);
   const [queryChipInput, setQueryChipInput] = useState('');
-  const [limit, setLimit] = useState(25);
+  const [limit, setLimit] = useState(50);
   const [offset, setOffset] = useState(0);
   const [searchOptions, setSearchOptions] = useState<SearchOptionsState>(DEFAULT_SEARCH_OPTIONS);
   const [searchState, setSearchState] = useState<SearchState | null>(null);
@@ -612,6 +707,10 @@ export default function BuscarMercadoLivreClient() {
   const [listingFilters, setListingFilters] = useState<ListingFilter[]>([]);
   const [attributeFilters, setAttributeFilters] = useState<Record<string, string[]>>({});
   const [detailsItem, setDetailsItem] = useState<MercadoLivreSearchItem | null>(null);
+  const [selectedItemKeys, setSelectedItemKeys] = useState<Set<string>>(new Set());
+  const [deepSearchOpen, setDeepSearchOpen] = useState(false);
+  const [categoryTrendsById, setCategoryTrendsById] = useState<Record<string, CategoryTrendLoadState>>({});
+  const [trendDialogCategoryId, setTrendDialogCategoryId] = useState<string | null>(null);
 
   const loadAccounts = useCallback(async () => {
     setAccountsLoading(true);
@@ -645,9 +744,56 @@ export default function BuscarMercadoLivreClient() {
     void loadSavedOffers();
   }, [loadAccounts, loadSavedOffers]);
 
+  useEffect(() => {
+    if (restoredSearchRef.current) return;
+    restoredSearchRef.current = true;
+
+    const shouldRestore = window.sessionStorage.getItem(ML_RESTORE_SEARCH_ON_RETURN_KEY) === 'true';
+    if (!shouldRestore) return;
+
+    const rawSnapshot = window.sessionStorage.getItem(ML_SEARCH_SNAPSHOT_KEY);
+    window.sessionStorage.removeItem(ML_RESTORE_SEARCH_ON_RETURN_KEY);
+    if (!rawSnapshot) return;
+
+    try {
+      const snapshot = JSON.parse(rawSnapshot) as MercadoLivreSearchSnapshot;
+      if (!snapshot.searchState || !Array.isArray(snapshot.searchState.results)) return;
+
+      autoSearchRef.current = true;
+      setSelectedAccountId(snapshot.accountId || '');
+      setMode(snapshot.mode || 'catalog');
+      setQuery(snapshot.query || '');
+      setQueryChips(Array.isArray(snapshot.queryChips) ? snapshot.queryChips : []);
+      setQueryChipInput('');
+      setLimit(snapshot.limit || 50);
+      setOffset(snapshot.offset || 0);
+      setSearchOptions({ ...DEFAULT_SEARCH_OPTIONS, ...(snapshot.searchOptions || {}) });
+      setSearchState(snapshot.searchState);
+      setSearchError(null);
+      setLocalTermInput('');
+      setLocalTerms(Array.isArray(snapshot.localTerms) ? snapshot.localTerms : []);
+      setStoreFilters(Array.isArray(snapshot.storeFilters) ? snapshot.storeFilters : []);
+      setShippingFilters(Array.isArray(snapshot.shippingFilters) ? snapshot.shippingFilters : []);
+      setListingFilters(Array.isArray(snapshot.listingFilters) ? snapshot.listingFilters : []);
+      setAttributeFilters(snapshot.attributeFilters || {});
+      setSelectedItemKeys(new Set(snapshot.selectedItemKeys || []));
+
+      if (snapshot.query) {
+        router.replace(`/buscar-mercado-livre?q=${encodeURIComponent(snapshot.query)}`);
+      }
+    } catch (error) {
+      console.warn('[buscar-mercado-livre] Falha ao restaurar busca anterior:', error);
+    }
+  }, [router]);
+
   const runSearch = useCallback(
-    async (queryOverride?: string, optionsOverride?: Partial<SearchOptionsState>, offsetOverride = offset) => {
-      const terms = uniqueStrings([queryOverride ?? query, ...queryChips]);
+    async (
+      queryOverride?: string,
+      optionsOverride?: Partial<SearchOptionsState>,
+      offsetOverride = offset,
+      queryChipsOverride = queryChips
+    ) => {
+      const terms = uniqueStrings([queryOverride ?? query, ...queryChipsOverride]);
       const searchQuery = terms.join(' ').trim();
 
       if (!selectedAccountId) {
@@ -663,6 +809,7 @@ export default function BuscarMercadoLivreClient() {
       setSearching(true);
       setSearchError(null);
       setSearchState(null);
+      setSelectedItemKeys(new Set());
       setOffset(offsetOverride);
       router.replace(`/buscar-mercado-livre?q=${encodeURIComponent(searchQuery)}`);
 
@@ -712,6 +859,48 @@ export default function BuscarMercadoLivreClient() {
   }, [initialQuery, runSearch, selectedAccountId]);
 
   const results = searchState?.results || [];
+  const selectedProducts = useMemo(
+    () => results.filter((item) => selectedItemKeys.has(getItemKey(item))),
+    [results, selectedItemKeys]
+  );
+  const resultCategories = useMemo<ResultCategorySummary[]>(() => {
+    const counts = new Map<string, ResultCategorySummary>();
+
+    results.forEach((item, index) => {
+      if (!item.categoryId) return;
+      const itemVisits = item.totalVisits ?? null;
+      const current = counts.get(item.categoryId);
+      if (current) {
+        current.count += 1;
+        if (item.categoryInfo?.name) current.name = item.categoryInfo.name;
+        if (itemVisits !== null && (current.maxVisits === null || itemVisits > current.maxVisits)) {
+          current.maxVisits = itemVisits;
+        }
+        return;
+      }
+
+      counts.set(item.categoryId, {
+        id: item.categoryId,
+        name: item.categoryInfo?.name || item.categoryId,
+        count: 1,
+        maxVisits: itemVisits,
+        firstIndex: index,
+      });
+    });
+
+    return [...counts.values()].sort((left, right) => {
+      const visitsDiff = (right.maxVisits ?? -1) - (left.maxVisits ?? -1);
+      if (visitsDiff !== 0) return visitsDiff;
+      const countDiff = right.count - left.count;
+      if (countDiff !== 0) return countDiff;
+      return left.firstIndex - right.firstIndex;
+    });
+  }, [results]);
+  const resultCategoryIds = useMemo(() => resultCategories.map((category) => category.id).join('|'), [resultCategories]);
+  const trendDialogCategory = useMemo(
+    () => resultCategories.find((category) => category.id === trendDialogCategoryId) || null,
+    [resultCategories, trendDialogCategoryId]
+  );
   const presenceByKey = useMemo(
     () => new Map((searchState?.publishedPresence || []).map((presence) => [presence.itemKey, presence])),
     [searchState?.publishedPresence]
@@ -783,6 +972,83 @@ export default function BuscarMercadoLivreClient() {
     return withScore.map(({ item }) => item);
   }, [attributeFilters, listingFilters, localTerms, results, shippingFilters, storeFilters]);
 
+  useEffect(() => {
+    if (!selectedAccountId || resultCategories.length === 0) {
+      setCategoryTrendsById({});
+      return;
+    }
+
+    let cancelled = false;
+    const categories = resultCategories.map((category) => ({ id: category.id }));
+
+    setCategoryTrendsById((current) => {
+      const next: Record<string, CategoryTrendLoadState> = {};
+      categories.forEach((category) => {
+        const existing = current[category.id];
+        next[category.id] = {
+          trends: existing?.trends || [],
+          categoryInfo: existing?.categoryInfo || null,
+          loading: true,
+          error: null,
+        };
+      });
+      return next;
+    });
+
+    async function loadCategory(categoryId: string) {
+      try {
+        const data = await fetchJson<CategoryTrendsApiResponse>('/api/mercado-livre/category-trends', {
+          method: 'POST',
+          body: JSON.stringify({
+            accountId: selectedAccountId,
+            categoryId,
+          }),
+        });
+
+        if (cancelled) return;
+        setCategoryTrendsById((current) => ({
+          ...current,
+          [categoryId]: {
+            trends: data.trends || [],
+            categoryInfo: data.categoryInfo || null,
+            loading: false,
+            error: null,
+          },
+        }));
+      } catch (error) {
+        if (cancelled) return;
+        setCategoryTrendsById((current) => ({
+          ...current,
+          [categoryId]: {
+            trends: current[categoryId]?.trends || [],
+            categoryInfo: current[categoryId]?.categoryInfo || null,
+            loading: false,
+            error: error instanceof Error ? error.message : 'Falha ao carregar tendências.',
+          },
+        }));
+      }
+    }
+
+    async function loadAllCategories() {
+      const queue = [...categories];
+      const workers = Array.from({ length: Math.min(4, queue.length) }, async () => {
+        while (!cancelled) {
+          const next = queue.shift();
+          if (!next) return;
+          await loadCategory(next.id);
+        }
+      });
+
+      await Promise.all(workers);
+    }
+
+    void loadAllCategories();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [resultCategories.length, resultCategoryIds, selectedAccountId]);
+
   function addQueryChip() {
     const next = queryChipInput.trim();
     if (!next) return;
@@ -795,6 +1061,17 @@ export default function BuscarMercadoLivreClient() {
     if (!next) return;
     setLocalTerms((current) => uniqueStrings([...current, next]));
     setLocalTermInput('');
+  }
+
+  function runTrendSearch(keyword: string) {
+    const nextQuery = keyword.trim();
+    if (!nextQuery) return;
+
+    setQuery(nextQuery);
+    setQueryChips([]);
+    setLocalTerms([]);
+    setOffset(0);
+    void runSearch(nextQuery, undefined, 0, []);
   }
 
   function updateSearchOption<K extends keyof SearchOptionsState>(key: K, value: SearchOptionsState[K]) {
@@ -903,16 +1180,67 @@ export default function BuscarMercadoLivreClient() {
     }
   }
 
-  function runDeepSearchPreset() {
-    const nextOptions: Partial<SearchOptionsState> = {
-      includeVisits: true,
-      includeReviews: true,
-      includeQuestions: true,
-      includeCategoryInfo: true,
-      includeTrends: true,
+  function toggleSelectedItem(item: MercadoLivreSearchItem) {
+    const itemKey = getItemKey(item);
+    setSelectedItemKeys((current) => {
+      const next = new Set(current);
+      if (next.has(itemKey)) next.delete(itemKey);
+      else next.add(itemKey);
+      return next;
+    });
+  }
+
+  function setVisibleSelection(selected: boolean) {
+    setSelectedItemKeys((current) => {
+      const next = new Set(current);
+      filteredResults.forEach((item) => {
+        const key = getItemKey(item);
+        if (selected) next.add(key);
+        else next.delete(key);
+      });
+      return next;
+    });
+  }
+
+  function startDeepSearch(config: DeepSearchConfig) {
+    if (!selectedAccountId) {
+      toast({ title: 'Selecione uma conta', description: 'Escolha a conta ativa do Mercado Livre.', variant: 'destructive' });
+      return;
+    }
+
+    if (searchState) {
+      const snapshot: MercadoLivreSearchSnapshot = {
+        accountId: selectedAccountId,
+        mode,
+        query,
+        queryChips,
+        limit,
+        offset,
+        searchOptions,
+        searchState,
+        localTerms,
+        storeFilters,
+        shippingFilters,
+        listingFilters,
+        attributeFilters,
+        selectedItemKeys: Array.from(selectedItemKeys),
+        savedAt: new Date().toISOString(),
+      };
+      try {
+        saveMercadoLivreSearchSnapshot(snapshot);
+      } catch (error) {
+        console.warn('[buscar-mercado-livre] Não foi possível salvar snapshot da busca:', error);
+      }
+    }
+
+    const payload = {
+      accountId: selectedAccountId,
+      config,
+      createdAt: new Date().toISOString(),
     };
-    setSearchOptions((current) => ({ ...current, ...nextOptions }));
-    void runSearch(undefined, nextOptions, 0);
+
+    window.sessionStorage.setItem(ML_DEEP_SEARCH_REQUEST_KEY, JSON.stringify(payload));
+    router.push('/buscar-mercado-livre/deep-search');
   }
 
   return (
@@ -932,29 +1260,15 @@ export default function BuscarMercadoLivreClient() {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <Popover>
-            <PopoverTrigger asChild>
-              <Button variant="outline" size="sm">
-                <Sparkles className="h-4 w-4" />
-                Deep Search
-                <ChevronDown className="h-4 w-4" />
-              </Button>
-            </PopoverTrigger>
-            <PopoverContent align="end" className="w-80">
-              <div className="space-y-3">
-                <div>
-                  <p className="text-sm font-medium">Busca aprofundada</p>
-                  <p className="text-xs text-muted-foreground">
-                    Ativa visitas, avaliações, perguntas, categoria e tendências para a próxima busca.
-                  </p>
-                </div>
-                <Button className="w-full" onClick={runDeepSearchPreset} disabled={searching || !query.trim()}>
-                  {searching ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
-                  Executar preset completo
-                </Button>
-              </div>
-            </PopoverContent>
-          </Popover>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setDeepSearchOpen(true)}
+            disabled={selectedProducts.length === 0}
+          >
+            <Sparkles className="h-4 w-4" />
+            Deep Search ({selectedProducts.length})
+          </Button>
         </div>
       </div>
 
@@ -1252,7 +1566,27 @@ export default function BuscarMercadoLivreClient() {
 
           <section className="space-y-4">
             <Card>
-              <CardContent className="flex flex-col gap-3 p-4 md:flex-row md:items-center md:justify-end">
+              <CardContent className="flex flex-col gap-3 p-4 md:flex-row md:items-center md:justify-between">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setVisibleSelection(true)}
+                    disabled={filteredResults.length === 0}
+                  >
+                    <CheckCircle2 className="h-4 w-4" />
+                    Selecionar visíveis
+                  </Button>
+                  {selectedProducts.length > 0 ? (
+                    <>
+                      <Button type="button" variant="ghost" size="sm" onClick={() => setSelectedItemKeys(new Set())}>
+                        Limpar seleção
+                      </Button>
+                      <Badge variant="secondary">{selectedProducts.length} para Deep Search</Badge>
+                    </>
+                  ) : null}
+                </div>
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
                   {searchState.searchOptions.includeVisits ? (
                     <div className="flex items-center gap-2 rounded-md border bg-white px-2 py-1.5">
@@ -1285,6 +1619,13 @@ export default function BuscarMercadoLivreClient() {
               </CardContent>
             </Card>
 
+            <CategoryTrendsCardsSection
+              categories={resultCategories}
+              trendsById={categoryTrendsById}
+              onTrendClick={runTrendSearch}
+              onOpenCategory={(categoryId) => setTrendDialogCategoryId(categoryId)}
+            />
+
             {filteredResults.length === 0 ? (
               <Card>
                 <CardContent className="flex min-h-[240px] flex-col items-center justify-center gap-2 p-6 text-center">
@@ -1306,6 +1647,8 @@ export default function BuscarMercadoLivreClient() {
                       presence={presenceByKey.get(itemKey)}
                       isSaved={savedOffers.has(itemKey)}
                       isSaving={savingKeys.has(itemKey)}
+                      isSelected={selectedItemKeys.has(itemKey)}
+                      onToggleSelected={() => toggleSelectedItem(item)}
                       onToggleSaved={() => void toggleSavedOffer(item)}
                       onDetails={() => setDetailsItem(item)}
                       searchTerm={searchState.query}
@@ -1335,6 +1678,22 @@ export default function BuscarMercadoLivreClient() {
         </Card>
       ) : null}
 
+        <DeepSearchDialog
+          open={deepSearchOpen}
+          onOpenChange={setDeepSearchOpen}
+          selectedProducts={selectedProducts}
+          onStart={startDeepSearch}
+        />
+        <CategoryTrendsDialog
+          category={trendDialogCategory}
+          state={trendDialogCategory ? categoryTrendsById[trendDialogCategory.id] : undefined}
+          open={Boolean(trendDialogCategory)}
+          onOpenChange={(open) => !open && setTrendDialogCategoryId(null)}
+          onTrendClick={(keyword) => {
+            setTrendDialogCategoryId(null);
+            runTrendSearch(keyword);
+          }}
+        />
         <DetailsDialog item={detailsItem} onOpenChange={(open) => !open && setDetailsItem(null)} />
       </div>
     </DashboardLayout>
@@ -1377,6 +1736,226 @@ function PaginationControls({
         </Button>
       </div>
     </div>
+  );
+}
+
+function CategoryTrendsCardsSection({
+  categories,
+  trendsById,
+  onTrendClick,
+  onOpenCategory,
+}: {
+  categories: ResultCategorySummary[];
+  trendsById: Record<string, CategoryTrendLoadState>;
+  onTrendClick: (keyword: string) => void;
+  onOpenCategory: (categoryId: string) => void;
+}) {
+  if (categories.length === 0) return null;
+
+  const loadingCount = categories.filter((category) => trendsById[category.id]?.loading ?? true).length;
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle className="flex flex-wrap items-center justify-between gap-2 text-base">
+          <span className="flex items-center gap-2">
+            <BarChart3 className="h-4 w-4" />
+            Tendências por categoria
+          </span>
+          <span className="text-xs font-normal text-muted-foreground">
+            {categories.length} categoria{categories.length !== 1 ? 's' : ''} única{categories.length !== 1 ? 's' : ''}
+            {loadingCount > 0 ? ` · ${loadingCount} carregando` : ''}
+          </span>
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        <div className="grid gap-3 lg:grid-cols-2">
+          {categories.map((category) => (
+            <CategoryTrendSummaryCard
+              key={category.id}
+              category={category}
+              state={trendsById[category.id]}
+              onTrendClick={onTrendClick}
+              onOpen={() => onOpenCategory(category.id)}
+            />
+          ))}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function CategoryTrendSummaryCard({
+  category,
+  state,
+  onTrendClick,
+  onOpen,
+}: {
+  category: ResultCategorySummary;
+  state: CategoryTrendLoadState | undefined;
+  onTrendClick: (keyword: string) => void;
+  onOpen: () => void;
+}) {
+  const loading = state?.loading ?? true;
+  const error = state?.error || null;
+  const trends = state?.trends || [];
+  const topTrends = trends.slice(0, 10);
+  const categoryName = state?.categoryInfo?.name || category.name;
+  const categoryPath = state?.categoryInfo?.path || null;
+
+  return (
+    <div className="space-y-3 rounded-md border bg-background p-3">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0 space-y-1">
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
+            <h3 className="truncate text-sm font-semibold">{categoryName}</h3>
+            <Badge variant="outline" className="shrink-0 font-mono text-[10px]">
+              {category.id}
+            </Badge>
+          </div>
+          {categoryPath && categoryPath !== categoryName ? (
+            <p className="truncate text-[11px] text-muted-foreground" title={categoryPath}>
+              {categoryPath}
+            </p>
+          ) : null}
+          <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
+            <span>
+              {category.count} resultado{category.count !== 1 ? 's' : ''}
+            </span>
+            {category.maxVisits !== null ? <span>Maior anúncio: {formatCount(category.maxVisits)} visitas</span> : null}
+          </div>
+        </div>
+        {loading ? <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-muted-foreground" /> : null}
+      </div>
+
+      {error ? <p className="text-xs text-red-600">{error}</p> : null}
+
+      {!loading && !error && trends.length === 0 ? (
+        <p className="text-xs text-muted-foreground">Nenhuma tendência retornada para esta categoria.</p>
+      ) : null}
+
+      {topTrends.length > 0 ? (
+        <div className="flex flex-wrap gap-1.5">
+          {topTrends.map((trend) => (
+            <TrendKeywordButton key={`${category.id}:${trend.rank || trend.keyword}:${trend.keyword}`} trend={trend} onClick={onTrendClick} />
+          ))}
+        </div>
+      ) : loading ? (
+        <div className="grid gap-1.5 sm:grid-cols-2">
+          {Array.from({ length: 4 }).map((_, index) => (
+            <div key={index} className="h-7 animate-pulse rounded-md bg-muted" />
+          ))}
+        </div>
+      ) : null}
+
+      {trends.length > 10 ? (
+        <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={onOpen}>
+          Ver tudo ({trends.length})
+        </Button>
+      ) : null}
+    </div>
+  );
+}
+
+function CategoryTrendsDialog({
+  category,
+  state,
+  open,
+  onOpenChange,
+  onTrendClick,
+}: {
+  category: ResultCategorySummary | null;
+  state: CategoryTrendLoadState | undefined;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onTrendClick: (keyword: string) => void;
+}) {
+  if (!category) return null;
+
+  const loading = state?.loading ?? false;
+  const error = state?.error || null;
+  const trends = state?.trends || [];
+  const grouped = groupCategoryTrends(trends);
+  const categoryName = state?.categoryInfo?.name || category.name;
+  const categoryPath = state?.categoryInfo?.path || null;
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-h-[86vh] max-w-3xl overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>{categoryName}</DialogTitle>
+          <DialogDescription>
+            {category.id} · {category.count} resultado{category.count !== 1 ? 's' : ''}
+            {categoryPath && categoryPath !== categoryName ? ` · ${categoryPath}` : ''}
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-4">
+          {loading ? (
+            <div className="flex items-center gap-2 rounded-md border bg-muted/20 p-3 text-sm text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Carregando tendências da categoria...
+            </div>
+          ) : null}
+
+          {error ? <p className="text-sm text-red-600">{error}</p> : null}
+
+          {!loading && !error && trends.length === 0 ? (
+            <p className="text-sm text-muted-foreground">Nenhuma tendência retornada para esta categoria.</p>
+          ) : null}
+
+          {TREND_GROUPS.map((group) => {
+            const entries = grouped[group] || [];
+            if (entries.length === 0) return null;
+
+            return (
+              <div key={group} className="space-y-2">
+                <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{trendGroupLabel(group)}</h3>
+                <div className="flex flex-wrap gap-2">
+                  {entries.map((trend) => (
+                    <TrendKeywordButton
+                      key={`${category.id}:dialog:${trend.rank || trend.keyword}:${trend.keyword}`}
+                      trend={trend}
+                      onClick={onTrendClick}
+                    />
+                  ))}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function TrendKeywordButton({
+  trend,
+  onClick,
+}: {
+  trend: MercadoLivreSearchCategoryTrend;
+  onClick: (keyword: string) => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={() => onClick(trend.keyword)}
+      className="inline-flex max-w-full items-center gap-1 rounded-md border bg-background px-2 py-1 text-left text-[11px] font-medium hover:bg-muted"
+      title={trend.keyword}
+    >
+      {trend.rank ? <span className="shrink-0 text-muted-foreground">#{trend.rank}</span> : null}
+      <span className="truncate">{trend.keyword}</span>
+    </button>
+  );
+}
+
+function groupCategoryTrends(trends: MercadoLivreSearchCategoryTrend[]) {
+  return trends.reduce<Record<TrendGroup, MercadoLivreSearchCategoryTrend[]>>(
+    (acc, trend) => {
+      acc[trend.group || 'popular'].push(trend);
+      return acc;
+    },
+    { growth: [], most_wanted: [], popular: [] }
   );
 }
 
@@ -1742,6 +2321,8 @@ function ResultCard({
   presence,
   isSaved,
   isSaving,
+  isSelected,
+  onToggleSelected,
   onToggleSaved,
   onDetails,
   searchTerm,
@@ -1752,6 +2333,8 @@ function ResultCard({
   presence: MercadoLivrePublishedPresenceItem | undefined;
   isSaved: boolean;
   isSaving: boolean;
+  isSelected: boolean;
+  onToggleSelected: () => void;
   onToggleSaved: () => void;
   onDetails: () => void;
   searchTerm?: string;
@@ -1817,10 +2400,16 @@ function ResultCard({
   );
 
   return (
-    <Card className="overflow-hidden rounded-lg border-slate-200 bg-white shadow-sm hover:border-slate-300">
+    <Card className={cn('overflow-hidden rounded-lg bg-white shadow-sm hover:border-slate-300', isSelected ? 'border-primary ring-1 ring-primary/25' : 'border-slate-200')}>
       <div className={cn('border-b px-4 py-2', cfg.bg, cfg.border)}>
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex min-w-0 items-center gap-2">
+            <Checkbox
+              checked={isSelected}
+              onCheckedChange={onToggleSelected}
+              aria-label={`Selecionar ${item.title} para Deep Search`}
+              className="border-slate-400 bg-white"
+            />
             <MatchIcon className={cn('h-4 w-4 shrink-0', cfg.iconColor)} />
             <span className={cn('truncate text-xs font-semibold', cfg.text)}>
               {searchTerm ? `Busca: ${searchTerm}` : 'Resultado do catálogo'}
