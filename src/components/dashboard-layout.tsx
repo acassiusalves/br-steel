@@ -17,6 +17,7 @@ import {
   LogOut,
   Menu,
   MessageCircle,
+  Package,
   PackagePlus,
   Plug,
   RefreshCw,
@@ -80,6 +81,7 @@ const allNavItems: NavItem[] = [
       { href: "/insumos?tab=estoque", icon: Boxes, label: "Estoque de Insumo" },
     ],
   },
+  { href: "/produtos", icon: Package, label: "Produtos" },
   { href: "/estoque", icon: Warehouse, label: "Estoque" },
   {
     href: "/anuncios-mercado-livre",

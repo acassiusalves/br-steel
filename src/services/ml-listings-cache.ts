@@ -4,6 +4,11 @@ import type { DocumentData } from 'firebase-admin/firestore';
 import { getMlToken } from '@/services/mercadolivre';
 import { getPrimaryMlAccountIdAdmin, saveMlCredentialsAdmin } from '@/services/firestore-admin';
 import {
+  BRSTEEL_UNMATCHED_PARENT_GROUP_KEY,
+  resolveBrSteelParentsForListings,
+  type BrSteelParentMatchSource,
+} from '@/services/brsteel-product-associations';
+import {
   loadMercadoLivreAdsCampaignDailyRows,
   loadMercadoLivreAdsCampaignSummaries,
   loadMercadoLivreAdsListingsMap,
@@ -26,7 +31,7 @@ const ANALYTICS_CONCURRENCY = 5;
 const WRITE_BATCH_SIZE = 450;
 
 export type MlListingsViewMode = 'list' | 'grouped';
-export type MlListingsGroupBy = 'sku' | 'catalog';
+export type MlListingsGroupBy = 'sku' | 'catalog' | 'parent_product';
 export type MlCatalogMode = 'catalog' | 'list';
 export type MlListingsAnalysisFilter =
   | 'all'
@@ -150,6 +155,18 @@ export type MlListingCacheRow = {
   adsDateTo?: string | null;
   adsSyncedAt?: string | null;
   rawItem?: Record<string, unknown>;
+  parentProductSku?: string | null;
+  parentProductName?: string | null;
+  parentProductType?: string | null;
+  parentProductMatchSource?: BrSteelParentMatchSource;
+  parentProductMatchedSku?: string | null;
+  productKitSku?: string | null;
+  productKitComponents?: Array<{
+    parentSku: string;
+    quantity: number;
+    productName: string;
+    productType: string;
+  }>;
 };
 
 export type MlListingGroup = {
@@ -159,6 +176,20 @@ export type MlListingGroup = {
   thumbnail: string | null;
   sellerSku: string | null;
   catalogProductId: string | null;
+  parentProductSku?: string | null;
+  parentProductName?: string | null;
+  parentProductType?: string | null;
+  parentProductMatchSources?: BrSteelParentMatchSource[];
+  parentProductLinkedListings?: number;
+  parentProductUnlinkedListings?: number;
+  productKitSku?: string | null;
+  productKitComponents?: Array<{
+    parentSku: string;
+    quantity: number;
+    productName: string;
+    productType: string;
+  }>;
+  productKitListings?: number;
   totalListings: number;
   activeListings: number;
   pausedListings: number;
@@ -2295,6 +2326,15 @@ function containsSearch(row: MlListingCacheRow, search: string) {
     row.title,
     row.itemId,
     row.sellerSku,
+    row.parentProductSku,
+    row.parentProductName,
+    row.parentProductType,
+    row.productKitSku,
+    ...(row.productKitComponents ?? []).flatMap((component) => [
+      component.parentSku,
+      component.productName,
+      component.productType,
+    ]),
     row.catalogProductId,
     row.accountName,
     row.categoryId,
@@ -2449,7 +2489,9 @@ function groupListings(rows: MlListingCacheRow[], groupBy: MlListingsGroupBy): M
     const key =
       groupBy === 'catalog'
         ? row.catalogProductId || `sem-catalogo:${row.sellerSku || row.itemId}`
-        : row.sellerSku || row.catalogProductId || row.itemId;
+        : groupBy === 'parent_product'
+          ? row.parentProductSku || (row.productKitSku ? `kit:${row.productKitSku}` : BRSTEEL_UNMATCHED_PARENT_GROUP_KEY)
+          : row.sellerSku || row.catalogProductId || row.itemId;
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key)!.push(row);
   });
@@ -2464,13 +2506,39 @@ function groupListings(rows: MlListingCacheRow[], groupBy: MlListingsGroupBy): M
       const accountNames = Array.from(new Set(listings.map((row) => row.accountName || row.accountId))).sort();
       const adsCost = listings.reduce((sum, row) => sum + (row.adsCost || 0), 0);
       const adsTotalAmount = listings.reduce((sum, row) => sum + (row.adsTotalAmount || 0), 0);
+      const parentProductMatchSources = Array.from(
+        new Set(
+          listings
+            .filter((row) => row.parentProductSku)
+            .map((row) => row.parentProductMatchSource)
+            .filter((source): source is BrSteelParentMatchSource => Boolean(source) && source !== 'none')
+        )
+      );
+      const isParentProductGroup = groupBy === 'parent_product';
+      const parentProduct = isParentProductGroup
+        ? listings.find((row) => row.parentProductSku)
+        : null;
+      const productKit = isParentProductGroup
+        ? listings.find((row) => row.productKitSku)
+        : null;
       return {
         groupKey,
         groupBy,
-        title: first.title || first.sellerSku || first.catalogProductId || first.itemId,
-        thumbnail: first.thumbnail,
-        sellerSku: first.sellerSku,
+        title: isParentProductGroup
+          ? parentProduct?.parentProductName || (productKit?.productKitSku ? first.title || `Kit configurado ${productKit.productKitSku}` : 'Sem produto mãe')
+          : first.title || first.sellerSku || first.catalogProductId || first.itemId,
+        thumbnail: parentProduct?.thumbnail || first.thumbnail,
+        sellerSku: isParentProductGroup ? parentProduct?.parentProductSku ?? productKit?.productKitSku ?? null : first.sellerSku,
         catalogProductId: first.catalogProductId,
+        parentProductSku: parentProduct?.parentProductSku ?? null,
+        parentProductName: parentProduct?.parentProductName ?? null,
+        parentProductType: parentProduct?.parentProductType ?? null,
+        parentProductMatchSources,
+        parentProductLinkedListings: listings.filter((row) => row.parentProductSku).length,
+        parentProductUnlinkedListings: listings.filter((row) => !row.parentProductSku && !row.productKitSku).length,
+        productKitSku: productKit?.productKitSku ?? null,
+        productKitComponents: productKit?.productKitComponents ?? [],
+        productKitListings: listings.filter((row) => row.productKitSku).length,
         totalListings: listings.length,
         activeListings: listings.filter((row) => row.status === 'active').length,
         pausedListings: listings.filter((row) => row.status === 'paused').length,
@@ -2785,16 +2853,20 @@ export async function listMercadoLivreListingsCache(
     .filter((row) => row.itemId && row.accountId)
     .sort(sortListings);
   const allRowsWithAds = await enrichListingsWithAds(allRows, filters.accountId);
+  const groupBy = filters.groupBy || 'sku';
+  const shouldResolveParentProducts = filters.viewMode === 'grouped' && groupBy === 'parent_product';
+  const rowsForView = shouldResolveParentProducts
+    ? await resolveBrSteelParentsForListings(allRowsWithAds)
+    : allRowsWithAds;
 
-  const filtered = applyFilters(allRowsWithAds, filters);
-  const statusRows = applyFilters(allRowsWithAds, {
+  const filtered = applyFilters(rowsForView, filters);
+  const statusRows = applyFilters(rowsForView, {
     ...filters,
     status: [],
     problemsOnly: false,
   });
   const { offset, limit } = clampPaging(filters);
   const viewMode = filters.viewMode || 'list';
-  const groupBy = filters.groupBy || 'sku';
   const groups = groupListings(filtered, groupBy);
   const total = viewMode === 'grouped' ? groups.length : filtered.length;
   const [adsCampaigns, adsCampaignDailyRows] = await Promise.all([

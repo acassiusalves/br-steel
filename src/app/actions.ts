@@ -56,6 +56,13 @@ import {
     verifySessionToken,
     type SessionUser,
 } from '@/lib/server-auth';
+import { fetchBrSteelProductsSheet } from '@/services/brsteel-products-sheet';
+import {
+    approveSafeBrSteelSkuAssociations,
+    getBrSteelProductAssociationOverview,
+    replaceBrSteelSkuAssociationsForParent,
+    saveBrSteelProductKitComposition as saveBrSteelProductKitCompositionService,
+} from '@/services/brsteel-product-associations';
 
 
 // Bling API actions
@@ -87,6 +94,43 @@ async function getCurrentServerActionUser(): Promise<SessionUser> {
 // Gemini / IA
 export async function getGeminiCredentials(): Promise<GeminiCredentialsPublic> {
     return getGeminiCredentialsAdmin();
+}
+
+export async function getBrSteelProductsFromSheet() {
+    return fetchBrSteelProductsSheet();
+}
+
+export async function getBrSteelProductAssociationsOverview() {
+    return getBrSteelProductAssociationOverview();
+}
+
+export async function approveBrSteelSafeProductSkuAssociations() {
+    return approveSafeBrSteelSkuAssociations();
+}
+
+export async function replaceBrSteelProductSkuAssociations(input: {
+    parentSku: string;
+    childSkus: string[];
+}) {
+    return replaceBrSteelSkuAssociationsForParent({
+        parentSku: input.parentSku,
+        childSkus: input.childSkus,
+        source: 'manual',
+    });
+}
+
+export async function saveBrSteelProductKitComposition(input: {
+    kitSku: string;
+    components: Array<{
+        parentSku: string;
+        quantity: number;
+    }>;
+}) {
+    return saveBrSteelProductKitCompositionService({
+        kitSku: input.kitSku,
+        components: input.components,
+        source: 'manual',
+    });
 }
 
 export async function saveGeminiCredentials(partial: { apiKey?: string }): Promise<void> {

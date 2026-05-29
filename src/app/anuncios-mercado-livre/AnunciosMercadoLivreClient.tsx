@@ -390,6 +390,7 @@ function ListingBadges({ row }: { row: MlListingCacheRow }) {
       {row.accountName ? <Badge variant="outline" className="gap-1"><Store className="h-3 w-3" />{row.accountName}</Badge> : null}
       {row.sellerSku ? <Badge variant="secondary">SKU {row.sellerSku}</Badge> : <Badge variant="destructive">Sem SKU</Badge>}
       {row.catalogProductId || row.catalogListing ? <Badge variant="outline" className="gap-1"><Layers className="h-3 w-3" />Catalogo</Badge> : null}
+      {row.productKitSku ? <Badge variant="outline" className="gap-1"><Boxes className="h-3 w-3" />Kit</Badge> : null}
       {row.listingTypeId ? <Badge variant="outline">{listingTypeLabel(row.listingTypeId)}</Badge> : null}
       {row.freeShipping ? <Badge variant="outline">Frete gratis</Badge> : null}
       {row.adsCampaignId ? <Badge variant="outline" className="gap-1"><Megaphone className="h-3 w-3" />Ads</Badge> : null}
@@ -1164,6 +1165,14 @@ function ListingTable({
   );
 }
 
+function parentProductMatchLabel(source: string) {
+  if (source === 'exact') return 'match exato';
+  if (source === 'manual') return 'manual';
+  if (source === 'bulk') return 'massa';
+  if (source === 'suggested') return 'sugerido';
+  return 'sem vínculo';
+}
+
 function GroupedList({
   groups,
   isLoading,
@@ -1205,8 +1214,36 @@ function GroupedList({
               <div className="min-w-0">
                 <div className="truncate font-semibold">{group.title}</div>
                 <div className="mt-1 flex flex-wrap gap-1.5 text-xs text-muted-foreground">
-                  {group.sellerSku ? <span>SKU {group.sellerSku}</span> : null}
-                  {group.catalogProductId ? <span>Catalogo {group.catalogProductId}</span> : null}
+                  {group.groupBy === 'parent_product' ? (
+                    <>
+                      {group.parentProductSku ? (
+                        <span>Produto mãe {group.parentProductSku}</span>
+                      ) : group.productKitSku ? (
+                        <span>Kit configurado {group.productKitSku}</span>
+                      ) : (
+                        <span>Sem produto mãe</span>
+                      )}
+                      {group.parentProductType ? <span>{group.parentProductType}</span> : null}
+                      {group.productKitComponents?.length ? (
+                        <span>
+                          {group.productKitComponents
+                            .map((component) => `${component.quantity}x ${component.parentSku}`)
+                            .join(', ')}
+                        </span>
+                      ) : null}
+                      {group.parentProductMatchSources?.length ? (
+                        <span>{group.parentProductMatchSources.map(parentProductMatchLabel).join(', ')}</span>
+                      ) : null}
+                      {group.parentProductUnlinkedListings ? (
+                        <span className="text-destructive">{formatNumber(group.parentProductUnlinkedListings)} sem vínculo</span>
+                      ) : null}
+                    </>
+                  ) : (
+                    <>
+                      {group.sellerSku ? <span>SKU {group.sellerSku}</span> : null}
+                      {group.catalogProductId ? <span>Catalogo {group.catalogProductId}</span> : null}
+                    </>
+                  )}
                   <span>{group.accountNames.join(', ')}</span>
                   {group.hasProblems ? <span className="text-destructive">Com alertas</span> : null}
                 </div>
@@ -1656,6 +1693,7 @@ export default function AnunciosMercadoLivreClient() {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="sku">Por SKU</SelectItem>
+                      <SelectItem value="parent_product">Por produto mãe</SelectItem>
                       <SelectItem value="catalog">Por catalogo</SelectItem>
                     </SelectContent>
                   </Select>
