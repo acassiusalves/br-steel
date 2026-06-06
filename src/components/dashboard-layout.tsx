@@ -10,6 +10,7 @@ import {
   Boxes,
   ChevronRight,
   ClipboardList,
+  DollarSign,
   Factory,
   Kanban,
   LayoutDashboard,
@@ -79,6 +80,14 @@ const allNavItems: NavItem[] = [
     subItems: [
       { href: "/insumos?tab=cadastro", icon: PackagePlus, label: "Cadastro" },
       { href: "/insumos?tab=estoque", icon: Boxes, label: "Estoque de Insumo" },
+    ],
+  },
+  {
+    href: "/financeiro/conciliacao",
+    icon: DollarSign,
+    label: "Financeiro",
+    subItems: [
+      { href: "/financeiro/conciliacao", icon: ClipboardList, label: "Conciliação" },
     ],
   },
   { href: "/produtos", icon: Package, label: "Produtos" },
