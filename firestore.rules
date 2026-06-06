@@ -48,6 +48,18 @@ service cloud.firestore {
       allow read, write: if legacyClientAccess();
     }
 
+    match /conciliationSales/{document=**} {
+      allow read, write: if legacyClientAccess();
+    }
+
+    match /conciliationMarketplacePayouts/{document=**} {
+      allow read, write: if legacyClientAccess();
+    }
+
+    match /conciliationSettings/{document=**} {
+      allow read, write: if legacyClientAccess();
+    }
+
     match /productionColumns/{document=**} {
       allow read, write: if legacyClientAccess();
     }
