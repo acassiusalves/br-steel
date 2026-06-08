@@ -1,5 +1,10 @@
 import type {
   ConciliationActor,
+  ConciliationCalculationConditionOperator,
+  ConciliationCalculationConditionalFormula,
+  ConciliationCalculationInlineConditional,
+  ConciliationCalculationInlineConditionOperator,
+  ConciliationCalculationInteraction,
   ConciliationCalculationValue,
   ConciliationCustomCalculation,
   ConciliationOrder,
@@ -28,6 +33,17 @@ export type ConciliationCalculationFieldOption = {
   id: ConciliationCalculationFieldId;
   label: string;
   helper: string;
+};
+
+export type ConciliationCalculationConditionOperatorOption = {
+  value: ConciliationCalculationConditionOperator;
+  label: string;
+};
+
+export type ConciliationCalculationInlineConditionOperatorOption = {
+  value: ConciliationCalculationInlineConditionOperator;
+  label: string;
+  needsValue: boolean;
 };
 
 type FormulaToken =
@@ -59,6 +75,35 @@ export const conciliationCalculationFieldOptions: ConciliationCalculationFieldOp
 
 const fieldIds = new Set<string>(conciliationCalculationFieldOptions.map((field) => field.id));
 
+export const conciliationCalculationConditionOperatorOptions: ConciliationCalculationConditionOperatorOption[] = [
+  { value: "equals", label: "Igual a" },
+  { value: "notEquals", label: "Diferente de" },
+  { value: "greaterThan", label: "Maior que" },
+  { value: "greaterThanOrEqual", label: "Maior ou igual a" },
+  { value: "lessThan", label: "Menor que" },
+  { value: "lessThanOrEqual", label: "Menor ou igual a" },
+];
+
+const conditionOperators = new Set<ConciliationCalculationConditionOperator>(
+  conciliationCalculationConditionOperatorOptions.map((operator) => operator.value)
+);
+
+export const conciliationCalculationInlineConditionOperatorOptions: ConciliationCalculationInlineConditionOperatorOption[] =
+  [
+    { value: "exists", label: "Existe", needsValue: false },
+    { value: "notExists", label: "Não existe", needsValue: false },
+    { value: "equals", label: "Igual a", needsValue: true },
+    { value: "notEquals", label: "Diferente de", needsValue: true },
+    { value: "greaterThan", label: "Maior que", needsValue: true },
+    { value: "greaterThanOrEqual", label: "Maior ou igual a", needsValue: true },
+    { value: "lessThan", label: "Menor que", needsValue: true },
+    { value: "lessThanOrEqual", label: "Menor ou igual a", needsValue: true },
+  ];
+
+const inlineConditionOperators = new Set<ConciliationCalculationInlineConditionOperator>(
+  conciliationCalculationInlineConditionOperatorOptions.map((operator) => operator.value)
+);
+
 export const sanitizeConciliationCalculationId = (value: string): string => {
   const normalized = value
     .normalize("NFD")
@@ -69,6 +114,119 @@ export const sanitizeConciliationCalculationId = (value: string): string => {
     .slice(0, 48);
 
   return normalized ? `calc_${normalized}` : `calc_${Date.now().toString(36)}`;
+};
+
+const sanitizeConciliationConditionalFormulaId = (value: string, index: number): string => {
+  const normalized = value
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .replace(/[^a-zA-Z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .toLowerCase()
+    .slice(0, 40);
+
+  return normalized ? `cond_${normalized}` : `cond_${index + 1}`;
+};
+
+export const normalizeConciliationCalculationConditionalFormulas = (
+  value: unknown
+): ConciliationCalculationConditionalFormula[] => {
+  if (!Array.isArray(value)) return [];
+
+  const seenIds = new Set<string>();
+
+  return value.reduce<ConciliationCalculationConditionalFormula[]>((formulas, item, index) => {
+    if (!item || typeof item !== "object") return formulas;
+
+    const record = item as Partial<ConciliationCalculationConditionalFormula>;
+    const fieldId = String(record.fieldId || "").trim();
+    const operator = conditionOperators.has(record.operator as ConciliationCalculationConditionOperator)
+      ? (record.operator as ConciliationCalculationConditionOperator)
+      : "equals";
+    const expression = String(record.expression || "").trim();
+    const name = String(record.name || `Condição ${index + 1}`).trim();
+    const id = String(record.id || sanitizeConciliationConditionalFormulaId(name, index)).trim();
+
+    if (!fieldId || !expression || !id || seenIds.has(id)) return formulas;
+
+    seenIds.add(id);
+    formulas.push({
+      id,
+      name,
+      fieldId,
+      operator,
+      value: String(record.value ?? "").trim(),
+      expression,
+    });
+
+    return formulas;
+  }, []);
+};
+
+const sanitizeConciliationInlineConditionalId = (value: string, index: number): string => {
+  const normalized = value
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .replace(/[^a-zA-Z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .toLowerCase()
+    .slice(0, 40);
+
+  return normalized ? `inline_${normalized}` : `inline_${index + 1}`;
+};
+
+export const normalizeConciliationCalculationInlineConditionals = (
+  value: unknown
+): ConciliationCalculationInlineConditional[] => {
+  if (!Array.isArray(value)) return [];
+
+  const seenIds = new Set<string>();
+
+  return value.reduce<ConciliationCalculationInlineConditional[]>((conditionals, item, index) => {
+    if (!item || typeof item !== "object") return conditionals;
+
+    const record = item as Partial<ConciliationCalculationInlineConditional>;
+    const checkFieldId = String(record.checkFieldId || "").trim();
+    const thenFieldId = String(record.thenFieldId || "").trim();
+    const elseFieldId = String(record.elseFieldId || "").trim();
+    const operator = inlineConditionOperators.has(record.operator as ConciliationCalculationInlineConditionOperator)
+      ? (record.operator as ConciliationCalculationInlineConditionOperator)
+      : "exists";
+    const name = String(record.name || `Inline ${index + 1}`).trim();
+    const id = String(record.id || sanitizeConciliationInlineConditionalId(name, index)).trim();
+
+    if (!checkFieldId || !thenFieldId || !elseFieldId || !id || seenIds.has(id)) return conditionals;
+
+    seenIds.add(id);
+    conditionals.push({
+      id,
+      name,
+      checkFieldId,
+      operator,
+      value: String(record.value ?? "").trim(),
+      thenFieldId,
+      elseFieldId,
+    });
+
+    return conditionals;
+  }, []);
+};
+
+export const normalizeConciliationCalculationInteraction = (
+  value: unknown
+): ConciliationCalculationInteraction | null => {
+  if (!value || typeof value !== "object") return null;
+
+  const record = value as Partial<ConciliationCalculationInteraction>;
+  const targetFieldId = String(record.targetFieldId || "").trim();
+  const operator = record.operator === "+" ? "+" : "-";
+
+  if (!targetFieldId || targetFieldId === "none") return null;
+
+  return {
+    targetFieldId,
+    operator,
+  };
 };
 
 export const normalizeConciliationCustomCalculations = (
@@ -87,6 +245,16 @@ export const normalizeConciliationCustomCalculations = (
     const name = String(record.name || "").trim();
     const expression = String(record.expression || "").trim();
     const id = String(record.id || sanitizeConciliationCalculationId(name)).trim();
+    const marketplace = String(record.marketplace || "Todos").trim() || "Todos";
+    const statusNames = Array.isArray(record.statusNames)
+      ? Array.from(
+          new Set(
+            record.statusNames
+              .map((statusName) => String(statusName || "").trim())
+              .filter(Boolean)
+          )
+        )
+      : [];
 
     if (!name || !expression || !id || seenIds.has(id)) return calculations;
 
@@ -96,6 +264,11 @@ export const normalizeConciliationCustomCalculations = (
       name,
       description: String(record.description || "").trim(),
       expression,
+      conditionalFormulas: normalizeConciliationCalculationConditionalFormulas(record.conditionalFormulas),
+      inlineConditionals: normalizeConciliationCalculationInlineConditionals(record.inlineConditionals),
+      interaction: normalizeConciliationCalculationInteraction(record.interaction),
+      marketplace,
+      statusNames,
       isPercentage: Boolean(record.isPercentage),
       enabled: record.enabled !== false,
       updatedAt: updatedAt ?? record.updatedAt ?? null,
@@ -106,29 +279,55 @@ export const normalizeConciliationCustomCalculations = (
   }, []);
 };
 
+const parseConciliationCalculationNumericValue = (value: unknown): number => {
+  if (typeof value === "number") return Number.isFinite(value) ? value : Number.NaN;
+  if (typeof value !== "string") return Number.NaN;
+
+  const trimmed = value.trim();
+  if (!trimmed) return Number.NaN;
+
+  const normalized = trimmed.includes(",") ? trimmed.replace(/\./g, "").replace(",", ".") : trimmed;
+  const parsed = Number(normalized);
+
+  return Number.isFinite(parsed) ? parsed : Number.NaN;
+};
+
 export const buildConciliationCalculationContext = (
   order: ConciliationOrder,
   previousValues: Record<string, number> = {}
-): Record<string, number> => ({
-  grossRevenue: order.grossRevenue,
-  productRevenue: order.productRevenue,
-  customerShippingRevenue: order.customerShippingRevenue,
-  discountAmount: order.discountAmount,
-  otherExpenses: order.otherExpenses,
-  netRevenue: order.netRevenue,
-  productCost: order.productCost,
-  shippingCost: order.shippingCost,
-  commissionFee: order.commissionFee,
-  taxes: order.taxes,
-  contributionMargin: order.contributionMargin,
-  contributionMarginPercentage: order.contributionMarginPercentage,
-  totalQuantity: order.totalQuantity,
-  itemsCount: order.items.length,
-  payoutPaidNetAmount: order.payoutComparison.paidNetAmount,
-  payoutDifferenceAmount: order.payoutComparison.differenceAmount,
-  financialRiskAmount: order.financialDivergence.riskAmount,
-  ...previousValues,
-});
+): Record<string, number> => {
+  const sheetValues = Object.entries(order.sheetFields || {}).reduce<Record<string, number>>((values, [key, value]) => {
+    const numericValue = parseConciliationCalculationNumericValue(value);
+
+    if (Number.isFinite(numericValue)) {
+      values[`sheet:${key}`] = numericValue;
+    }
+
+    return values;
+  }, {});
+
+  return {
+    grossRevenue: order.grossRevenue,
+    productRevenue: order.productRevenue,
+    customerShippingRevenue: order.customerShippingRevenue,
+    discountAmount: order.discountAmount,
+    otherExpenses: order.otherExpenses,
+    netRevenue: order.netRevenue,
+    productCost: order.productCost,
+    shippingCost: order.shippingCost,
+    commissionFee: order.commissionFee,
+    taxes: order.taxes,
+    contributionMargin: order.contributionMargin,
+    contributionMarginPercentage: order.contributionMarginPercentage,
+    totalQuantity: order.totalQuantity,
+    itemsCount: order.items.length,
+    payoutPaidNetAmount: order.payoutComparison.paidNetAmount,
+    payoutDifferenceAmount: order.payoutComparison.differenceAmount,
+    financialRiskAmount: order.financialDivergence.riskAmount,
+    ...sheetValues,
+    ...previousValues,
+  };
+};
 
 const tokenizeExpression = (expression: string): FormulaToken[] => {
   const tokens: FormulaToken[] = [];
@@ -311,6 +510,166 @@ export const validateConciliationCalculationExpression = (
   return result.error;
 };
 
+const parseConditionNumericValue = (value: string): number => {
+  const trimmed = value.trim();
+  if (!trimmed) return Number.NaN;
+
+  const normalized = trimmed.includes(",") ? trimmed.replace(/\./g, "").replace(",", ".") : trimmed;
+  return Number(normalized);
+};
+
+const compareConciliationCondition = (
+  left: number,
+  operator: ConciliationCalculationConditionOperator,
+  rawRight: string
+) => {
+  const right = parseConditionNumericValue(rawRight);
+  if (!Number.isFinite(left) || !Number.isFinite(right)) return false;
+
+  switch (operator) {
+    case "equals":
+      return Math.abs(left - right) < 0.0000001;
+    case "notEquals":
+      return Math.abs(left - right) >= 0.0000001;
+    case "greaterThan":
+      return left > right;
+    case "greaterThanOrEqual":
+      return left >= right;
+    case "lessThan":
+      return left < right;
+    case "lessThanOrEqual":
+      return left <= right;
+    default:
+      return false;
+  }
+};
+
+const compareConciliationInlineCondition = (
+  context: Record<string, number>,
+  conditional: ConciliationCalculationInlineConditional
+) => {
+  const left = context[conditional.checkFieldId];
+  const fieldExists = conditional.checkFieldId in context && Number.isFinite(left);
+
+  if (conditional.operator === "exists") return fieldExists;
+  if (conditional.operator === "notExists") return !fieldExists;
+  if (!fieldExists) return false;
+
+  return compareConciliationCondition(left, conditional.operator, conditional.value);
+};
+
+export const resolveConciliationInlineConditionalValues = (
+  calculation: Pick<ConciliationCustomCalculation, "inlineConditionals">,
+  context: Record<string, number>
+): Record<string, number> =>
+  (calculation.inlineConditionals || []).reduce<Record<string, number>>((values, conditional) => {
+    const pickedThen = compareConciliationInlineCondition(context, conditional);
+    const fieldId = pickedThen ? conditional.thenFieldId : conditional.elseFieldId;
+    const resolvedValue = context[fieldId];
+
+    values[conditional.id] = Number.isFinite(resolvedValue) ? resolvedValue : 0;
+
+    return values;
+  }, {});
+
+export const buildConciliationCalculationEvaluationContext = (
+  calculation: Pick<ConciliationCustomCalculation, "inlineConditionals">,
+  context: Record<string, number>
+): Record<string, number> => ({
+  ...context,
+  ...resolveConciliationInlineConditionalValues(calculation, context),
+});
+
+export const resolveConciliationCalculationExpression = (
+  calculation: Pick<ConciliationCustomCalculation, "expression" | "conditionalFormulas">,
+  context: Record<string, number>
+): {
+  expression: string;
+  conditionalFormula: ConciliationCalculationConditionalFormula | null;
+} => {
+  const conditionalFormula =
+    (calculation.conditionalFormulas || []).find((formula) =>
+      compareConciliationCondition(context[formula.fieldId], formula.operator, formula.value)
+    ) ?? null;
+
+  return {
+    expression: conditionalFormula?.expression || calculation.expression,
+    conditionalFormula,
+  };
+};
+
+export const isConciliationCalculationApplicableToOrder = (
+  calculation: Pick<ConciliationCustomCalculation, "marketplace" | "statusNames">,
+  order: ConciliationOrder
+) => {
+  const marketplace = String(calculation.marketplace || "Todos").trim();
+  const statusNames = Array.isArray(calculation.statusNames) ? calculation.statusNames : [];
+
+  if (marketplace && marketplace !== "Todos" && order.marketplace !== marketplace) {
+    return false;
+  }
+
+  if (statusNames.length > 0 && !statusNames.includes(order.statusName)) {
+    return false;
+  }
+
+  return true;
+};
+
+const mutableOrderCalculationFieldIds = new Set<string>([
+  "grossRevenue",
+  "productRevenue",
+  "customerShippingRevenue",
+  "discountAmount",
+  "otherExpenses",
+  "netRevenue",
+  "productCost",
+  "shippingCost",
+  "commissionFee",
+  "taxes",
+  "contributionMargin",
+  "contributionMarginPercentage",
+  "totalQuantity",
+]);
+
+const applyConciliationCalculationInteraction = ({
+  order,
+  numericResults,
+  values,
+  interaction,
+  calculationValue,
+}: {
+  order: ConciliationOrder;
+  numericResults: Record<string, number>;
+  values: Record<string, ConciliationCalculationValue>;
+  interaction: ConciliationCalculationInteraction | null;
+  calculationValue: number;
+}) => {
+  if (!interaction?.targetFieldId) return;
+
+  const baseValue = numericResults[interaction.targetFieldId];
+  const fallbackValue = buildConciliationCalculationContext(order, numericResults)[interaction.targetFieldId];
+  const resolvedBaseValue = Number.isFinite(baseValue) ? baseValue : fallbackValue;
+  const nextValue =
+    interaction.operator === "+"
+      ? (Number.isFinite(resolvedBaseValue) ? resolvedBaseValue : 0) + calculationValue
+      : (Number.isFinite(resolvedBaseValue) ? resolvedBaseValue : 0) - calculationValue;
+  const safeValue = Number.isFinite(nextValue) ? nextValue : 0;
+
+  numericResults[interaction.targetFieldId] = safeValue;
+
+  if (values[interaction.targetFieldId]) {
+    values[interaction.targetFieldId] = {
+      ...values[interaction.targetFieldId],
+      value: safeValue,
+    };
+  }
+
+  if (mutableOrderCalculationFieldIds.has(interaction.targetFieldId)) {
+    (order as unknown as Record<string, unknown>)[interaction.targetFieldId] = safeValue;
+  }
+};
+
 export const applyConciliationCustomCalculations = (
   orders: ConciliationOrder[],
   calculations: ConciliationCustomCalculation[]
@@ -324,24 +683,39 @@ export const applyConciliationCustomCalculations = (
   }
 
   return orders.map((order) => {
+    const workingOrder: ConciliationOrder = { ...order };
     const numericResults: Record<string, number> = {};
     const calculationValues = enabledCalculations.reduce<Record<string, ConciliationCalculationValue>>(
       (values, calculation) => {
-        const result = evaluateConciliationCalculationExpression(
-          calculation.expression,
-          buildConciliationCalculationContext(order, numericResults)
-        );
+        if (!isConciliationCalculationApplicableToOrder(calculation, workingOrder)) {
+          return values;
+        }
+
+        const baseContext = buildConciliationCalculationContext(workingOrder, numericResults);
+        const context = buildConciliationCalculationEvaluationContext(calculation, baseContext);
+        const resolvedExpression = resolveConciliationCalculationExpression(calculation, context);
+        const result = evaluateConciliationCalculationExpression(resolvedExpression.expression, context);
 
         numericResults[calculation.id] = result.value;
         values[calculation.id] = {
           id: calculation.id,
           name: calculation.name,
           description: calculation.description,
-          expression: calculation.expression,
+          expression: resolvedExpression.expression,
           value: result.value,
           isPercentage: calculation.isPercentage,
           error: result.error,
         };
+
+        if (!result.error) {
+          applyConciliationCalculationInteraction({
+            order: workingOrder,
+            numericResults,
+            values,
+            interaction: calculation.interaction,
+            calculationValue: result.value,
+          });
+        }
 
         return values;
       },
@@ -349,7 +723,7 @@ export const applyConciliationCustomCalculations = (
     );
 
     return {
-      ...order,
+      ...workingOrder,
       calculationValues,
     };
   });

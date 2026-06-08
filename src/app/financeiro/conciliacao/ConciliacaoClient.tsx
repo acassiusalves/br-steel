@@ -3,10 +3,12 @@
 import * as React from "react";
 import {
   AlertTriangle,
+  BadgeCheck,
   Banknote,
   Calendar as CalendarIcon,
   BarChart3,
   Calculator,
+  Check,
   CheckCheck,
   CheckCircle2,
   ChevronDown,
@@ -16,25 +18,31 @@ import {
   ChevronsRight,
   Columns3,
   DollarSign,
+  Filter,
   FileDown,
   FileSearch,
+  FileSpreadsheet,
   FileText,
   Files,
   GripVertical,
   Hash,
   History,
   CircleAlert,
+  ListChecks,
   ArrowDown,
   ArrowUp,
   ArrowUpDown,
   LayoutGrid,
   Loader2,
+  Lock,
   Package,
   Percent,
   Plus,
   ReceiptText,
   RotateCcw,
+  Save,
   Search,
+  Settings2,
   SlidersHorizontal,
   Table2,
   TrendingUp,
@@ -44,9 +52,12 @@ import {
   Upload,
   User,
   Wallet,
+  X,
+  Zap,
 } from "lucide-react";
 import { endOfDay, endOfMonth, format, parseISO, startOfDay, startOfMonth, subDays, subMonths } from "date-fns";
 import { ptBR } from "date-fns/locale";
+import { useRouter } from "next/navigation";
 import type { DateRange } from "react-day-picker";
 import * as XLSX from "xlsx";
 
@@ -66,12 +77,14 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Progress } from "@/components/ui/progress";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Switch } from "@/components/ui/switch";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
@@ -102,16 +115,27 @@ import {
   resolveAutomaticSystemStatus,
   type ConciliationSystemStatus,
 } from "@/lib/conciliation/status";
+import {
+  conciliationSystemStatusColorSwatches,
+  defaultConciliationSystemStatusSettings,
+  getConciliationSystemStatusDefinition,
+  getConciliationSystemStatusDisplayName,
+  normalizeConciliationSystemStatusSettings,
+  serializeConciliationSystemStatusSettings,
+} from "@/lib/conciliation/system-status-settings";
 import { cn } from "@/lib/utils";
 import {
+  applyAccountMappings,
   applyStatusMappings,
   applyMarketplacePayouts,
   applyCustomCalculationsToOrders,
+  applySheetAssociationsToOrders,
   applyFinancialDivergenceRules,
   applyConciliationRecords,
   calculateConciliationSummary,
   fetchConciliationState,
   deleteConciliationMarketplacePayoutImport,
+  saveConciliationAccountMappings,
   saveConciliationRecords,
   saveConciliationCalculationSettings,
   saveConciliationDivergenceSettings,
@@ -120,10 +144,15 @@ import {
   saveConciliationStatusMappings,
   saveConciliationSummarySettings,
   saveConciliationSystemStatus,
+  saveConciliationSystemStatusSettings,
   normalizeConciliationPayoutOrderKey,
   subscribeConciliationOrders,
 } from "@/services/conciliation-service";
+import { fetchSheetAssociations } from "@/services/planilhas-service";
+import type { ConciliationSheetAssociation } from "@/types/conciliation-planilhas";
 import type {
+  ConciliationAccountMappings,
+  ConciliationAccountSettings,
   ConciliationAuditEvent,
   ConciliationCalculationSettings,
   ConciliationCustomCalculation,
@@ -141,2698 +170,537 @@ import type {
   ConciliationSummarySettings,
   ConciliationStatusMappings,
   ConciliationStatusSettings,
+  ConciliationSystemStatusDefinition,
+  ConciliationSystemStatusSettings,
   ConciliationSummary,
 } from "@/types/conciliation";
 
-type SystemStatusFilter = "Todos" | ConciliationSystemStatus;
 
-type AppliedFilters = {
-  date: DateRange | undefined;
-  marketplace: string;
-  account: string;
-  orderStatus: string;
-  systemStatus: SystemStatusFilter;
-  financialAlert: FinancialAlertFilter;
-  adjustmentStatus: AdjustmentStatusFilter;
-  payoutStatus: PayoutStatusFilter;
-  suggestion: SuggestionFilter;
-  reconciliationStatus: ReconciliationStatusFilter;
-  searchTerm: string;
+import {
+  AdjustmentStatusFilter,
+  AppliedFilters,
+  CalculatedColumnsBadge,
+  ColumnMoveFeedback,
+  ColumnVisibilityPopover,
+  ConciliationCalculationColumnId,
+  ConciliationColumnId,
+  ConciliationColumnOption,
+  ConciliationEmptyState,
+  ConciliationLoadingState,
+  ConciliationSuggestionBadge,
+  ConciliationTableLoadingState,
+  FinancialAdjustmentsBadge,
+  FinancialAlertFilter,
+  FinancialDivergenceBadge,
+  InlineSystemStatusSelect,
+  OrderCard,
+  PayoutComparisonBadge,
+  PayoutStatusFilter,
+  PeriodSummaryMetricCard,
+  QueryLoadingNotice,
+  ReconciliationStatusFilter,
+  SortConfig,
+  SortFeedback,
+  SortableHeader,
+  SuggestionFilter,
+  SystemStatusBadge,
+  SystemStatusFilter,
+  SystemStatusSelectValue,
+  TableDensity,
+  ViewMode,
+  adjustmentStatusOptions,
+  allocateOrderAmountToItem,
+  automaticStatusSelectValue,
+  appliedQueryStorageKey,
+  buildCalculationColumnOptions,
+  buildConciliationAuditEvents,
+  buildDefaultColumnOrderWithCalculations,
+  columnOrderStorageKey,
+  compareString,
+  conciliationColumnOptions,
+  defaultColumnOrderIds,
+  defaultVisibleColumnIds,
+  emptySummary,
+  financialAlertOptions,
+  formatActor,
+  formatCalculationValue,
+  formatClock,
+  formatCurrency,
+  formatDate,
+  formatDateTime,
+  formatNumber,
+  formatPercentage,
+  getActiveFinancialAdjustments,
+  getCalculationIdFromColumnId,
+  getColumnAlignment,
+  getOrderCalculationValues,
+  getOrderRowMarkerClassName,
+  getSortValue,
+  getStatusVariant,
+  isCalculationColumnId,
+  isConciliationColumnId,
+  isConciliationSuggestionCandidate,
+  isDateInRange,
+  isStaticConciliationColumnId,
+  knownCalculationColumnsStorageKey,
+  normalizeColumnOrderIds,
+  payoutStatusOptions,
+  reconciliationStatusOptions,
+  referenceCompactButtonClassName,
+  referenceControlClassName,
+  referenceDateButtonClassName,
+  referenceOutlineButtonClassName,
+  referencePanelClassName,
+  referencePrimaryButtonClassName,
+  referenceToolbarButtonClassName,
+  buildSheetColumnOptions,
+  getSheetKeyFromColumnId,
+  rowsPerPageOptions,
+  serializeStatusMappings,
+  suggestionOptions,
+  summaryMetricDefinitionById,
+  viewModeStorageKey,
+  visibleColumnsStorageKey,
+} from "./components/shared";
+import {
+  CalculationSettingsDialog,
+  FinancialDivergenceSettingsDialog,
+  StatusMappingsDialog,
+  SummarySettingsDialog,
+} from "./components/settings-dialogs";
+import {
+  PayoutHistoryDialog,
+  PayoutImportDialog,
+  PayoutImportGroup,
+  buildPayoutImportGroups,
+  getOrderPayoutImportKeys,
+} from "./components/payouts";
+import {
+  OrderDetailsDialog,
+} from "./components/OrderDetailsDialog";
+
+type SummaryMetricTone = "blue" | "red" | "green" | "cyan";
+
+const summaryToneByMetricId: Partial<Record<ConciliationSummaryMetricId, SummaryMetricTone>> = {
+  grossRevenue: "blue",
+  netRevenue: "cyan",
+  productCost: "red",
+  contributionMargin: "green",
+  contributionMarginPercentage: "green",
+  averageTicket: "blue",
+  itemsQuantity: "blue",
+  ordersCount: "blue",
+  reconciledPercentage: "cyan",
+  financialAlertCount: "red",
+  financialRiskAmount: "red",
 };
 
-type ReconciliationStatusFilter = "Todos" | "Pendentes" | "Conciliados";
-type FinancialAlertFilter = "Todos" | "Com alerta" | "Críticos" | "Atenção" | "Sem alerta";
-type AdjustmentStatusFilter = "Todos" | "Com ajustes" | "Sem ajustes";
-type PayoutStatusFilter = "Todos" | "Sem repasse" | "Repasse OK" | "Divergente";
-type SuggestionFilter = "Todos" | "Sugeridos" | "Revisar";
-type SortDirection = "asc" | "desc";
-
-type SortConfig = {
-  columnId: ConciliationColumnId;
-  direction: SortDirection;
+type StoredAppliedQuery = {
+  filters: AppliedFilters;
+  appliedAt: Date | null;
 };
 
-type SortFeedback = {
-  columnId: ConciliationColumnId;
-  columnLabel: string;
-  totalRows: number;
-};
-
-type ColumnMoveFeedback = {
-  columnId: ConciliationColumnId;
-  columnLabel: string;
-  detail: string;
-};
-
-type ViewMode = "table" | "cards";
-type TableDensity = "compact" | "comfortable";
-
-type SummaryMetricDefinition = {
-  id: ConciliationSummaryMetricId;
-  title: string;
-  icon: React.ElementType;
-  value: (summary: ConciliationSummary) => string;
-  helper?: (summary: ConciliationSummary) => string;
-};
-
-const reconciliationStatusOptions: ReconciliationStatusFilter[] = ["Todos", "Pendentes", "Conciliados"];
-const financialAlertOptions: FinancialAlertFilter[] = ["Todos", "Com alerta", "Críticos", "Atenção", "Sem alerta"];
-const adjustmentStatusOptions: AdjustmentStatusFilter[] = ["Todos", "Com ajustes", "Sem ajustes"];
-const payoutStatusOptions: PayoutStatusFilter[] = ["Todos", "Sem repasse", "Repasse OK", "Divergente"];
-const suggestionOptions: SuggestionFilter[] = ["Todos", "Sugeridos", "Revisar"];
-
-const conciliationColumnOptions = [
-  { id: "conciliation", label: "Conciliação", group: "Sistema" },
-  { id: "items", label: "Itens", group: "Pedido" },
-  { id: "order", label: "Pedido", group: "Pedido" },
-  { id: "date", label: "Data", group: "Pedido" },
-  { id: "account", label: "Conta", group: "Pedido" },
-  { id: "marketplace", label: "Marketplace", group: "Marketplace" },
-  { id: "product", label: "Produto", group: "Produto" },
-  { id: "quantity", label: "Qtd", group: "Produto" },
-  { id: "status", label: "Status Pedido", group: "Status" },
-  { id: "grossRevenue", label: "Faturamento Bruto", group: "Financeiro" },
-  { id: "netRevenue", label: "Líquido", group: "Financeiro" },
-  { id: "taxes", label: "Imposto", group: "Financeiro" },
-  { id: "margin", label: "Margem de Contribuição", group: "Financeiro" },
-  { id: "marginPercentage", label: "Margem %", group: "Financeiro" },
-  { id: "adjustments", label: "Ajustes", group: "Financeiro" },
-  { id: "calculatedColumns", label: "Cálculos", group: "Financeiro" },
-  { id: "suggestion", label: "Sugestão", group: "Conciliação" },
-  { id: "financialAlert", label: "Alerta Financeiro", group: "Conciliação" },
-  { id: "payout", label: "Repasse", group: "Conciliação" },
-  { id: "systemStatus", label: "Status Sistema", group: "Status" },
-  { id: "productCost", label: "Custo Produto", group: "Produto" },
-] as const;
-
-type StaticConciliationColumnId = (typeof conciliationColumnOptions)[number]["id"];
-const calculationColumnPrefix = "calculation:" as const;
-type ConciliationCalculationColumnId = `${typeof calculationColumnPrefix}${string}`;
-type ConciliationColumnId = StaticConciliationColumnId | ConciliationCalculationColumnId;
-type ConciliationColumnOption = {
-  id: ConciliationColumnId;
-  label: string;
-  group: string;
-  description?: string;
-  calculationId?: string;
-  isDynamic?: boolean;
-};
-
-const allConciliationColumnIds = conciliationColumnOptions.map(
-  (column) => column.id
-) as StaticConciliationColumnId[];
-const allConciliationColumnIdSet = new Set<StaticConciliationColumnId>(allConciliationColumnIds);
-const defaultColumnOrderIds: ConciliationColumnId[] = [...allConciliationColumnIds];
-const defaultVisibleColumnIds: ConciliationColumnId[] = [
-  "conciliation",
-  "items",
-  "order",
-  "date",
-  "account",
-  "marketplace",
-  "product",
-  "quantity",
-  "status",
-  "grossRevenue",
-  "netRevenue",
-  "taxes",
-  "margin",
-  "marginPercentage",
-  "adjustments",
-  "calculatedColumns",
-];
-const visibleColumnsStorageKey = "brsteel.conciliacao.visibleColumns.v9";
-const columnOrderStorageKey = "brsteel.conciliacao.columnOrder.v2";
-const knownCalculationColumnsStorageKey = "brsteel.conciliacao.knownCalculationColumns.v1";
-const viewModeStorageKey = "brsteel.conciliacao.viewMode.v1";
-const tableDensityStorageKey = "brsteel.conciliacao.tableDensity.v1";
-const referencePanelClassName = "rounded-xl border-slate-200 bg-white shadow-sm transition-all duration-200 hover:shadow-md";
-const referenceOutlineButtonClassName =
-  "h-10 whitespace-nowrap rounded-md border-slate-200 bg-transparent px-4 text-sm font-medium text-slate-950 shadow-sm transition-all duration-200 hover:border-slate-300 hover:bg-slate-100 hover:text-slate-950 active:scale-[0.98]";
-const referenceCompactButtonClassName =
-  "h-8 whitespace-nowrap rounded-md border-slate-200 bg-transparent px-3 text-xs font-medium text-slate-950 shadow-sm transition-all duration-200 hover:border-slate-300 hover:bg-slate-100 hover:text-slate-950 active:scale-[0.98]";
-const referenceToolbarButtonClassName =
-  "h-9 whitespace-nowrap rounded-md border-slate-200 bg-transparent px-3 text-sm font-medium text-slate-950 shadow-sm transition-all duration-200 hover:border-slate-300 hover:bg-slate-100 hover:text-slate-950 active:scale-[0.98]";
-const referenceDateButtonClassName =
-  "h-10 rounded-lg border-zinc-300 bg-white px-4 text-sm font-normal text-slate-950 shadow-none transition-colors hover:border-[#4169E1] hover:bg-white hover:text-slate-950 focus:ring-[#4169E1]";
-const referenceControlClassName =
-  "h-9 rounded-md border-slate-300 bg-white text-sm text-slate-950 shadow-sm focus:ring-[#4169E1]";
-const referencePrimaryButtonClassName =
-  "h-10 min-w-[110px] rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground shadow-sm transition-all duration-200 hover:bg-primary/90 active:scale-[0.98]";
-
-const rowsPerPageOptions = [20, 50, 100];
-const tableDensityOptions: Array<{ id: TableDensity; label: string }> = [
-  { id: "compact", label: "Compacta" },
-  { id: "comfortable", label: "Conforto" },
-];
-const automaticStatusSelectValue = "__auto__";
-const defaultDivergenceRuleScopeValue = "__default__";
-const financialAdjustmentFields: Array<{
-  id: ConciliationFinancialAdjustmentFieldId;
-  label: string;
-  helper: string;
-}> = [
-  { id: "grossRevenue", label: "Faturamento bruto", helper: "Valor total do pedido" },
-  { id: "productRevenue", label: "Produtos", helper: "Subtotal dos produtos" },
-  { id: "customerShippingRevenue", label: "Frete cliente", helper: "Frete cobrado do cliente" },
-  { id: "discountAmount", label: "Desconto", helper: "Desconto aplicado no pedido" },
-  { id: "otherExpenses", label: "Outras despesas", helper: "Despesas adicionais do pedido" },
-  { id: "shippingCost", label: "Frete custo", helper: "Custo logístico" },
-  { id: "commissionFee", label: "Comissão", helper: "Taxa/comissão do marketplace" },
-  { id: "taxes", label: "Impostos", helper: "Tributos considerados no cálculo" },
-  { id: "productCost", label: "Custo produto", helper: "CMV total do pedido" },
-];
-
-const toCalculationColumnId = (calculationId: string): ConciliationCalculationColumnId =>
-  `${calculationColumnPrefix}${calculationId}`;
-
-const getCalculationIdFromColumnId = (columnId: ConciliationColumnId): string | null =>
-  typeof columnId === "string" && columnId.startsWith(calculationColumnPrefix)
-    ? columnId.slice(calculationColumnPrefix.length)
-    : null;
-
-const isCalculationColumnId = (value: unknown): value is ConciliationCalculationColumnId =>
-  typeof value === "string" && value.startsWith(calculationColumnPrefix) && value.length > calculationColumnPrefix.length;
-
-const isStaticConciliationColumnId = (value: unknown): value is StaticConciliationColumnId =>
-  typeof value === "string" && allConciliationColumnIdSet.has(value as StaticConciliationColumnId);
-
-const isConciliationColumnId = (value: unknown): value is ConciliationColumnId =>
-  isStaticConciliationColumnId(value) || isCalculationColumnId(value);
-
-const normalizeColumnOrderIds = (value: unknown): ConciliationColumnId[] => {
-  const normalized: ConciliationColumnId[] = [];
-
-  if (Array.isArray(value)) {
-    value.forEach((columnId) => {
-      if (isConciliationColumnId(columnId) && !normalized.includes(columnId)) {
-        normalized.push(columnId);
-      }
-    });
-  }
-
-  defaultColumnOrderIds.forEach((columnId) => {
-    if (!normalized.includes(columnId)) {
-      normalized.push(columnId);
-    }
-  });
-
-  return normalized;
-};
-
-const getColumnAlignment = (columnId: ConciliationColumnId): "left" | "center" | "right" => {
-  if (isCalculationColumnId(columnId)) return "right";
-  if (columnId === "quantity") return "center";
-  if (
-    columnId === "grossRevenue" ||
-    columnId === "netRevenue" ||
-    columnId === "taxes" ||
-    columnId === "productCost" ||
-    columnId === "margin" ||
-    columnId === "marginPercentage"
-  ) {
-    return "right";
-  }
-
-  return "left";
-};
-
-const buildCalculationColumnOptions = (
-  calculations: ConciliationCustomCalculation[]
-): ConciliationColumnOption[] =>
-  calculations
-    .filter((calculation) => calculation.enabled)
-    .map((calculation) => ({
-      id: toCalculationColumnId(calculation.id),
-      label: calculation.name,
-      group: "Cálculos",
-      description: calculation.description || calculation.expression,
-      calculationId: calculation.id,
-      isDynamic: true,
-    }));
-
-const buildDefaultColumnOrderWithCalculations = (
-  calculationColumnIds: ConciliationCalculationColumnId[]
-): ConciliationColumnId[] => {
-  const next: ConciliationColumnId[] = [...defaultColumnOrderIds];
-  const insertIndex = next.indexOf("calculatedColumns") + 1;
-
-  next.splice(insertIndex > 0 ? insertIndex : next.length, 0, ...calculationColumnIds);
-
-  return next;
-};
-
-type SystemStatusSelectValue = typeof automaticStatusSelectValue | ConciliationSystemStatus;
-type DivergenceRuleField = keyof ConciliationFinancialDivergenceRule;
-type FinancialAdjustmentDraft = Record<ConciliationFinancialAdjustmentFieldId, { value: string; reason: string }>;
-
-const serializeStatusMappings = (mappings: ConciliationStatusMappings) =>
-  JSON.stringify(
-    Object.keys(mappings)
-      .sort((first, second) => first.localeCompare(second, "pt-BR", { numeric: true }))
-      .map((statusName) => [statusName, mappings[statusName]])
-  );
-
-const serializeSummaryMetricIds = (metricIds: ConciliationSummaryMetricId[]) => JSON.stringify(metricIds);
-
-const serializeDivergenceRules = (rules: ConciliationFinancialDivergenceRules) => {
-  const normalizedRules = normalizeConciliationFinancialDivergenceRules(rules);
-
-  return JSON.stringify({
-    defaultRule: normalizedRules.defaultRule,
-    marketplaceRules: Object.keys(normalizedRules.marketplaceRules)
-      .sort(compareString)
-      .map((marketplace) => [marketplace, normalizedRules.marketplaceRules[marketplace]]),
-  });
-};
-
-const compareString = (first: string, second: string) => first.localeCompare(second, "pt-BR", { numeric: true });
-
-const emptySummary: ConciliationSummary = {
-  ordersCount: 0,
-  itemsQuantity: 0,
-  grossRevenue: 0,
-  netRevenue: 0,
-  productCost: 0,
-  contributionMargin: 0,
-  contributionMarginPercentage: 0,
-  averageTicket: 0,
-  reconciledCount: 0,
-  pendingCount: 0,
-  reconciledPercentage: 0,
-  financialAlertCount: 0,
-  financialAttentionCount: 0,
-  financialCriticalCount: 0,
-  financialAlertPercentage: 0,
-  financialRiskAmount: 0,
-  payoutMatchedCount: 0,
-  payoutDivergentCount: 0,
-  payoutMissingCount: 0,
-  payoutNetAmount: 0,
-  payoutDifferenceAmount: 0,
-};
-
-const formatCurrency = (value: number | undefined) =>
-  new Intl.NumberFormat("pt-BR", {
-    style: "currency",
-    currency: "BRL",
-  }).format(value || 0);
-
-const formatCurrencyInput = (value: number | undefined | null) =>
-  value === null || value === undefined
-    ? ""
-    : new Intl.NumberFormat("pt-BR", {
-        maximumFractionDigits: 2,
-        minimumFractionDigits: 2,
-      }).format(value);
-
-const parseCurrencyInput = (value: string): number | null => {
-  const normalized = value
-    .trim()
-    .replace(/\s/g, "")
-    .replace(/[R$]/g, "")
-    .replace(/\./g, "")
-    .replace(",", ".");
-
-  if (!normalized) return null;
-
-  const numberValue = Number(normalized);
-
-  return Number.isFinite(numberValue) ? numberValue : null;
-};
-
-const formatNumber = (value: number | undefined) => new Intl.NumberFormat("pt-BR").format(value || 0);
-
-const formatPercentage = (value: number | undefined) =>
-  `${new Intl.NumberFormat("pt-BR", {
-    maximumFractionDigits: 1,
-    minimumFractionDigits: 1,
-  }).format(value || 0)}%`;
-
-const getItemAllocationShare = (order: ConciliationOrder, item: ConciliationOrderItem) => {
-  const itemsGrossValue = order.items.reduce((total, currentItem) => total + currentItem.grossValue, 0);
-
-  if (itemsGrossValue > 0) {
-    return item.grossValue / itemsGrossValue;
-  }
-
-  if (order.totalQuantity > 0) {
-    return item.quantity / order.totalQuantity;
-  }
-
-  return 0;
-};
-
-const allocateOrderAmountToItem = (
-  order: ConciliationOrder,
-  item: ConciliationOrderItem,
-  amount: number | undefined
-) => (amount || 0) * getItemAllocationShare(order, item);
-
-const formatClock = (value: Date | null) =>
-  value
-    ? new Intl.DateTimeFormat("pt-BR", {
-        hour: "2-digit",
-        minute: "2-digit",
-      }).format(value)
-    : "--:--";
-
-const summaryMetricDefinitions: SummaryMetricDefinition[] = [
-  {
-    id: "grossRevenue",
-    title: "Faturamento Bruto",
-    icon: DollarSign,
-    value: (summary) => formatCurrency(summary.grossRevenue),
-    helper: (summary) => `${formatNumber(summary.ordersCount)} pedido(s)`,
-  },
-  {
-    id: "netRevenue",
-    title: "Líquido Estimado",
-    icon: ReceiptText,
-    value: (summary) => formatCurrency(summary.netRevenue),
-    helper: () => "Após frete, comissão e impostos disponíveis",
-  },
-  {
-    id: "productCost",
-    title: "Custo do Produto",
-    icon: Package,
-    value: (summary) => formatCurrency(summary.productCost),
-    helper: () => "Depende de custo nos itens",
-  },
-  {
-    id: "contributionMargin",
-    title: "Margem",
-    icon: TrendingUp,
-    value: (summary) => formatCurrency(summary.contributionMargin),
-    helper: (summary) => formatPercentage(summary.contributionMarginPercentage),
-  },
-  {
-    id: "contributionMarginPercentage",
-    title: "Margem %",
-    icon: Percent,
-    value: (summary) => formatPercentage(summary.contributionMarginPercentage),
-    helper: (summary) => formatCurrency(summary.contributionMargin),
-  },
-  {
-    id: "ordersCount",
-    title: "Pedidos",
-    icon: Hash,
-    value: (summary) => formatNumber(summary.ordersCount),
-    helper: (summary) => `${formatNumber(summary.pendingCount)} pendente(s)`,
-  },
-  {
-    id: "averageTicket",
-    title: "Ticket Médio",
-    icon: BarChart3,
-    value: (summary) => formatCurrency(summary.averageTicket),
-    helper: (summary) => `${formatNumber(summary.ordersCount)} pedido(s)`,
-  },
-  {
-    id: "itemsQuantity",
-    title: "Quantidade de Itens",
-    icon: Package,
-    value: (summary) => formatNumber(summary.itemsQuantity),
-    helper: (summary) => `${formatNumber(summary.ordersCount)} pedido(s)`,
-  },
-  {
-    id: "reconciledCount",
-    title: "Conciliados",
-    icon: CheckCircle2,
-    value: (summary) => formatNumber(summary.reconciledCount),
-    helper: (summary) => formatPercentage(summary.reconciledPercentage),
-  },
-  {
-    id: "pendingCount",
-    title: "Pendentes",
-    icon: FileSearch,
-    value: (summary) => formatNumber(summary.pendingCount),
-    helper: (summary) => `${formatNumber(summary.reconciledCount)} conciliado(s)`,
-  },
-  {
-    id: "reconciledPercentage",
-    title: "Conciliação",
-    icon: CheckCircle2,
-    value: (summary) => formatPercentage(summary.reconciledPercentage),
-    helper: (summary) => `${formatNumber(summary.reconciledCount)} de ${formatNumber(summary.ordersCount)} pedido(s)`,
-  },
-  {
-    id: "financialAlertCount",
-    title: "Alertas Financeiros",
-    icon: AlertTriangle,
-    value: (summary) => formatNumber(summary.financialAlertCount),
-    helper: (summary) => formatPercentage(summary.financialAlertPercentage),
-  },
-  {
-    id: "financialCriticalCount",
-    title: "Críticos",
-    icon: CircleAlert,
-    value: (summary) => formatNumber(summary.financialCriticalCount),
-    helper: (summary) => `${formatNumber(summary.financialAttentionCount)} em atenção`,
-  },
-  {
-    id: "financialRiskAmount",
-    title: "Risco Estimado",
-    icon: DollarSign,
-    value: (summary) => formatCurrency(summary.financialRiskAmount),
-    helper: (summary) => `${formatNumber(summary.financialAlertCount)} pedido(s) com alerta`,
-  },
-];
-
-const summaryMetricDefinitionById = new Map(summaryMetricDefinitions.map((definition) => [definition.id, definition]));
-
-const formatDate = (dateString: string | undefined) => {
-  if (!dateString || dateString.startsWith("0000")) return "N/A";
-
-  try {
-    return new Intl.DateTimeFormat("pt-BR").format(new Date(`${dateString}T00:00:00`));
-  } catch {
-    return dateString;
-  }
-};
-
-const formatDateTime = (dateString: string | null | undefined) => {
-  if (!dateString) return "N/A";
-
-  try {
-    return new Intl.DateTimeFormat("pt-BR", {
-      dateStyle: "short",
-      timeStyle: "short",
-    }).format(new Date(dateString));
-  } catch {
-    return dateString;
-  }
-};
-
-const formatActor = (actor: ConciliationRecord["updatedBy"]) => {
-  if (!actor) return "N/A";
-
-  return actor.name || actor.email || "Usuário";
-};
-
-const isDateInRange = (dateString: string, dateRange: DateRange | undefined) => {
-  if (!dateRange?.from || !dateRange?.to) return true;
-
-  try {
-    const orderDate = parseISO(dateString);
-
-    return orderDate >= startOfDay(dateRange.from) && orderDate <= endOfDay(dateRange.to);
-  } catch {
-    return false;
-  }
-};
-
-const getPayoutComparisonScore = (status: ConciliationPayoutComparisonStatus) => {
-  if (status === "divergent") return 2;
-  if (status === "matched") return 1;
-
-  return 0;
-};
-
-const isConciliationSuggestionCandidate = (order: ConciliationOrder) =>
-  !order.isReconciled &&
-  order.systemStatus === "Entregue" &&
-  order.financialDivergence.severity === "ok" &&
-  order.payoutComparison.status === "matched";
-
-const getOrderRowMarkerClassName = (order: ConciliationOrder) => {
-  if (order.financialDivergence.severity === "critical") {
-    return "shadow-[inset_3px_0_0_#dc2626]";
-  }
-
-  if (order.financialDivergence.severity === "attention") {
-    return "shadow-[inset_3px_0_0_#d97706]";
-  }
-
-  if (isConciliationSuggestionCandidate(order)) {
-    return "shadow-[inset_3px_0_0_#059669]";
-  }
-
-  if (order.isReconciled) {
-    return "shadow-[inset_3px_0_0_#0284c7]";
-  }
-
-  return "shadow-[inset_3px_0_0_#cbd5e1]";
-};
-
-const getActiveFinancialAdjustments = (order: ConciliationOrder): ConciliationFinancialAdjustment[] =>
-  financialAdjustmentFields
-    .map((field) => order.financialAdjustments[field.id])
-    .filter((adjustment): adjustment is ConciliationFinancialAdjustment => Boolean(adjustment?.active));
-
-const getFinancialAdjustmentSummary = (order: ConciliationOrder): string => {
-  const activeAdjustments = getActiveFinancialAdjustments(order);
-
-  if (activeAdjustments.length === 0) return "Sem ajustes manuais";
-
-  return activeAdjustments
-    .map((adjustment) => {
-      const reason = adjustment.reason ? ` | ${adjustment.reason}` : "";
-
-      return `${adjustment.label}: ${formatCurrency(adjustment.originalValue)} -> ${formatCurrency(adjustment.adjustedValue ?? 0)}${reason}`;
-    })
-    .join("\n");
-};
-
-const FinancialAdjustmentsBadge = ({
-  order,
-  hideEmpty = false,
-}: {
-  order: ConciliationOrder;
-  hideEmpty?: boolean;
-}) => {
-  const activeAdjustments = getActiveFinancialAdjustments(order);
-
-  if (activeAdjustments.length === 0) {
-    if (hideEmpty) return null;
-
-    return (
-      <Badge variant="outline" className="gap-1 whitespace-nowrap border-slate-200 bg-slate-50 text-slate-600">
-        <Banknote className="h-3 w-3" />
-        Sem ajustes
-      </Badge>
-    );
-  }
-
-  return (
-    <Badge
-      variant="outline"
-      className="gap-1 whitespace-nowrap border-blue-200 bg-blue-50 text-blue-800"
-      title={getFinancialAdjustmentSummary(order)}
-    >
-      <Banknote className="h-3 w-3" />
-      {activeAdjustments.length === 1 ? activeAdjustments[0].label : `${formatNumber(activeAdjustments.length)} ajustes`}
-    </Badge>
-  );
-};
-
-const getOrderCalculationValues = (order: ConciliationOrder) => Object.values(order.calculationValues || {});
-
-const formatCalculationValue = (value: number, isPercentage: boolean) =>
-  isPercentage ? formatPercentage(value) : formatCurrency(value);
-
-const getCalculationSummary = (order: ConciliationOrder): string => {
-  const values = getOrderCalculationValues(order);
-
-  if (values.length === 0) return "Sem colunas calculadas";
-
-  return values
-    .map((value) => {
-      const status = value.error ? ` | erro: ${value.error}` : "";
-
-      return `${value.name}: ${formatCalculationValue(value.value, value.isPercentage)}${status}`;
-    })
-    .join("\n");
-};
-
-const CalculatedColumnsBadge = ({ order }: { order: ConciliationOrder }) => {
-  const values = getOrderCalculationValues(order);
-  const errorCount = values.filter((value) => value.error).length;
-
-  if (values.length === 0) {
-    return (
-      <Badge variant="outline" className="gap-1 whitespace-nowrap border-slate-200 bg-slate-50 text-slate-600">
-        <Calculator className="h-3 w-3" />
-        Sem cálculos
-      </Badge>
-    );
-  }
-
-  return (
-    <Badge
-      variant={errorCount > 0 ? "destructive" : "outline"}
-      className={cn(
-        "gap-1 whitespace-nowrap",
-        errorCount === 0 && "border-violet-200 bg-violet-50 text-violet-800"
-      )}
-      title={getCalculationSummary(order)}
-    >
-      <Calculator className="h-3 w-3" />
-      {errorCount > 0 ? `${formatNumber(errorCount)} erro(s)` : `${formatNumber(values.length)} cálculo(s)`}
-    </Badge>
-  );
-};
-
-const getSortValue = (order: ConciliationOrder, columnId: ConciliationColumnId): string | number => {
-  const calculationId = getCalculationIdFromColumnId(columnId);
-
-  if (calculationId) {
-    const calculation = order.calculationValues?.[calculationId];
-
-    return calculation && !calculation.error ? calculation.value : 0;
-  }
-
-  switch (columnId) {
-    case "conciliation":
-      return order.isReconciled ? 1 : 0;
-    case "suggestion":
-      return isConciliationSuggestionCandidate(order) ? 1 : 0;
-    case "financialAlert":
-      return getConciliationFinancialDivergenceScore(order.financialDivergence.severity);
-    case "adjustments":
-      return getActiveFinancialAdjustments(order).length;
-    case "calculatedColumns":
-      return getOrderCalculationValues(order).reduce((total, value) => total + (value.error ? 0 : value.value), 0);
-    case "payout":
-      return getPayoutComparisonScore(order.payoutComparison.status);
-    case "items":
-      return order.items.length;
-    case "order":
-      return order.number || order.orderId;
-    case "date":
-      return order.date ? new Date(`${order.date}T00:00:00`).getTime() : 0;
-    case "account":
-      return order.accountName;
-    case "marketplace":
-      return order.marketplace;
-    case "product":
-      return order.items[0]?.description || "";
-    case "quantity":
-      return order.totalQuantity;
-    case "status":
-      return order.statusName;
-    case "systemStatus":
-      return order.systemStatus;
-    case "grossRevenue":
-      return order.grossRevenue;
-    case "netRevenue":
-      return order.netRevenue;
-    case "taxes":
-      return order.taxes;
-    case "productCost":
-      return order.productCost;
-    case "margin":
-      return order.contributionMargin;
-    case "marginPercentage":
-      return order.contributionMarginPercentage;
-  }
-
-  return "";
-};
-
-const getStatusVariant = (statusName: string): "default" | "secondary" | "destructive" | "outline" => {
-  const normalized = statusName
-    .normalize("NFD")
-    .replace(/\p{Diacritic}/gu, "")
-    .toLowerCase();
-
-  if (normalized.includes("cancelado")) return "destructive";
-  if (normalized.includes("entregue") || normalized.includes("concluido") || normalized.includes("atendido")) return "default";
-  if (normalized.includes("enviado") || normalized.includes("transito")) return "outline";
-
-  return "secondary";
-};
-
-const getSystemStatusVariant = (
-  status: ConciliationSystemStatus
-): "default" | "secondary" | "destructive" | "outline" => {
-  if (status === "Cancelado" || status === "Devolução" || status === "Devolução / Reembolso Parcial") {
-    return "destructive";
-  }
-  if (status === "Entregue") return "default";
-  if (status === "Em Trânsito" || status === "Extravio") return "outline";
-
-  return "secondary";
-};
-
-const getSystemStatusControlClassName = (status: ConciliationSystemStatus) => {
-  if (status === "Cancelado" || status === "Devolução" || status === "Devolução / Reembolso Parcial") {
-    return "border-red-200 bg-red-50 text-red-800";
-  }
-
-  if (status === "Entregue") {
-    return "border-emerald-200 bg-emerald-50 text-emerald-800";
-  }
-
-  if (status === "Em Trânsito" || status === "Extravio") {
-    return "border-blue-200 bg-blue-50 text-blue-800";
-  }
-
-  return "border-slate-200 bg-slate-50 text-slate-700";
-};
-
-const InlineSystemStatusSelect = ({
-  order,
-  isSaving,
-  onSave,
-}: {
-  order: ConciliationOrder;
-  isSaving: boolean;
-  onSave: (order: ConciliationOrder, manualSystemStatus: ConciliationSystemStatus | null) => void;
-}) => (
-  <div
-    className="min-w-[180px]"
-    data-stop-row-click="true"
-    onClick={(event) => event.stopPropagation()}
-  >
-    <Select
-      value={order.manualSystemStatus ?? automaticStatusSelectValue}
-      disabled={isSaving}
-      onValueChange={(value) =>
-        onSave(order, value === automaticStatusSelectValue ? null : (value as ConciliationSystemStatus))
-      }
-    >
-      <SelectTrigger
-        className={cn(
-          "h-8 min-w-[180px] rounded-md border px-2 text-xs font-medium shadow-none focus:ring-[#4169E1]",
-          getSystemStatusControlClassName(order.systemStatus)
-        )}
-        title={
-          order.manualSystemStatus
-            ? `Status manual. Automático: ${order.automaticSystemStatus}`
-            : `Status automático: ${order.automaticSystemStatus}`
-        }
-      >
-        <span className="flex min-w-0 items-center gap-1.5">
-          <span
-            className={cn(
-              "h-1.5 w-1.5 shrink-0 rounded-full",
-              order.manualSystemStatus ? "bg-slate-950" : "bg-slate-400"
-            )}
-          />
-          <SelectValue />
-        </span>
-      </SelectTrigger>
-      <SelectContent>
-        <SelectItem value={automaticStatusSelectValue}>
-          Automático ({order.automaticSystemStatus})
-        </SelectItem>
-        {conciliationSystemStatusOptions.map((statusOption) => (
-          <SelectItem key={statusOption} value={statusOption}>
-            {statusOption}
-          </SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
-  </div>
-);
-
-const getFinancialDivergenceBadgeClass = (severity: ConciliationFinancialDivergenceSeverity) => {
-  if (severity === "critical") return "border-transparent";
-  if (severity === "attention") return "border-amber-200 bg-amber-50 text-amber-800";
-
-  return "border-emerald-200 bg-emerald-50 text-emerald-800";
-};
-
-const getFinancialDivergenceVariant = (
-  severity: ConciliationFinancialDivergenceSeverity
-): "default" | "secondary" | "destructive" | "outline" => {
-  if (severity === "critical") return "destructive";
-
-  return "outline";
-};
-
-const FinancialDivergenceBadge = ({
-  divergence,
-  compact = false,
-}: {
-  divergence: ConciliationFinancialDivergence;
-  compact?: boolean;
-}) => {
-  const Icon = divergence.severity === "ok" ? CheckCircle2 : AlertTriangle;
-  const alertCount = divergence.criticalCount + divergence.attentionCount;
-  const label = compact && divergence.severity !== "ok" ? `${divergence.label} (${alertCount})` : divergence.label;
-
-  return (
-    <Badge
-      variant={getFinancialDivergenceVariant(divergence.severity)}
-      className={cn("gap-1 whitespace-nowrap", getFinancialDivergenceBadgeClass(divergence.severity))}
-    >
-      <Icon className="h-3 w-3" />
-      {label}
-    </Badge>
-  );
-};
-
-const getPayoutComparisonBadgeClass = (status: ConciliationPayoutComparisonStatus) => {
-  if (status === "matched") return "border-emerald-200 bg-emerald-50 text-emerald-800";
-  if (status === "divergent") return "border-transparent";
-
-  return "border-slate-200 bg-slate-50 text-slate-700";
-};
-
-const getPayoutComparisonVariant = (
-  status: ConciliationPayoutComparisonStatus
-): "default" | "secondary" | "destructive" | "outline" => {
-  if (status === "divergent") return "destructive";
-
-  return "outline";
-};
-
-const PayoutComparisonBadge = ({
-  order,
-  compact = false,
-}: {
-  order: ConciliationOrder;
-  compact?: boolean;
-}) => {
-  const comparison = order.payoutComparison;
-  const Icon = comparison.status === "matched" ? CheckCircle2 : comparison.status === "divergent" ? AlertTriangle : Wallet;
-  const label =
-    compact && comparison.status === "divergent"
-      ? `${comparison.label} ${formatCurrency(comparison.differenceAmount)}`
-      : comparison.label;
-
-  return (
-    <Badge
-      variant={getPayoutComparisonVariant(comparison.status)}
-      className={cn("gap-1 whitespace-nowrap", getPayoutComparisonBadgeClass(comparison.status))}
-    >
-      <Icon className="h-3 w-3" />
-      {label}
-    </Badge>
-  );
-};
-
-const ConciliationSuggestionBadge = ({ order }: { order: ConciliationOrder }) => {
-  if (isConciliationSuggestionCandidate(order)) {
-    return (
-      <Badge className="gap-1 whitespace-nowrap">
-        <CheckCircle2 className="h-3 w-3" />
-        Pronto para conciliar
-      </Badge>
-    );
-  }
-
-  return (
-    <Badge variant="outline" className="whitespace-nowrap">
-      Revisar
-    </Badge>
-  );
-};
-
-const FinancialDivergenceReasons = ({ divergence }: { divergence: ConciliationFinancialDivergence }) => {
-  if (divergence.reasons.length === 0) {
-    return (
-      <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">
-        Nenhuma divergência financeira encontrada pelas regras atuais.
-      </div>
-    );
-  }
-
-  return (
-    <div className="space-y-2">
-      {divergence.reasons.map((reason) => (
-        <div
-          key={reason.id}
-          className={cn(
-            "rounded-lg border p-3",
-            reason.severity === "critical" ? "border-red-200 bg-red-50" : "border-amber-200 bg-amber-50"
-          )}
-        >
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-            <div>
-              <p className="text-sm font-medium">{reason.title}</p>
-              <p className="mt-1 text-xs text-muted-foreground">{reason.description}</p>
-            </div>
-            <div className="flex shrink-0 items-center gap-2">
-              <Badge
-                variant={reason.severity === "critical" ? "destructive" : "outline"}
-                className={cn(
-                  reason.severity === "attention" && "border-amber-200 bg-amber-100 text-amber-800"
-                )}
-              >
-                {reason.severity === "critical" ? "Crítico" : "Atenção"}
-              </Badge>
-              {reason.amount !== null ? (
-                <span className="text-sm font-semibold">{formatCurrency(reason.amount)}</span>
-              ) : null}
-            </div>
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-};
-
-const SummaryCard = ({
+const CompactFilterGroup = ({
   title,
-  value,
-  icon: Icon,
-  isLoading,
-  helper,
-}: {
-  title: string;
-  value: string;
-  icon: React.ElementType;
-  isLoading: boolean;
-  helper?: string;
-}) => (
-  <Card className={referencePanelClassName}>
-    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-      <CardTitle className="text-sm font-medium">{title}</CardTitle>
-      <Icon className="h-4 w-4 text-muted-foreground" />
-    </CardHeader>
-    <CardContent>
-      {isLoading ? (
-        <div className="space-y-2">
-          <Skeleton className="h-7 w-28" />
-          <Skeleton className="h-3 w-36" />
-        </div>
-      ) : (
-        <>
-          <div className="text-2xl font-bold tracking-tight">{value}</div>
-          {helper ? <p className="mt-1 text-xs text-muted-foreground">{helper}</p> : null}
-        </>
-      )}
-    </CardContent>
-  </Card>
-);
-
-const PeriodSummaryMetricCard = ({
-  title,
-  value,
-  tone,
-  isLoading,
-}: {
-  title: string;
-  value: string;
-  tone: "blue" | "red" | "green" | "cyan";
-  isLoading: boolean;
-}) => {
-  const toneClassName = {
-    blue: "border-blue-600/20",
-    red: "border-red-600/20",
-    green: "border-green-600/20",
-    cyan: "border-cyan-600/20",
-  }[tone];
-
-  return (
-    <div className={cn("min-h-[150px] rounded-xl border bg-white p-6 shadow-sm transition-shadow hover:shadow-md", toneClassName)}>
-      <p className="mb-1 text-sm text-slate-400">{title}</p>
-      {isLoading ? <Skeleton className="mt-4 h-8 w-32" /> : <p className="text-2xl font-semibold tracking-tight text-slate-950">{value}</p>}
-    </div>
-  );
-};
-
-const QueryLoadingNotice = () => (
-  <div className="flex flex-col gap-3 rounded-2xl border border-blue-100 bg-blue-50/70 p-4 text-sm shadow-sm sm:flex-row sm:items-center">
-    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white text-blue-600 shadow-sm">
-      <Loader2 className="h-5 w-5 animate-spin" />
-    </div>
-    <div>
-      <p className="font-semibold text-slate-950">Carregando vendas</p>
-      <p className="mt-0.5 text-xs text-slate-500">Preparando consulta...</p>
-    </div>
-  </div>
-);
-
-const ConciliationLoadingState = () => (
-  <div className="flex min-h-40 flex-col items-center justify-center rounded-lg border border-dashed border-slate-200 bg-slate-50/80 p-8 text-center">
-    <Loader2 className="h-6 w-6 animate-spin text-blue-600" />
-    <p className="mt-3 text-sm font-semibold text-slate-950">Carregando conciliação...</p>
-    <p className="mt-1 max-w-sm text-xs text-slate-500">
-      Conferindo pedidos, marcações e repasses do período.
-    </p>
-  </div>
-);
-
-const ConciliationTableLoadingState = ({
-  columnCount,
-  density,
-}: {
-  columnCount: number;
-  density: TableDensity;
-}) => {
-  const rowCount = density === "compact" ? 8 : 6;
-  const rowHeightClassName = density === "compact" ? "h-4" : "h-5";
-
-  return (
-    <div className="space-y-3 rounded-lg border border-slate-200 bg-white p-4">
-      <div className="flex items-center gap-3 border-b border-slate-100 pb-3">
-        <Loader2 className="h-4 w-4 animate-spin text-blue-600" />
-        <div>
-          <p className="text-sm font-semibold text-slate-950">Montando tabela de conferência</p>
-          <p className="text-xs text-slate-500">Carregando pedidos, colunas, marcações e totais financeiros.</p>
-        </div>
-      </div>
-      <div className="space-y-2">
-        {Array.from({ length: rowCount }).map((_, rowIndex) => (
-          <div key={rowIndex} className="grid items-center gap-3" style={{ gridTemplateColumns: `40px repeat(${Math.min(columnCount, 8)}, minmax(80px, 1fr)) 96px` }}>
-            <Skeleton className={cn(rowHeightClassName, "w-4 rounded")} />
-            {Array.from({ length: Math.min(columnCount, 8) }).map((__, columnIndex) => (
-              <Skeleton
-                key={`${rowIndex}:${columnIndex}`}
-                className={cn(
-                  rowHeightClassName,
-                  columnIndex === 0 ? "w-24" : columnIndex % 3 === 0 ? "w-32" : "w-full"
-                )}
-              />
-            ))}
-            <Skeleton className={cn(rowHeightClassName, "w-20 justify-self-end")} />
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-};
-
-const ConciliationEmptyState = ({
-  hasAppliedFilters,
-  searchTerm,
-}: {
-  hasAppliedFilters: boolean;
-  searchTerm: string;
-}) => {
-  const normalizedSearch = searchTerm.trim();
-  const Icon = hasAppliedFilters ? ReceiptText : FileSearch;
-  const title = !hasAppliedFilters
-    ? "Aplique filtros para consultar vendas"
-    : normalizedSearch
-      ? `Nenhum resultado para "${normalizedSearch}"`
-      : "Nenhuma venda encontrada";
-  const description = !hasAppliedFilters
-    ? "Escolha o período e clique em Aplicar filtros para montar a grade de conciliação."
-    : normalizedSearch
-      ? "A busca global não encontrou pedidos com esse termo. Tente número do pedido, SKU, cliente, marketplace ou status."
-      : "Não há pedidos para os filtros aplicados. Ajuste período, marketplace, conta ou status e aplique novamente.";
-
-  return (
-    <div className="flex min-h-40 flex-col items-center justify-center rounded-lg border border-dashed border-slate-200 bg-slate-50/80 p-8 text-center">
-      <div className="flex h-10 w-10 items-center justify-center rounded-full bg-white text-slate-500 shadow-sm">
-        <Icon className="h-5 w-5" />
-      </div>
-      <p className="mt-3 text-sm font-semibold text-slate-950">{title}</p>
-      <p className="mt-1 max-w-md text-xs text-slate-500">{description}</p>
-    </div>
-  );
-};
-
-const FinancialAlertsSummary = ({
-  summary,
-  isLoading,
-}: {
-  summary: ConciliationSummary;
-  isLoading: boolean;
-}) => {
-  const items = [
-    {
-      label: "Pedidos com alerta",
-      value: formatNumber(summary.financialAlertCount),
-      helper: formatPercentage(summary.financialAlertPercentage),
-    },
-    {
-      label: "Críticos",
-      value: formatNumber(summary.financialCriticalCount),
-      helper: "Prioridade de conferência",
-    },
-    {
-      label: "Em atenção",
-      value: formatNumber(summary.financialAttentionCount),
-      helper: "Revisão recomendada",
-    },
-    {
-      label: "Risco estimado",
-      value: formatCurrency(summary.financialRiskAmount),
-      helper: "Soma dos impactos mapeados",
-    },
-  ];
-
-  return (
-    <div className="grid gap-3 rounded-lg border bg-muted/20 p-3 md:grid-cols-2 xl:grid-cols-4">
-      {items.map((item) => (
-        <div key={item.label} className="min-w-0">
-          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{item.label}</p>
-          {isLoading ? (
-            <div className="mt-2 space-y-2">
-              <Skeleton className="h-6 w-24" />
-              <Skeleton className="h-3 w-32" />
-            </div>
-          ) : (
-            <>
-              <p className="mt-1 text-xl font-semibold tracking-tight">{item.value}</p>
-              <p className="mt-0.5 text-xs text-muted-foreground">{item.helper}</p>
-            </>
-          )}
-        </div>
-      ))}
-    </div>
-  );
-};
-
-const PayoutSummary = ({
-  summary,
-  isLoading,
-}: {
-  summary: ConciliationSummary;
-  isLoading: boolean;
-}) => {
-  const items = [
-    {
-      label: "Repasse OK",
-      value: formatNumber(summary.payoutMatchedCount),
-      helper: "Valor líquido dentro da tolerância",
-    },
-    {
-      label: "Divergentes",
-      value: formatNumber(summary.payoutDivergentCount),
-      helper: "Diferença acima da tolerância",
-    },
-    {
-      label: "Sem repasse",
-      value: formatNumber(summary.payoutMissingCount),
-      helper: "Pedido ainda sem linha importada",
-    },
-    {
-      label: "Líquido repassado",
-      value: formatCurrency(summary.payoutNetAmount),
-      helper: `Diferença absoluta ${formatCurrency(summary.payoutDifferenceAmount)}`,
-    },
-  ];
-
-  return (
-    <div className="grid gap-3 rounded-lg border bg-muted/20 p-3 md:grid-cols-2 xl:grid-cols-4">
-      {items.map((item) => (
-        <div key={item.label} className="min-w-0">
-          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{item.label}</p>
-          {isLoading ? (
-            <div className="mt-2 space-y-2">
-              <Skeleton className="h-6 w-24" />
-              <Skeleton className="h-3 w-32" />
-            </div>
-          ) : (
-            <>
-              <p className="mt-1 text-xl font-semibold tracking-tight">{item.value}</p>
-              <p className="mt-0.5 text-xs text-muted-foreground">{item.helper}</p>
-            </>
-          )}
-        </div>
-      ))}
-    </div>
-  );
-};
-
-const SuggestedReconciliationSummary = ({
-  count,
-  netAmount,
-  isLoading,
-  isSaving,
-  onReconcile,
-}: {
-  count: number;
-  netAmount: number;
-  isLoading: boolean;
-  isSaving: boolean;
-  onReconcile: () => void;
-}) => {
-  const exceedsBatchLimit = count > 450;
-
-  return (
-    <div className="flex flex-col gap-3 rounded-lg border bg-emerald-50/60 p-3 lg:flex-row lg:items-center lg:justify-between">
-      <div className="grid gap-3 sm:grid-cols-3">
-        <div className="min-w-0">
-          <p className="text-xs font-medium uppercase tracking-wide text-emerald-800">Prontos para conciliar</p>
-          {isLoading ? (
-            <Skeleton className="mt-2 h-6 w-20" />
-          ) : (
-            <p className="mt-1 text-xl font-semibold tracking-tight">{formatNumber(count)}</p>
-          )}
-        </div>
-        <div className="min-w-0">
-          <p className="text-xs font-medium uppercase tracking-wide text-emerald-800">Líquido no escopo</p>
-          {isLoading ? (
-            <Skeleton className="mt-2 h-6 w-28" />
-          ) : (
-            <p className="mt-1 text-xl font-semibold tracking-tight">{formatCurrency(netAmount)}</p>
-          )}
-        </div>
-        <div className="min-w-0">
-          <p className="text-xs font-medium uppercase tracking-wide text-emerald-800">Regra</p>
-          <p className="mt-1 text-sm text-emerald-900">Entregue, sem alerta e repasse OK</p>
-        </div>
-      </div>
-
-      <Button
-        type="button"
-        className="w-full lg:w-auto"
-        onClick={onReconcile}
-        disabled={isLoading || isSaving || count === 0 || exceedsBatchLimit}
-      >
-        {isSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <CheckCheck className="mr-2 h-4 w-4" />}
-        Conciliar sugeridos
-      </Button>
-    </div>
-  );
-};
-
-const ColumnVisibilityPopover = ({
-  columnOptions,
-  visibleColumnIds,
-  visibleCount,
-  onToggleColumn,
-  onShowAll,
-  onHideAll,
-  onReset,
-  isLoading,
-}: {
-  columnOptions: ConciliationColumnOption[];
-  visibleColumnIds: Set<ConciliationColumnId>;
-  visibleCount: number;
-  onToggleColumn: (columnId: ConciliationColumnId, checked: boolean) => void;
-  onShowAll: () => void;
-  onHideAll: () => void;
-  onReset: () => void;
-  isLoading: boolean;
-}) => {
-  const [search, setSearch] = React.useState("");
-  const groupEntries = React.useMemo<Array<[string, ConciliationColumnOption[]]>>(() => {
-    const needle = search.trim().toLocaleLowerCase("pt-BR");
-    const filteredColumns = needle
-      ? columnOptions.filter((column) => column.label.toLocaleLowerCase("pt-BR").includes(needle))
-      : columnOptions;
-    const groups: Record<string, ConciliationColumnOption[]> = {};
-
-    filteredColumns.forEach((column) => {
-      const groupName = column.group || "Geral";
-      groups[groupName] = groups[groupName] || [];
-      groups[groupName].push(column);
-    });
-
-    return Object.entries(groups);
-  }, [columnOptions, search]);
-
-  return (
-    <Popover>
-      <PopoverTrigger asChild>
-        <Button variant="outline" size="sm" disabled={isLoading} className={referenceToolbarButtonClassName}>
-          {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Columns3 className="mr-2 h-4 w-4" />}
-          Exibir Colunas
-          <span className="text-xs text-slate-500">
-            ({visibleCount}/{columnOptions.length})
-          </span>
-        </Button>
-      </PopoverTrigger>
-      <PopoverContent className="w-72 p-0" align="end">
-        <div className="border-b border-slate-200 p-2">
-          <div className="relative">
-            <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-slate-400" />
-            <Input
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-              className="h-9 pl-9"
-              placeholder="Buscar coluna..."
-            />
-          </div>
-          <div className="mt-2 flex gap-1">
-            <Button type="button" variant="outline" size="sm" className="flex-1 text-xs" onClick={onShowAll}>
-              Mostrar todas
-            </Button>
-            <Button type="button" variant="outline" size="sm" className="flex-1 text-xs" onClick={onHideAll}>
-              Ocultar todas
-            </Button>
-          </div>
-          <div className="mt-2">
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="w-full gap-2 text-xs"
-              onClick={onReset}
-              title="Reverter para a configuração padrão das colunas"
-            >
-              <RotateCcw className="h-3 w-3" />
-              Resetar colunas
-            </Button>
-          </div>
-          <p className="mt-2 text-[11px] leading-tight text-slate-500">
-            Dica: mantenha apenas as colunas necessárias para conferir pedidos com mais agilidade.
-          </p>
-        </div>
-
-        <ScrollArea className="h-72">
-          <div className="p-2">
-            {groupEntries.length === 0 ? (
-              <p className="px-2 py-6 text-center text-xs text-slate-500">Nenhuma coluna encontrada.</p>
-            ) : (
-              groupEntries.map(([groupName, columns]) => (
-                <div key={groupName} className="mb-2">
-                  <p className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
-                    {groupName}
-                  </p>
-                  <div className="flex flex-col">
-                    {columns.map((column) => {
-                      const checked = visibleColumnIds.has(column.id);
-
-                      return (
-                        <div
-                          key={column.id}
-                          role="button"
-                          tabIndex={0}
-                          className="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-left text-sm transition-colors hover:bg-slate-100"
-                          onClick={() => onToggleColumn(column.id, !checked)}
-                          onKeyDown={(event) => {
-                            if (event.key === "Enter" || event.key === " ") {
-                              event.preventDefault();
-                              onToggleColumn(column.id, !checked);
-                            }
-                          }}
-                        >
-                          <Checkbox
-                            checked={checked}
-                            onClick={(event) => event.stopPropagation()}
-                            onCheckedChange={(value) => onToggleColumn(column.id, value === true)}
-                          />
-                          <span className="min-w-0 flex-1 truncate" title={column.description}>
-                            {column.label}
-                          </span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
-        </ScrollArea>
-      </PopoverContent>
-    </Popover>
-  );
-};
-
-const DetailItem = ({ label, value }: { label: string; value: React.ReactNode }) => (
-  <div className="min-w-0">
-    <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{label}</p>
-    <div className="mt-1 break-words text-sm text-foreground">
-      {value === null || value === undefined || value === "" ? "N/A" : value}
-    </div>
-  </div>
-);
-
-const DetailCard = ({
-  title,
-  icon: Icon,
+  active,
   children,
 }: {
   title: string;
-  icon: React.ElementType;
+  active: number;
   children: React.ReactNode;
 }) => (
-  <Card>
-    <CardHeader>
-      <CardTitle className="flex items-center gap-2 text-base">
-        <Icon className="h-5 w-5 text-muted-foreground" />
-        {title}
-      </CardTitle>
-    </CardHeader>
-    <CardContent>{children}</CardContent>
-  </Card>
+  <div className="min-w-[180px] space-y-3">
+    <div className="flex min-h-5 items-center justify-between gap-2">
+      <h5 className="text-xs font-bold uppercase tracking-widest text-zinc-500">{title}</h5>
+      {active > 0 ? (
+        <Badge variant="secondary" className="h-5 shrink-0 px-1.5 text-[10px]">
+          {active}
+        </Badge>
+      ) : null}
+    </div>
+    <div className="space-y-1">{children}</div>
+  </div>
 );
 
-const EmptyDetailState = ({ children }: { children: React.ReactNode }) => (
-  <div className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">
+const CompactFilterOption = ({
+  checked,
+  color,
+  count,
+  label,
+  muted,
+  onClick,
+}: {
+  checked: boolean;
+  color?: string;
+  count?: number;
+  label: string;
+  muted?: boolean;
+  onClick: () => void;
+}) => (
+  <button
+    type="button"
+    role="checkbox"
+    aria-checked={checked}
+    onClick={onClick}
+    className="group flex w-full cursor-pointer items-center gap-3 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-zinc-50"
+  >
+    <span
+      className={cn(
+        "flex h-4 w-4 shrink-0 items-center justify-center rounded border transition-colors",
+        checked
+          ? "border-primary bg-primary text-primary-foreground"
+          : "border-zinc-300 bg-white group-hover:border-primary/60"
+      )}
+    >
+      {checked ? <Check className="h-3 w-3" /> : null}
+    </span>
+    {color ? (
+      <span
+        className="h-2 w-2 shrink-0 rounded-full"
+        style={{ backgroundColor: color }}
+        aria-hidden="true"
+      />
+    ) : null}
+    <span
+      className={cn(
+        "min-w-0 flex-1 truncate text-sm text-zinc-600 group-hover:text-zinc-950",
+        muted && "text-zinc-400"
+      )}
+    >
+      {label}
+    </span>
+    {typeof count === "number" ? (
+      <span
+        className={cn(
+          "ml-auto inline-flex h-5 min-w-6 shrink-0 items-center justify-center rounded-full px-1.5 text-[10px] font-semibold tabular-nums",
+          checked ? "bg-primary/10 text-primary" : "bg-zinc-100 text-zinc-500"
+        )}
+      >
+        {count.toLocaleString("pt-BR")}
+      </span>
+    ) : null}
+  </button>
+);
+
+const SettingsMenuItem = ({
+  icon: Icon,
+  title,
+  description,
+  badge,
+  disabled,
+  onClick,
+}: {
+  icon: React.ElementType;
+  title: string;
+  description: string;
+  badge?: string;
+  disabled?: boolean;
+  onClick: () => void;
+}) => (
+  <Button
+    type="button"
+    variant="ghost"
+    className="h-auto w-full justify-start rounded-lg px-3 py-2.5 text-left hover:bg-slate-50"
+    onClick={onClick}
+    disabled={disabled}
+  >
+    <span className="mr-3 flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-600 shadow-sm">
+      <Icon className="h-4 w-4" />
+    </span>
+    <span className="min-w-0 flex-1">
+      <span className="flex items-center gap-2">
+        <span className="truncate text-sm font-semibold text-slate-950">{title}</span>
+        {badge ? (
+          <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-500">
+            {badge}
+          </span>
+        ) : null}
+      </span>
+      <span className="mt-0.5 block whitespace-normal text-xs font-normal leading-snug text-slate-500">
+        {description}
+      </span>
+    </span>
+  </Button>
+);
+
+const SettingsMenuSection = ({ title, children }: { title: string; children: React.ReactNode }) => (
+  <div className="space-y-1">
+    <p className="px-3 py-1 text-[10px] font-bold uppercase tracking-widest text-slate-400">{title}</p>
     {children}
   </div>
 );
 
-const getAuditEventIcon = (type: ConciliationAuditEvent["type"]) => {
-  if (type === "reconciled") return CheckCircle2;
-  if (type === "unreconciled") return Undo2;
-  if (type === "financial-adjustment-updated") return Banknote;
+const SettingsDetailLine = ({ label, value }: { label: string; value: React.ReactNode }) => (
+  <div className="space-y-1">
+    <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{label}</p>
+    <div className="text-sm font-semibold text-slate-950">{value}</div>
+  </div>
+);
 
-  return SlidersHorizontal;
-};
+const normalizeAccountMappingsDraft = (mappings: ConciliationAccountMappings): ConciliationAccountMappings =>
+  Object.entries(mappings).reduce<ConciliationAccountMappings>((normalized, [accountId, name]) => {
+    const trimmedAccountId = accountId.trim();
+    const trimmedName = name.trim();
 
-const getAuditEventBadge = (type: ConciliationAuditEvent["type"]) => {
-  if (type === "reconciled") return <Badge>Conciliação</Badge>;
-  if (type === "unreconciled") return <Badge variant="outline">Desfeito</Badge>;
-  if (type === "financial-adjustment-updated") return <Badge variant="outline">Ajuste financeiro</Badge>;
-
-  return <Badge variant="secondary">Status</Badge>;
-};
-
-const auditDetailLabels: Record<string, string> = {
-  previousSystemStatus: "Status anterior",
-  systemStatus: "Status aplicado",
-  manualSystemStatus: "Status manual",
-  automaticSystemStatus: "Status automático",
-  reconciled: "Conciliado",
-  orderNumber: "Pedido",
-  activeAdjustments: "Ajustes ativos",
-  fields: "Campos",
-};
-
-const formatAuditDetailValue = (value: string | number | boolean | null) => {
-  if (value === null || value === "") return "N/A";
-  if (typeof value === "boolean") return value ? "Sim" : "Não";
-
-  return String(value);
-};
-
-const buildConciliationAuditEvents = (order: ConciliationOrder): ConciliationAuditEvent[] => {
-  const history = order.conciliation?.history || [];
-  const events = [...history];
-  const hasEvent = (type: ConciliationAuditEvent["type"], at: string | null | undefined) =>
-    Boolean(at && events.some((event) => event.type === type && event.at === at));
-
-  if (order.conciliation?.reconciledAt && !hasEvent("reconciled", order.conciliation.reconciledAt)) {
-    events.push({
-      id: `legacy-reconciled-${order.conciliation.reconciledAt}`,
-      type: "reconciled",
-      title: "Pedido conciliado",
-      description: "Evento reconstruído a partir dos dados atuais da conciliação.",
-      at: order.conciliation.reconciledAt,
-      actor: order.conciliation.reconciledBy,
-      details: {
-        reconciled: true,
-        systemStatus: order.conciliation.systemStatus,
-        orderNumber: order.number || order.orderId,
-      },
-    });
-  }
-
-  if (order.conciliation?.unreconciledAt && !hasEvent("unreconciled", order.conciliation.unreconciledAt)) {
-    events.push({
-      id: `legacy-unreconciled-${order.conciliation.unreconciledAt}`,
-      type: "unreconciled",
-      title: "Conciliação desfeita",
-      description: "Evento reconstruído a partir dos dados atuais da conciliação.",
-      at: order.conciliation.unreconciledAt,
-      actor: order.conciliation.unreconciledBy,
-      details: {
-        reconciled: false,
-        systemStatus: order.conciliation.systemStatus,
-        orderNumber: order.number || order.orderId,
-      },
-    });
-  }
-
-  if (
-    order.conciliation?.systemStatusUpdatedAt &&
-    !hasEvent("system-status-updated", order.conciliation.systemStatusUpdatedAt)
-  ) {
-    events.push({
-      id: `legacy-status-${order.conciliation.systemStatusUpdatedAt}`,
-      type: "system-status-updated",
-      title: "Status de sistema alterado",
-      description: "Evento reconstruído a partir dos dados atuais do status do sistema.",
-      at: order.conciliation.systemStatusUpdatedAt,
-      actor: order.conciliation.systemStatusUpdatedBy,
-      details: {
-        systemStatus: order.conciliation.systemStatus,
-        manualSystemStatus: order.conciliation.manualSystemStatus,
-        automaticSystemStatus: order.conciliation.automaticSystemStatus,
-      },
-    });
-  }
-
-  return events.sort((first, second) => new Date(second.at).getTime() - new Date(first.at).getTime());
-};
-
-const AuditTimeline = ({ events }: { events: ConciliationAuditEvent[] }) => {
-  if (events.length === 0) {
-    return <EmptyDetailState>Nenhuma ação de conciliação registrada para este pedido.</EmptyDetailState>;
-  }
-
-  return (
-    <div className="space-y-3">
-      {events.map((event) => {
-        const Icon = getAuditEventIcon(event.type);
-        const details = Object.entries(event.details || {}).filter(([, value]) => value !== undefined);
-
-        return (
-          <div key={event.id} className="relative pl-8">
-            <span className="absolute left-0 top-3 flex h-6 w-6 items-center justify-center rounded-full border bg-background">
-              <Icon className="h-3.5 w-3.5 text-muted-foreground" />
-            </span>
-            <div className="rounded-lg border bg-background p-3">
-              <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-                <div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <p className="text-sm font-semibold">{event.title}</p>
-                    {getAuditEventBadge(event.type)}
-                  </div>
-                  <p className="mt-1 text-xs text-muted-foreground">{event.description}</p>
-                </div>
-                <div className="text-left text-xs text-muted-foreground sm:text-right">
-                  <p>{formatDateTime(event.at)}</p>
-                  <p>{formatActor(event.actor)}</p>
-                </div>
-              </div>
-
-              {details.length > 0 ? (
-                <>
-                  <Separator className="my-3" />
-                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                    {details.map(([key, value]) => (
-                      <DetailItem
-                        key={key}
-                        label={auditDetailLabels[key] || key}
-                        value={formatAuditDetailValue(value)}
-                      />
-                    ))}
-                  </div>
-                </>
-              ) : null}
-            </div>
-          </div>
-        );
-      })}
-    </div>
-  );
-};
-
-const SortableHeader = ({
-  columnId,
-  label,
-  align = "left",
-  sortConfig,
-  sortFeedback,
-  onSort,
-}: {
-  columnId: ConciliationColumnId;
-  label: string;
-  align?: "left" | "center" | "right";
-  sortConfig: SortConfig;
-  sortFeedback?: SortFeedback | null;
-  onSort: (columnId: ConciliationColumnId) => void;
-}) => {
-  const active = sortConfig.columnId === columnId;
-  const isSorting = sortFeedback?.columnId === columnId;
-  const Icon = active ? (sortConfig.direction === "asc" ? ArrowUp : ArrowDown) : ArrowUpDown;
-  const nextDirectionLabel = active && sortConfig.direction === "asc" ? "decrescente" : "crescente";
-
-  return (
-    <Button
-      type="button"
-      variant="ghost"
-      size="sm"
-      className={cn(
-        "group h-8 px-2 font-medium text-slate-500 transition-colors hover:bg-zinc-100/70 hover:text-zinc-900",
-        active && "text-zinc-900",
-        align === "right" && "ml-auto",
-        align === "center" && "mx-auto"
-      )}
-      aria-label={`Ordenar ${label} em ordem ${nextDirectionLabel}`}
-      aria-pressed={active}
-      onClick={() => onSort(columnId)}
-    >
-      <span>{label}</span>
-      {isSorting ? (
-        <Loader2 className="ml-1.5 h-3.5 w-3.5 animate-spin text-purple-500" aria-label="Ordenando coluna" />
-      ) : (
-        <Icon
-          className={cn(
-            "ml-1.5 h-3.5 w-3.5 transition-colors",
-            active ? "text-purple-500" : "text-purple-400 group-hover:text-purple-500"
-          )}
-        />
-      )}
-    </Button>
-  );
-};
-
-const OrderCard = ({
-  order,
-  selected,
-  isSaving,
-  onSelect,
-  onOpen,
-  onToggleReconciled,
-}: {
-  order: ConciliationOrder;
-  selected: boolean;
-  isSaving: boolean;
-  onSelect: (checked: boolean) => void;
-  onOpen: () => void;
-  onToggleReconciled: () => void;
-}) => {
-  const mainItem = order.items[0];
-
-  return (
-    <div className="flex min-h-[300px] flex-col rounded-lg border bg-white p-4 shadow-sm transition-colors hover:border-primary/40">
-      <div className="flex items-start justify-between gap-3">
-        <div className="flex items-center gap-3">
-          <Checkbox
-            aria-label={`Selecionar pedido ${order.number || order.orderId}`}
-            checked={selected}
-            onCheckedChange={(checked) => onSelect(checked === true)}
-            disabled={isSaving}
-          />
-          {order.isReconciled ? (
-            <Badge className="gap-1 whitespace-nowrap">
-              <CheckCircle2 className="h-3 w-3" />
-              Conciliado
-            </Badge>
-          ) : (
-            <Badge variant="outline" className="whitespace-nowrap">
-              Pendente
-            </Badge>
-          )}
-        </div>
-        <div className="flex flex-col items-end gap-2">
-          <Badge variant={getStatusVariant(order.statusName)} className="whitespace-nowrap">
-            {order.statusName}
-          </Badge>
-          <Badge variant={getSystemStatusVariant(order.systemStatus)} className="whitespace-nowrap">
-            {order.systemStatus}
-          </Badge>
-          <FinancialAdjustmentsBadge order={order} hideEmpty />
-          <FinancialDivergenceBadge divergence={order.financialDivergence} compact />
-          <PayoutComparisonBadge order={order} compact />
-          <ConciliationSuggestionBadge order={order} />
-        </div>
-      </div>
-
-      <div className="mt-4 min-w-0">
-        <button type="button" className="text-left" onClick={onOpen}>
-          <p className="text-lg font-semibold leading-none">#{order.number || order.orderId}</p>
-          <p className="mt-1 text-xs text-muted-foreground">{order.storeNumber}</p>
-        </button>
-        <div className="mt-3 flex flex-wrap gap-2 text-xs text-muted-foreground">
-          <span className="rounded-md bg-muted px-2 py-1">{order.marketplace}</span>
-          <span className="rounded-md bg-muted px-2 py-1">{order.accountName}</span>
-          <span className="rounded-md bg-muted px-2 py-1">{formatDate(order.date)}</span>
-        </div>
-      </div>
-
-      <button type="button" className="mt-4 min-w-0 text-left" onClick={onOpen}>
-        <p className="line-clamp-2 text-sm font-medium leading-snug">
-          {mainItem?.description || "Pedido sem itens registrados"}
-        </p>
-        <p className="mt-1 text-xs text-muted-foreground">
-          {mainItem?.sku || "Sem SKU"}
-          {order.items.length > 1 ? ` +${order.items.length - 1}` : ""}
-        </p>
-      </button>
-
-      <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
-        <DetailItem label="Bruto" value={formatCurrency(order.grossRevenue)} />
-        <DetailItem label="Líquido" value={formatCurrency(order.netRevenue)} />
-        <DetailItem label="Repasse" value={formatCurrency(order.payoutComparison.paidNetAmount)} />
-        <DetailItem label="Margem" value={formatCurrency(order.contributionMargin)} />
-        <DetailItem label="Margem %" value={formatPercentage(order.contributionMarginPercentage)} />
-      </div>
-
-      <div className="mt-auto flex flex-col gap-2 pt-4 sm:flex-row">
-        <Button type="button" variant="outline" size="sm" className="flex-1" onClick={onOpen}>
-          Detalhes
-        </Button>
-        <Button
-          type="button"
-          size="sm"
-          variant={order.isReconciled ? "outline" : "default"}
-          className="flex-1"
-          onClick={onToggleReconciled}
-          disabled={isSaving}
-        >
-          {order.isReconciled ? (
-            <>
-              <Undo2 className="mr-2 h-4 w-4" />
-              Desfazer
-            </>
-          ) : (
-            <>
-              <CheckCheck className="mr-2 h-4 w-4" />
-              Conciliar
-            </>
-          )}
-        </Button>
-      </div>
-    </div>
-  );
-};
-
-const SummarySettingsDialog = ({
-  open,
-  onOpenChange,
-  summarySettings,
-  isSaving,
-  onSave,
-}: {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  summarySettings: ConciliationSummarySettings;
-  isSaving: boolean;
-  onSave: (metricIds: ConciliationSummaryMetricId[]) => void;
-}) => {
-  const [draftMetricIds, setDraftMetricIds] = React.useState<ConciliationSummaryMetricId[]>(
-    defaultConciliationSummaryMetricIds
-  );
-
-  React.useEffect(() => {
-    if (open) {
-      setDraftMetricIds(normalizeConciliationSummaryMetricIds(summarySettings.metricIds));
+    if (trimmedAccountId && trimmedName) {
+      normalized[trimmedAccountId] = trimmedName;
     }
-  }, [open, summarySettings.metricIds]);
 
-  const hasChanges =
-    serializeSummaryMetricIds(draftMetricIds) !==
-    serializeSummaryMetricIds(normalizeConciliationSummaryMetricIds(summarySettings.metricIds));
-  const selectedMetricIdSet = React.useMemo(() => new Set(draftMetricIds), [draftMetricIds]);
-  const selectedMetricDefinitions = draftMetricIds
-    .map((metricId) => summaryMetricDefinitionById.get(metricId))
-    .filter((definition): definition is SummaryMetricDefinition => Boolean(definition));
+    return normalized;
+  }, {});
 
-  const toggleMetric = (metricId: ConciliationSummaryMetricId, checked: boolean) => {
-    setDraftMetricIds((previous) => {
-      if (checked) {
-        return previous.includes(metricId) ? previous : [...previous, metricId];
-      }
-
-      return previous.length > 1 ? previous.filter((selectedMetricId) => selectedMetricId !== metricId) : previous;
-    });
-  };
-
-  const moveMetric = (metricId: ConciliationSummaryMetricId, direction: -1 | 1) => {
-    setDraftMetricIds((previous) => {
-      const currentIndex = previous.indexOf(metricId);
-      const nextIndex = currentIndex + direction;
-
-      if (currentIndex === -1 || nextIndex < 0 || nextIndex >= previous.length) return previous;
-
-      const next = [...previous];
-      const [metric] = next.splice(currentIndex, 1);
-      next.splice(nextIndex, 0, metric);
-
-      return next;
-    });
-  };
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-4xl">
-        <DialogHeader>
-          <DialogTitle>Configurar Resumo</DialogTitle>
-          <DialogDescription>
-            Escolha quais métricas aparecem no topo da conciliação e defina a ordem dos cards.
-          </DialogDescription>
-        </DialogHeader>
-
-        <div className="grid gap-4 lg:grid-cols-[1fr_1.2fr]">
-          <div className="rounded-lg border">
-            <div className="border-b p-3">
-              <p className="text-sm font-medium">Métricas disponíveis</p>
-              <p className="text-xs text-muted-foreground">Mantenha pelo menos uma métrica ativa.</p>
-            </div>
-            <div className="grid max-h-[46vh] gap-1 overflow-y-auto p-2">
-              {conciliationSummaryMetricOptions.map((metricId) => {
-                const definition = summaryMetricDefinitionById.get(metricId);
-                if (!definition) return null;
-
-                const checked = selectedMetricIdSet.has(metricId);
-
-                return (
-                  <label
-                    key={metricId}
-                    className="flex cursor-pointer items-center gap-3 rounded-md px-2 py-2 text-sm hover:bg-muted"
-                  >
-                    <Checkbox
-                      checked={checked}
-                      onCheckedChange={(value) => toggleMetric(metricId, value === true)}
-                      disabled={isSaving || (checked && draftMetricIds.length === 1)}
-                    />
-                    <definition.icon className="h-4 w-4 text-muted-foreground" />
-                    <span>{definition.title}</span>
-                  </label>
-                );
-              })}
-            </div>
-          </div>
-
-          <div className="rounded-lg border">
-            <div className="border-b p-3">
-              <p className="text-sm font-medium">Ordem dos cards</p>
-              <p className="text-xs text-muted-foreground">{formatNumber(draftMetricIds.length)} card(s) ativo(s)</p>
-            </div>
-            <div className="max-h-[46vh] overflow-y-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Card</TableHead>
-                    <TableHead className="w-24 text-right">Ordem</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {selectedMetricDefinitions.map((definition, index) => (
-                    <TableRow key={definition.id}>
-                      <TableCell>
-                        <div className="flex items-center gap-3">
-                          <definition.icon className="h-4 w-4 text-muted-foreground" />
-                          <span className="font-medium">{definition.title}</span>
-                        </div>
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <div className="inline-flex gap-1">
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="sm"
-                            className="h-8 w-8 p-0"
-                            onClick={() => moveMetric(definition.id, -1)}
-                            disabled={isSaving || index === 0}
-                            aria-label={`Mover ${definition.title} para cima`}
-                          >
-                            <ArrowUp className="h-4 w-4" />
-                          </Button>
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="sm"
-                            className="h-8 w-8 p-0"
-                            onClick={() => moveMetric(definition.id, 1)}
-                            disabled={isSaving || index === selectedMetricDefinitions.length - 1}
-                            aria-label={`Mover ${definition.title} para baixo`}
-                          >
-                            <ArrowDown className="h-4 w-4" />
-                          </Button>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
-          </div>
-        </div>
-
-        <div className="grid gap-4 rounded-lg border bg-muted/30 p-3 sm:grid-cols-2">
-          <DetailItem label="Atualizado em" value={formatDateTime(summarySettings.updatedAt)} />
-          <DetailItem label="Atualizado por" value={formatActor(summarySettings.updatedBy)} />
-        </div>
-
-        <DialogFooter className="gap-2 sm:justify-between">
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => setDraftMetricIds(defaultConciliationSummaryMetricIds)}
-            disabled={isSaving}
-          >
-            <RotateCcw className="mr-2 h-4 w-4" />
-            Resetar padrão
-          </Button>
-          <div className="flex flex-col gap-2 sm:flex-row">
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={isSaving}>
-              Fechar
-            </Button>
-            <Button type="button" onClick={() => onSave(draftMetricIds)} disabled={!hasChanges || isSaving}>
-              {isSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-              Salvar resumo
-            </Button>
-          </div>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-};
-
-const emptyCalculationDraft: ConciliationCustomCalculationInput = {
-  name: "",
-  description: "",
-  expression: "",
-  isPercentage: false,
-  enabled: true,
-};
-
-const serializeCustomCalculations = (calculations: ConciliationCustomCalculationInput[]) =>
+const serializeAccountMappings = (mappings: ConciliationAccountMappings) =>
   JSON.stringify(
-    calculations.map((calculation) => ({
-      id: calculation.id || "",
-      name: calculation.name.trim(),
-      description: calculation.description.trim(),
-      expression: calculation.expression.trim(),
-      isPercentage: Boolean(calculation.isPercentage),
-      enabled: calculation.enabled !== false,
-    }))
+    Object.entries(normalizeAccountMappingsDraft(mappings))
+      .sort(([first], [second]) => compareString(first, second))
+      .map(([accountId, name]) => [accountId, name])
   );
 
-const CalculationSettingsDialog = ({
-  open,
-  onOpenChange,
-  calculationSettings,
-  isSaving,
-  onSave,
-}: {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  calculationSettings: ConciliationCalculationSettings;
-  isSaving: boolean;
-  onSave: (calculations: ConciliationCustomCalculationInput[]) => void;
-}) => {
-  const [draftCalculations, setDraftCalculations] = React.useState<ConciliationCustomCalculationInput[]>([]);
-  const [editingId, setEditingId] = React.useState<string | null>(null);
-  const [draft, setDraft] = React.useState<ConciliationCustomCalculationInput>(emptyCalculationDraft);
+type ConciliationSettingsHubTab =
+  | "account-mapping"
+  | "order-status"
+  | "auto-reconciliation"
+  | "system-status";
 
-  React.useEffect(() => {
-    if (!open) return;
-
-    setDraftCalculations(
-      calculationSettings.calculations.map((calculation) => ({
-        id: calculation.id,
-        name: calculation.name,
-        description: calculation.description,
-        expression: calculation.expression,
-        isPercentage: calculation.isPercentage,
-        enabled: calculation.enabled,
-      }))
-    );
-    setEditingId(null);
-    setDraft(emptyCalculationDraft);
-  }, [calculationSettings.calculations, open]);
-
-  const calculationIds = draftCalculations
-    .filter((calculation) => calculation.enabled)
-    .map((calculation) => calculation.id)
-    .filter((id): id is string => Boolean(id));
-  const expressionError = draft.expression.trim()
-    ? validateConciliationCalculationExpression(
-        draft.expression,
-        calculationIds.filter((id) => id !== editingId)
-      )
-    : "Informe uma fórmula.";
-  const hasDraftName = draft.name.trim().length > 0;
-  const canAddOrUpdate = hasDraftName && !expressionError;
-  const hasChanges =
-    serializeCustomCalculations(draftCalculations) !== serializeCustomCalculations(calculationSettings.calculations);
-
-  const updateDraft = <Field extends keyof ConciliationCustomCalculationInput>(
-    field: Field,
-    value: ConciliationCustomCalculationInput[Field]
-  ) => {
-    setDraft((current) => ({
-      ...current,
-      [field]: value,
-    }));
-  };
-
-  const appendFieldToExpression = (fieldId: ConciliationCalculationFieldId | string) => {
-    setDraft((current) => ({
-      ...current,
-      expression: `${current.expression}${current.expression.trim() ? " " : ""}{${fieldId}}`,
-    }));
-  };
-
-  const resetDraft = () => {
-    setEditingId(null);
-    setDraft(emptyCalculationDraft);
-  };
-
-  const upsertDraftCalculation = () => {
-    if (!canAddOrUpdate) return;
-
-    const id = editingId || draft.id || sanitizeConciliationCalculationId(draft.name);
-    const normalized: ConciliationCustomCalculationInput = {
-      id,
-      name: draft.name.trim(),
-      description: draft.description.trim(),
-      expression: draft.expression.trim(),
-      isPercentage: draft.isPercentage,
-      enabled: draft.enabled,
-    };
-
-    setDraftCalculations((current) => {
-      if (editingId) {
-        return current.map((calculation) => (calculation.id === editingId ? normalized : calculation));
-      }
-
-      return [...current, normalized];
-    });
-    resetDraft();
-  };
-
-  const editCalculation = (calculation: ConciliationCustomCalculationInput) => {
-    setEditingId(calculation.id || null);
-    setDraft({
-      id: calculation.id,
-      name: calculation.name,
-      description: calculation.description,
-      expression: calculation.expression,
-      isPercentage: calculation.isPercentage,
-      enabled: calculation.enabled,
-    });
-  };
-
-  const removeCalculation = (calculationId: string | undefined) => {
-    if (!calculationId) return;
-
-    setDraftCalculations((current) => current.filter((calculation) => calculation.id !== calculationId));
-    if (editingId === calculationId) resetDraft();
-  };
-
-  const moveCalculation = (calculationId: string | undefined, direction: -1 | 1) => {
-    if (!calculationId) return;
-
-    setDraftCalculations((current) => {
-      const currentIndex = current.findIndex((calculation) => calculation.id === calculationId);
-      const nextIndex = currentIndex + direction;
-
-      if (currentIndex < 0 || nextIndex < 0 || nextIndex >= current.length) return current;
-
-      const next = [...current];
-      const [movedCalculation] = next.splice(currentIndex, 1);
-
-      if (!movedCalculation) return current;
-
-      next.splice(nextIndex, 0, movedCalculation);
-
-      return next;
-    });
-  };
-
-  const customCalculationFields = draftCalculations
-    .filter((calculation) => calculation.enabled && calculation.id && calculation.id !== editingId)
-    .map((calculation) => ({
-      id: calculation.id as string,
-      label: calculation.name,
-      helper: calculation.expression,
-    }));
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-5xl">
-        <DialogHeader>
-          <DialogTitle>Colunas calculadas</DialogTitle>
-          <DialogDescription>
-            Crie colunas com fórmulas aritméticas usando campos financeiros do pedido.
-          </DialogDescription>
-        </DialogHeader>
-
-        <div className="grid gap-4 lg:grid-cols-[1.05fr_0.95fr]">
-          <div className="space-y-4 rounded-lg border p-4">
-            <div className="grid gap-3 sm:grid-cols-2">
-              <label className="grid gap-1.5">
-                <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Nome</span>
-                <Input
-                  value={draft.name}
-                  onChange={(event) => updateDraft("name", event.target.value)}
-                  placeholder="Ex.: Lucro operacional"
-                  disabled={isSaving}
-                />
-              </label>
-              <label className="grid gap-1.5">
-                <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Descrição</span>
-                <Input
-                  value={draft.description}
-                  onChange={(event) => updateDraft("description", event.target.value)}
-                  placeholder="Opcional"
-                  disabled={isSaving}
-                />
-              </label>
-            </div>
-
-            <label className="grid gap-1.5">
-              <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Fórmula</span>
-              <Input
-                value={draft.expression}
-                onChange={(event) => updateDraft("expression", event.target.value)}
-                placeholder="{netRevenue} - {productCost} - {shippingCost}"
-                disabled={isSaving}
-                className={cn(expressionError && draft.expression.trim() && "border-red-300 focus-visible:ring-red-300")}
-              />
-              <span className={cn("text-xs", expressionError ? "text-red-600" : "text-muted-foreground")}>
-                {expressionError || "Use +, -, *, / e parênteses."}
-              </span>
-            </label>
-
-            <div className="grid gap-2 rounded-lg border bg-muted/20 p-3">
-              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Campos disponíveis</p>
-              <div className="max-h-44 space-y-3 overflow-y-auto pr-1">
-                <div className="flex flex-wrap gap-1.5">
-                  {conciliationCalculationFieldOptions.map((field) => (
-                    <Button
-                      key={field.id}
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      className="h-7 px-2 text-xs"
-                      onClick={() => appendFieldToExpression(field.id)}
-                      disabled={isSaving}
-                      title={field.helper}
-                    >
-                      {field.label}
-                    </Button>
-                  ))}
-                </div>
-                {customCalculationFields.length > 0 ? (
-                  <div className="space-y-1.5 border-t pt-2">
-                    <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                      Cálculos da grade
-                    </p>
-                    <div className="flex flex-wrap gap-1.5">
-                      {customCalculationFields.map((field) => (
-                        <Button
-                          key={field.id}
-                          type="button"
-                          variant="secondary"
-                          size="sm"
-                          className="h-7 px-2 text-xs"
-                          onClick={() => appendFieldToExpression(field.id)}
-                          disabled={isSaving}
-                          title={field.helper}
-                        >
-                          {field.label}
-                        </Button>
-                      ))}
-                    </div>
-                  </div>
-                ) : null}
-              </div>
-            </div>
-
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-              <div className="flex flex-wrap gap-3">
-                <label className="flex cursor-pointer items-center gap-2 text-sm">
-                  <Checkbox
-                    checked={draft.enabled}
-                    onCheckedChange={(value) => updateDraft("enabled", value === true)}
-                    disabled={isSaving}
-                  />
-                  Ativo
-                </label>
-                <label className="flex cursor-pointer items-center gap-2 text-sm">
-                  <Checkbox
-                    checked={draft.isPercentage}
-                    onCheckedChange={(value) => updateDraft("isPercentage", value === true)}
-                    disabled={isSaving}
-                  />
-                  Exibir como %
-                </label>
-              </div>
-              <div className="flex gap-2">
-                <Button type="button" variant="outline" size="sm" onClick={resetDraft} disabled={isSaving}>
-                  Limpar
-                </Button>
-                <Button type="button" size="sm" onClick={upsertDraftCalculation} disabled={!canAddOrUpdate || isSaving}>
-                  <Plus className="mr-2 h-4 w-4" />
-                  {editingId ? "Atualizar" : "Adicionar"}
-                </Button>
-              </div>
-            </div>
-          </div>
-
-          <div className="rounded-lg border">
-            <div className="flex items-center justify-between border-b p-3">
-              <div>
-                <p className="text-sm font-medium">Cálculos configurados</p>
-                <p className="text-xs text-muted-foreground">{formatNumber(draftCalculations.length)} coluna(s)</p>
-              </div>
-              <Badge variant="outline">{formatNumber(draftCalculations.filter((calculation) => calculation.enabled).length)} ativo(s)</Badge>
-            </div>
-            <div className="max-h-[52vh] overflow-y-auto p-2">
-              {draftCalculations.length > 0 ? (
-                <div className="space-y-2">
-                  {draftCalculations.map((calculation, index) => (
-                    <div
-                      key={calculation.id}
-                      className={cn(
-                        "rounded-md border p-3",
-                        editingId === calculation.id && "border-primary bg-primary/5"
-                      )}
-                    >
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0">
-                          <p className="truncate text-sm font-medium">{calculation.name}</p>
-                          <p className="mt-1 font-mono text-[11px] text-muted-foreground">{calculation.expression}</p>
-                          {calculation.description ? (
-                            <p className="mt-1 text-xs text-muted-foreground">{calculation.description}</p>
-                          ) : null}
-                        </div>
-                        <Badge variant={calculation.enabled ? "default" : "outline"}>
-                          {calculation.enabled ? "Ativo" : "Inativo"}
-                        </Badge>
-                      </div>
-                      <div className="mt-3 flex justify-end gap-2">
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          className="h-8 w-8 p-0"
-                          onClick={() => moveCalculation(calculation.id, -1)}
-                          disabled={isSaving || index === 0}
-                          aria-label={`Mover ${calculation.name} para cima`}
-                        >
-                          <ArrowUp className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          className="h-8 w-8 p-0"
-                          onClick={() => moveCalculation(calculation.id, 1)}
-                          disabled={isSaving || index === draftCalculations.length - 1}
-                          aria-label={`Mover ${calculation.name} para baixo`}
-                        >
-                          <ArrowDown className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          onClick={() => editCalculation(calculation)}
-                          disabled={isSaving}
-                        >
-                          Editar
-                        </Button>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => removeCalculation(calculation.id)}
-                          disabled={isSaving}
-                        >
-                          <Trash2 className="mr-2 h-4 w-4" />
-                          Remover
-                        </Button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <EmptyDetailState>Nenhuma coluna calculada configurada.</EmptyDetailState>
-              )}
-            </div>
-          </div>
-        </div>
-
-        <div className="grid gap-4 rounded-lg border bg-muted/30 p-3 sm:grid-cols-2">
-          <DetailItem label="Atualizado em" value={formatDateTime(calculationSettings.updatedAt)} />
-          <DetailItem label="Atualizado por" value={formatActor(calculationSettings.updatedBy)} />
-        </div>
-
-        <DialogFooter className="gap-2">
-          <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={isSaving}>
-            Fechar
-          </Button>
-          <Button type="button" onClick={() => onSave(draftCalculations)} disabled={!hasChanges || isSaving}>
-            {isSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-            Salvar cálculos
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-};
-
-const DivergenceRuleNumberField = ({
-  label,
-  value,
-  suffix,
-  step = "0.01",
-  disabled,
-  onChange,
-}: {
+const settingsHubTabItems: Array<{
+  value: ConciliationSettingsHubTab;
   label: string;
-  value: number;
-  suffix?: string;
-  step?: string;
-  disabled: boolean;
-  onChange: (value: number) => void;
-}) => (
-  <label className="grid gap-1.5">
-    <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{label}</span>
-    <div className="relative">
-      <Input
-        type="number"
-        min="0"
-        step={step}
-        value={Number.isFinite(value) ? String(value) : "0"}
-        onChange={(event) => onChange(Number(event.target.value))}
-        disabled={disabled}
-        className={suffix ? "pr-10" : undefined}
-      />
-      {suffix ? (
-        <span className="pointer-events-none absolute right-3 top-2.5 text-xs text-muted-foreground">{suffix}</span>
-      ) : null}
-    </div>
-  </label>
-);
+  icon: React.ElementType;
+}> = [
+  { value: "account-mapping", label: "Mapeamento de Conta", icon: BadgeCheck },
+  { value: "order-status", label: "Mapeamento Status", icon: Settings2 },
+  { value: "auto-reconciliation", label: "Conciliação Automática", icon: Zap },
+  { value: "system-status", label: "Status Sistema", icon: ListChecks },
+];
 
-const DivergenceRuleCheckboxField = ({
-  label,
-  checked,
-  disabled,
-  onChange,
-}: {
-  label: string;
-  checked: boolean;
-  disabled: boolean;
-  onChange: (checked: boolean) => void;
-}) => (
-  <label className="flex cursor-pointer items-center gap-2 rounded-md border bg-background px-3 py-2 text-sm">
-    <Checkbox checked={checked} disabled={disabled} onCheckedChange={(value) => onChange(value === true)} />
-    <span>{label}</span>
-  </label>
-);
-
-const DivergenceRuleEditor = ({
-  rule,
-  disabled,
-  onRuleChange,
-}: {
-  rule: ConciliationFinancialDivergenceRule;
-  disabled: boolean;
-  onRuleChange: (rule: ConciliationFinancialDivergenceRule) => void;
-}) => {
-  const updateRule = (field: DivergenceRuleField, value: number | boolean) => {
-    onRuleChange({
-      ...rule,
-      [field]: value,
-    });
-  };
-
-  return (
-    <div className="grid gap-4">
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <DivergenceRuleNumberField
-          label="Tolerância R$"
-          value={rule.moneyTolerance}
-          disabled={disabled}
-          onChange={(value) => updateRule("moneyTolerance", value)}
-        />
-        <DivergenceRuleNumberField
-          label="Diferença crítica R$"
-          value={rule.grossDifferenceCriticalAmount}
-          disabled={disabled}
-          onChange={(value) => updateRule("grossDifferenceCriticalAmount", value)}
-        />
-        <DivergenceRuleNumberField
-          label="Diferença crítica"
-          value={rule.grossDifferenceCriticalPercentage}
-          suffix="%"
-          disabled={disabled}
-          onChange={(value) => updateRule("grossDifferenceCriticalPercentage", value)}
-        />
-        <DivergenceRuleNumberField
-          label="Margem mínima"
-          value={rule.marginAttentionPercentage}
-          suffix="%"
-          disabled={disabled}
-          onChange={(value) => updateRule("marginAttentionPercentage", value)}
-        />
-      </div>
-
-      <div className="grid gap-2 sm:grid-cols-2">
-        <DivergenceRuleCheckboxField
-          label="Exigir custo do produto"
-          checked={rule.requireProductCost}
-          disabled={disabled}
-          onChange={(checked) => updateRule("requireProductCost", checked)}
-        />
-        <DivergenceRuleCheckboxField
-          label="Exigir comissão em marketplace"
-          checked={rule.requireMarketplaceCommission}
-          disabled={disabled}
-          onChange={(checked) => updateRule("requireMarketplaceCommission", checked)}
-        />
-        <DivergenceRuleCheckboxField
-          label="Exigir custo de frete quando cliente paga frete"
-          checked={rule.requireShippingCostWhenCustomerShipping}
-          disabled={disabled}
-          onChange={(checked) => updateRule("requireShippingCostWhenCustomerShipping", checked)}
-        />
-        <DivergenceRuleCheckboxField
-          label="Alertar status sem receita com valor"
-          checked={rule.flagNonRevenueStatusWithValue}
-          disabled={disabled}
-          onChange={(checked) => updateRule("flagNonRevenueStatusWithValue", checked)}
-        />
-      </div>
-    </div>
-  );
-};
-
-const FinancialDivergenceSettingsDialog = ({
+const ConciliationSettingsHubDialog = ({
   open,
   onOpenChange,
   orders,
-  divergenceSettings,
+  isLoading,
   isSaving,
-  onSave,
-}: {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  orders: ConciliationOrder[];
-  divergenceSettings: ConciliationDivergenceSettings;
-  isSaving: boolean;
-  onSave: (rules: ConciliationFinancialDivergenceRules) => void;
-}) => {
-  const [draftRules, setDraftRules] = React.useState<ConciliationFinancialDivergenceRules>(
-    defaultConciliationFinancialDivergenceRules
-  );
-  const [selectedScope, setSelectedScope] = React.useState(defaultDivergenceRuleScopeValue);
-
-  React.useEffect(() => {
-    if (open) {
-      setDraftRules(normalizeConciliationFinancialDivergenceRules(divergenceSettings));
-      setSelectedScope(defaultDivergenceRuleScopeValue);
-    }
-  }, [open, divergenceSettings]);
-
-  const marketplaceOptions = React.useMemo(() => {
-    const marketplaces = new Set(orders.map((order) => order.marketplace).filter(Boolean));
-
-    return Array.from(marketplaces).sort(compareString);
-  }, [orders]);
-  const selectedRule = React.useMemo(
-    () =>
-      selectedScope === defaultDivergenceRuleScopeValue
-        ? draftRules.defaultRule
-        : resolveConciliationFinancialDivergenceRule(selectedScope, draftRules),
-    [draftRules, selectedScope]
-  );
-  const hasMarketplaceOverride =
-    selectedScope !== defaultDivergenceRuleScopeValue && Boolean(draftRules.marketplaceRules[selectedScope]);
-  const previewOrders = React.useMemo(
-    () => applyFinancialDivergenceRules(orders, draftRules),
-    [draftRules, orders]
-  );
-  const currentSummary = React.useMemo(
-    () => (orders.length > 0 ? calculateConciliationSummary(orders) : emptySummary),
-    [orders]
-  );
-  const previewSummary = React.useMemo(
-    () => (previewOrders.length > 0 ? calculateConciliationSummary(previewOrders) : emptySummary),
-    [previewOrders]
-  );
-  const hasChanges = serializeDivergenceRules(draftRules) !== serializeDivergenceRules(divergenceSettings);
-
-  const handleRuleChange = (rule: ConciliationFinancialDivergenceRule) => {
-    setDraftRules((previous) => {
-      const normalizedRules = normalizeConciliationFinancialDivergenceRules(previous);
-
-      if (selectedScope === defaultDivergenceRuleScopeValue) {
-        return {
-          ...normalizedRules,
-          defaultRule: rule,
-        };
-      }
-
-      return {
-        ...normalizedRules,
-        marketplaceRules: {
-          ...normalizedRules.marketplaceRules,
-          [selectedScope]: rule,
-        },
-      };
-    });
-  };
-
-  const resetSelectedMarketplaceRule = () => {
-    if (selectedScope === defaultDivergenceRuleScopeValue) return;
-
-    setDraftRules((previous) => {
-      const normalizedRules = normalizeConciliationFinancialDivergenceRules(previous);
-      const marketplaceRules = { ...normalizedRules.marketplaceRules };
-
-      delete marketplaceRules[selectedScope];
-
-      return {
-        ...normalizedRules,
-        marketplaceRules,
-      };
-    });
-  };
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-5xl">
-        <DialogHeader>
-          <DialogTitle>Configurar Alertas Financeiros</DialogTitle>
-          <DialogDescription>
-            Ajuste as tolerâncias globais e regras específicas por marketplace para os alertas de divergência.
-          </DialogDescription>
-        </DialogHeader>
-
-        <div className="grid gap-3 sm:grid-cols-4">
-          <div className="rounded-lg border bg-muted/30 p-3">
-            <DetailItem label="Marketplaces" value={formatNumber(marketplaceOptions.length)} />
-          </div>
-          <div className="rounded-lg border bg-muted/30 p-3">
-            <DetailItem label="Regras próprias" value={formatNumber(Object.keys(draftRules.marketplaceRules).length)} />
-          </div>
-          <div className="rounded-lg border bg-muted/30 p-3">
-            <DetailItem
-              label="Alertas no preview"
-              value={`${formatNumber(previewSummary.financialAlertCount)} / atual ${formatNumber(currentSummary.financialAlertCount)}`}
-            />
-          </div>
-          <div className="rounded-lg border bg-muted/30 p-3">
-            <DetailItem label="Risco preview" value={formatCurrency(previewSummary.financialRiskAmount)} />
-          </div>
-        </div>
-
-        <div className="grid gap-4 lg:grid-cols-[260px_1fr]">
-          <div className="rounded-lg border">
-            <div className="border-b p-3">
-              <p className="text-sm font-medium">Escopo</p>
-              <p className="text-xs text-muted-foreground">Regra global ou marketplace.</p>
-            </div>
-            <div className="space-y-3 p-3">
-              <Select value={selectedScope} onValueChange={setSelectedScope} disabled={isSaving}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Escopo" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={defaultDivergenceRuleScopeValue}>Padrão global</SelectItem>
-                  {marketplaceOptions.map((marketplaceOption) => (
-                    <SelectItem key={marketplaceOption} value={marketplaceOption}>
-                      {marketplaceOption}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-
-              <div className="rounded-lg bg-muted/40 p-3">
-                <DetailItem
-                  label="Origem da regra"
-                  value={
-                    selectedScope === defaultDivergenceRuleScopeValue ? (
-                      <Badge variant="secondary">Global</Badge>
-                    ) : hasMarketplaceOverride ? (
-                      <Badge variant="outline">Marketplace</Badge>
-                    ) : (
-                      <Badge variant="secondary">Herdada</Badge>
-                    )
-                  }
-                />
-              </div>
-
-              {selectedScope !== defaultDivergenceRuleScopeValue ? (
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="w-full"
-                  onClick={resetSelectedMarketplaceRule}
-                  disabled={isSaving || !hasMarketplaceOverride}
-                >
-                  <RotateCcw className="mr-2 h-4 w-4" />
-                  Usar padrão global
-                </Button>
-              ) : null}
-            </div>
-          </div>
-
-          <div className="rounded-lg border">
-            <div className="border-b p-3">
-              <p className="text-sm font-medium">
-                {selectedScope === defaultDivergenceRuleScopeValue ? "Regra global" : selectedScope}
-              </p>
-              <p className="text-xs text-muted-foreground">
-                Alterações em marketplace criam uma regra própria para o escopo selecionado.
-              </p>
-            </div>
-            <div className="p-3">
-              <DivergenceRuleEditor rule={selectedRule} disabled={isSaving} onRuleChange={handleRuleChange} />
-            </div>
-          </div>
-        </div>
-
-        <div className="grid gap-4 rounded-lg border bg-muted/30 p-3 sm:grid-cols-2">
-          <DetailItem label="Atualizado em" value={formatDateTime(divergenceSettings.updatedAt)} />
-          <DetailItem label="Atualizado por" value={formatActor(divergenceSettings.updatedBy)} />
-        </div>
-
-        <DialogFooter className="gap-2 sm:justify-between">
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => {
-              setDraftRules(defaultConciliationFinancialDivergenceRules);
-              setSelectedScope(defaultDivergenceRuleScopeValue);
-            }}
-            disabled={isSaving}
-          >
-            <RotateCcw className="mr-2 h-4 w-4" />
-            Resetar tudo
-          </Button>
-          <div className="flex flex-col gap-2 sm:flex-row">
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={isSaving}>
-              Fechar
-            </Button>
-            <Button type="button" onClick={() => onSave(draftRules)} disabled={!hasChanges || isSaving}>
-              {isSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-              Salvar alertas
-            </Button>
-          </div>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-};
-
-const StatusMappingsDialog = ({
-  open,
-  onOpenChange,
-  orders,
-  statusMappings,
+  accountSettings,
   statusSettings,
-  isSaving,
-  onSave,
+  systemStatusSettings,
+  summaryCardsCount,
+  calculationColumnsCount,
+  divergenceRulesCount,
+  statusMappingsCount,
+  payoutRowsCount,
+  onSaveAccountMappings,
+  onSaveStatusMappings,
+  onSaveSystemStatusSettings,
+  onApplySuggestedConciliations,
+  onOpenSummarySettings,
+  onOpenCalculationSettings,
+  onOpenDivergenceSettings,
+  onOpenStatusSettings,
+  onOpenPayoutImport,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   orders: ConciliationOrder[];
-  statusMappings: ConciliationStatusMappings;
-  statusSettings: ConciliationStatusSettings;
+  isLoading: boolean;
   isSaving: boolean;
-  onSave: (statusMappings: ConciliationStatusMappings) => void;
+  accountSettings: ConciliationAccountSettings;
+  statusSettings: ConciliationStatusSettings;
+  systemStatusSettings: ConciliationSystemStatusSettings;
+  summaryCardsCount: number;
+  calculationColumnsCount: number;
+  divergenceRulesCount: number;
+  statusMappingsCount: number;
+  payoutRowsCount: number;
+  onSaveAccountMappings: (accountMappings: ConciliationAccountMappings) => void | Promise<void>;
+  onSaveStatusMappings: (statusMappings: ConciliationStatusMappings) => void | Promise<void>;
+  onSaveSystemStatusSettings: (
+    systemStatusSettings: ConciliationSystemStatusSettings
+  ) => void | Promise<void>;
+  onApplySuggestedConciliations: () => void;
+  onOpenSummarySettings: () => void;
+  onOpenCalculationSettings: () => void;
+  onOpenDivergenceSettings: () => void;
+  onOpenStatusSettings: () => void;
+  onOpenPayoutImport: () => void;
 }) => {
-  const [draftMappings, setDraftMappings] = React.useState<ConciliationStatusMappings>({});
+  const [activeTab, setActiveTab] = React.useState<ConciliationSettingsHubTab>("account-mapping");
+  const [draftAccountMappings, setDraftAccountMappings] = React.useState<ConciliationAccountMappings>({});
+  const [draftStatusMappings, setDraftStatusMappings] = React.useState<ConciliationStatusMappings>({});
+  const [draftSystemStatusSettings, setDraftSystemStatusSettings] =
+    React.useState<ConciliationSystemStatusSettings>(defaultConciliationSystemStatusSettings);
+  const normalizedSystemStatusSettings = React.useMemo(
+    () => normalizeConciliationSystemStatusSettings(systemStatusSettings),
+    [systemStatusSettings]
+  );
 
   React.useEffect(() => {
     if (open) {
-      setDraftMappings(statusMappings);
+      setActiveTab("account-mapping");
     }
-  }, [open, statusMappings]);
+  }, [open]);
 
-  const statusRows = React.useMemo(() => {
-    const rows = new Map<
+  React.useEffect(() => {
+    if (open) setDraftAccountMappings(accountSettings.accountMappings);
+  }, [accountSettings.accountMappings, open]);
+
+  React.useEffect(() => {
+    if (open) setDraftStatusMappings(statusSettings.statusMappings);
+  }, [open, statusSettings.statusMappings]);
+
+  React.useEffect(() => {
+    if (open) setDraftSystemStatusSettings(normalizedSystemStatusSettings);
+  }, [normalizedSystemStatusSettings, open]);
+
+  const accountSections = React.useMemo(() => {
+    const sections = new Map<
       string,
       {
-        statusName: string;
-        orderCount: number;
-        manualCount: number;
+        marketplace: string;
+        entries: Map<
+          string,
+          {
+            accountId: string;
+            accountName: string;
+            originalAccountName: string;
+            mappedName: string;
+            marketplace: string;
+            orderCount: number;
+          }
+        >;
       }
     >();
 
     orders.forEach((order) => {
-      const existing = rows.get(order.statusName) || {
-        statusName: order.statusName,
+      const originalAccountName = order.originalOrder?.loja?.nome || "Conta não informada";
+      const marketplace = order.marketplace || "Sem marketplace";
+      const accountId = String(order.originalOrder?.loja?.id || originalAccountName || "sem-conta");
+      const mappedName = accountSettings.accountMappings[accountId] || "";
+      const accountName = mappedName || originalAccountName;
+      const section = sections.get(marketplace) || { marketplace, entries: new Map() };
+      const current = section.entries.get(accountId) || {
+        accountId,
+        accountName,
+        originalAccountName,
+        mappedName,
+        marketplace,
         orderCount: 0,
-        manualCount: 0,
       };
 
-      existing.orderCount += 1;
-      if (order.manualSystemStatus) existing.manualCount += 1;
-      rows.set(order.statusName, existing);
+      current.orderCount += 1;
+      section.entries.set(accountId, current);
+      sections.set(marketplace, section);
+    });
+
+    return Array.from(sections.values())
+      .map((section) => ({
+        ...section,
+        entries: Array.from(section.entries.values()).sort(
+          (first, second) => compareString(first.accountName, second.accountName) || compareString(first.accountId, second.accountId)
+        ),
+      }))
+      .sort((first, second) => compareString(first.marketplace, second.marketplace));
+  }, [accountSettings.accountMappings, orders]);
+
+  const accountEntries = React.useMemo(
+    () => accountSections.flatMap((section) => section.entries),
+    [accountSections]
+  );
+
+  const statusRows = React.useMemo(() => {
+    const rows = new Map<string, { statusName: string; orderCount: number; manualCount: number }>();
+
+    orders.forEach((order) => {
+      const current =
+        rows.get(order.statusName) || {
+          statusName: order.statusName,
+          orderCount: 0,
+          manualCount: 0,
+        };
+
+      current.orderCount += 1;
+      if (order.manualSystemStatus) current.manualCount += 1;
+      rows.set(order.statusName, current);
     });
 
     return Array.from(rows.values()).sort((first, second) => compareString(first.statusName, second.statusName));
   }, [orders]);
 
-  const hasChanges = serializeStatusMappings(draftMappings) !== serializeStatusMappings(statusMappings);
-  const previewAffectedCount = React.useMemo(
+  const autoReconciliationMatchedOrders = React.useMemo(
+    () =>
+      orders.filter(
+        (order) =>
+          order.systemStatus === "Entregue" &&
+          order.financialDivergence.severity === "ok" &&
+          order.payoutComparison.status === "matched"
+      ),
+    [orders]
+  );
+  const autoReconciliationPendingOrders = React.useMemo(
+    () => autoReconciliationMatchedOrders.filter((order) => !order.isReconciled),
+    [autoReconciliationMatchedOrders]
+  );
+  const autoReconciliationAlreadyOrders = React.useMemo(
+    () => autoReconciliationMatchedOrders.filter((order) => order.isReconciled),
+    [autoReconciliationMatchedOrders]
+  );
+  const autoReconciliationExamples = React.useMemo(
+    () =>
+      autoReconciliationPendingOrders
+        .slice(0, 6)
+        .map((order) => `#${order.number || order.orderId}`),
+    [autoReconciliationPendingOrders]
+  );
+  const autoReconciliationBlockedCount = Math.max(
+    0,
+    orders.filter((order) => !order.isReconciled).length - autoReconciliationPendingOrders.length
+  );
+
+  const openNestedSettings = (handler: () => void) => {
+    onOpenChange(false);
+    handler();
+  };
+
+  const accountMappingsChanged =
+    serializeAccountMappings(draftAccountMappings) !== serializeAccountMappings(accountSettings.accountMappings);
+  const statusMappingsChanged =
+    serializeStatusMappings(draftStatusMappings) !== serializeStatusMappings(statusSettings.statusMappings);
+  const systemStatusSettingsChanged =
+    serializeConciliationSystemStatusSettings(draftSystemStatusSettings) !==
+    serializeConciliationSystemStatusSettings(normalizedSystemStatusSettings);
+  const systemStatusDefaultChanged =
+    serializeConciliationSystemStatusSettings(draftSystemStatusSettings) !==
+    serializeConciliationSystemStatusSettings(defaultConciliationSystemStatusSettings);
+  const systemStatusActiveCount = draftSystemStatusSettings.statuses.filter((status) => status.active).length;
+  const systemStatusInactiveCount = draftSystemStatusSettings.statuses.length - systemStatusActiveCount;
+  const normalizedDraftAccountMappings = React.useMemo(
+    () => normalizeAccountMappingsDraft(draftAccountMappings),
+    [draftAccountMappings]
+  );
+  const previewStatusAffectedCount = React.useMemo(
     () =>
       orders.reduce((total, order) => {
         if (order.manualSystemStatus) return total;
 
-        const nextAutomaticStatus = draftMappings[order.statusName] ?? resolveAutomaticSystemStatus(order.statusName);
+        const nextAutomaticStatus =
+          draftStatusMappings[order.statusName] ?? resolveAutomaticSystemStatus(order.statusName);
 
         return total + (nextAutomaticStatus !== order.automaticSystemStatus ? 1 : 0);
       }, 0),
-    [draftMappings, orders]
+    [draftStatusMappings, orders]
   );
 
-  const handleStatusChange = (statusName: string, value: SystemStatusSelectValue) => {
-    setDraftMappings((previous) => {
+  const updateAccountMapping = (accountId: string, name: string) => {
+    setDraftAccountMappings((previous) => ({
+      ...previous,
+      [accountId]: name,
+    }));
+  };
+
+  const handleSaveAccountMappings = () => {
+    onSaveAccountMappings(normalizedDraftAccountMappings);
+  };
+
+  const handleStatusMappingChange = (statusName: string, value: SystemStatusSelectValue) => {
+    setDraftStatusMappings((previous) => {
       const next = { ...previous };
 
       if (value === automaticStatusSelectValue) {
@@ -2845,1726 +713,733 @@ const StatusMappingsDialog = ({
     });
   };
 
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-4xl">
-        <DialogHeader>
-          <DialogTitle>Configurar Status de Sistema</DialogTitle>
-          <DialogDescription>
-            Mapeie os status dos pedidos para os status operacionais usados na conciliação.
-          </DialogDescription>
-        </DialogHeader>
-
-        <div className="grid gap-3 sm:grid-cols-3">
-          <div className="rounded-lg border bg-muted/30 p-3">
-            <DetailItem label="Status encontrados" value={formatNumber(statusRows.length)} />
-          </div>
-          <div className="rounded-lg border bg-muted/30 p-3">
-            <DetailItem label="Pedidos no escopo" value={formatNumber(orders.length)} />
-          </div>
-          <div className="rounded-lg border bg-muted/30 p-3">
-            <DetailItem label="Preview de impacto" value={`${formatNumber(previewAffectedCount)} pedido(s)`} />
-          </div>
-        </div>
-
-        <ScrollArea className="h-[48vh] rounded-lg border">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Status Pedido</TableHead>
-                <TableHead className="text-right">Pedidos</TableHead>
-                <TableHead className="text-right">Overrides</TableHead>
-                <TableHead>Padrão</TableHead>
-                <TableHead>Status Sistema</TableHead>
-                <TableHead className="text-right">Afeta</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {statusRows.length > 0 ? (
-                statusRows.map((row) => {
-                  const defaultStatus = resolveAutomaticSystemStatus(row.statusName);
-                  const selectedStatus = draftMappings[row.statusName] ?? automaticStatusSelectValue;
-                  const proposedStatus = draftMappings[row.statusName] ?? defaultStatus;
-                  const affectedCount = orders.filter(
-                    (order) =>
-                      order.statusName === row.statusName &&
-                      !order.manualSystemStatus &&
-                      order.automaticSystemStatus !== proposedStatus
-                  ).length;
-
-                  return (
-                    <TableRow key={row.statusName}>
-                      <TableCell className="font-medium">{row.statusName}</TableCell>
-                      <TableCell className="text-right">{formatNumber(row.orderCount)}</TableCell>
-                      <TableCell className="text-right">{formatNumber(row.manualCount)}</TableCell>
-                      <TableCell>
-                        <Badge variant={getSystemStatusVariant(defaultStatus)} className="whitespace-nowrap">
-                          {defaultStatus}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="min-w-52">
-                        <Select
-                          value={selectedStatus}
-                          onValueChange={(value) => handleStatusChange(row.statusName, value as SystemStatusSelectValue)}
-                          disabled={isSaving}
-                        >
-                          <SelectTrigger>
-                            <SelectValue placeholder="Status de sistema" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value={automaticStatusSelectValue}>
-                              Automático ({defaultStatus})
-                            </SelectItem>
-                            {conciliationSystemStatusOptions.map((statusOption) => (
-                              <SelectItem key={statusOption} value={statusOption}>
-                                {statusOption}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </TableCell>
-                      <TableCell className="text-right">{formatNumber(affectedCount)}</TableCell>
-                    </TableRow>
-                  );
-                })
-              ) : (
-                <TableRow>
-                  <TableCell colSpan={6} className="h-24 text-center text-sm text-muted-foreground">
-                    Nenhum status encontrado no escopo atual.
-                  </TableCell>
-                </TableRow>
-              )}
-            </TableBody>
-          </Table>
-        </ScrollArea>
-
-        <div className="grid gap-4 rounded-lg border bg-muted/30 p-3 sm:grid-cols-2">
-          <DetailItem label="Atualizado em" value={formatDateTime(statusSettings.updatedAt)} />
-          <DetailItem label="Atualizado por" value={formatActor(statusSettings.updatedBy)} />
-        </div>
-
-        <DialogFooter className="gap-2 sm:justify-between">
-          <Button type="button" variant="outline" onClick={() => setDraftMappings({})} disabled={isSaving || Object.keys(draftMappings).length === 0}>
-            <RotateCcw className="mr-2 h-4 w-4" />
-            Resetar regras
-          </Button>
-          <div className="flex flex-col gap-2 sm:flex-row">
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={isSaving}>
-              Fechar
-            </Button>
-            <Button type="button" onClick={() => onSave(draftMappings)} disabled={!hasChanges || isSaving}>
-              {isSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-              Salvar mapeamento
-            </Button>
-          </div>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-};
-
-const normalizeImportHeader = (value: unknown): string =>
-  String(value ?? "")
-    .normalize("NFD")
-    .replace(/\p{Diacritic}/gu, "")
-    .replace(/[^a-zA-Z0-9]+/g, " ")
-    .trim()
-    .toLowerCase();
-
-const findImportColumn = (headers: string[], aliases: string[]) => {
-  const normalizedAliases = aliases.map(normalizeImportHeader);
-  const entries = headers.map((header) => ({
-    header,
-    normalizedKey: normalizeImportHeader(header),
-  }));
-  const exactMatch = entries.find((entry) => normalizedAliases.includes(entry.normalizedKey));
-
-  if (exactMatch) return exactMatch.header;
-
-  return entries.find((entry) =>
-    normalizedAliases.some(
-      (alias) =>
-        alias.length > 2 &&
-        entry.normalizedKey.length > 2 &&
-        (entry.normalizedKey.includes(alias) || alias.includes(entry.normalizedKey))
-    )
-  )?.header || "";
-};
-
-const parseImportMoney = (value: unknown): number | null => {
-  if (typeof value === "number") return Number.isFinite(value) ? value : null;
-
-  const rawValue = String(value ?? "").trim();
-  if (!rawValue) return null;
-
-  const negative = rawValue.includes("(") && rawValue.includes(")") || rawValue.trim().startsWith("-");
-  let cleaned = rawValue.replace(/[^\d,.-]/g, "");
-  if (!cleaned || cleaned === "-" || cleaned === "," || cleaned === ".") return null;
-
-  const lastCommaIndex = cleaned.lastIndexOf(",");
-  const lastDotIndex = cleaned.lastIndexOf(".");
-
-  if (lastCommaIndex >= 0 && lastDotIndex >= 0) {
-    cleaned =
-      lastCommaIndex > lastDotIndex
-        ? cleaned.replace(/\./g, "").replace(",", ".")
-        : cleaned.replace(/,/g, "");
-  } else if (lastCommaIndex >= 0) {
-    cleaned = cleaned.replace(",", ".");
-  } else {
-    const dotCount = (cleaned.match(/\./g) || []).length;
-    const lastGroupLength = cleaned.length - lastDotIndex - 1;
-
-    if (dotCount > 1 || (dotCount === 1 && lastGroupLength === 3)) {
-      cleaned = cleaned.replace(/\./g, "");
-    }
-  }
-
-  const parsed = Number(cleaned);
-  if (!Number.isFinite(parsed)) return null;
-
-  return negative ? -Math.abs(parsed) : parsed;
-};
-
-const parseImportDate = (value: unknown): string | null => {
-  if (!value) return null;
-  if (value instanceof Date && !Number.isNaN(value.getTime())) return value.toISOString();
-  if (typeof value === "number") {
-    const parsedDate = XLSX.SSF.parse_date_code(value);
-
-    if (parsedDate) {
-      return new Date(parsedDate.y, parsedDate.m - 1, parsedDate.d, parsedDate.H, parsedDate.M, parsedDate.S).toISOString();
-    }
-  }
-
-  const rawValue = String(value).trim();
-  if (!rawValue) return null;
-
-  const brazilianDate = rawValue.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})(?:\s+(\d{1,2}):(\d{2}))?/);
-  if (brazilianDate) {
-    const [, day, month, year, hour = "0", minute = "0"] = brazilianDate;
-    const fullYear = year.length === 2 ? `20${year}` : year;
-    const parsed = new Date(Number(fullYear), Number(month) - 1, Number(day), Number(hour), Number(minute));
-
-    return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
-  }
-
-  const parsed = new Date(rawValue);
-
-  return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
-};
-
-const payoutOrderKeyAliases = [
-  "pedido",
-  "numero pedido",
-  "n pedido",
-  "pedido loja",
-  "pedido marketplace",
-  "numero pedido marketplace",
-  "id pedido",
-  "order id",
-  "order",
-  "sale id",
-];
-const payoutPaidAtAliases = ["data repasse", "data pagamento", "data liquidacao", "paid at", "payment date", "data"];
-const payoutGrossAliases = ["valor bruto", "bruto", "gross amount", "gross", "valor venda", "total venda"];
-const payoutFeeAliases = ["taxa", "tarifa", "comissao", "fee", "fees", "marketplace fee"];
-const payoutShippingAliases = ["frete", "shipping", "envio", "custo frete", "shipping amount"];
-const payoutNetAliases = [
-  "valor liquido",
-  "liquido",
-  "net amount",
-  "net",
-  "valor repasse",
-  "repasse",
-  "total recebido",
-  "amount",
-];
-
-type PayoutImportColumnKey = "orderKey" | "paidAt" | "grossAmount" | "feeAmount" | "shippingAmount" | "netAmount";
-type PayoutImportMapping = Record<PayoutImportColumnKey, string>;
-
-type PayoutImportRawRow = {
-  sourceRow: number;
-  values: Record<string, unknown>;
-  hasAnyValue: boolean;
-};
-
-const emptyPayoutImportMapping: PayoutImportMapping = {
-  orderKey: "",
-  paidAt: "",
-  grossAmount: "",
-  feeAmount: "",
-  shippingAmount: "",
-  netAmount: "",
-};
-
-const payoutImportFieldDefinitions: Array<{
-  id: PayoutImportColumnKey;
-  label: string;
-  aliases: string[];
-  required: boolean;
-}> = [
-  { id: "orderKey", label: "Pedido", aliases: payoutOrderKeyAliases, required: true },
-  { id: "netAmount", label: "Líquido", aliases: payoutNetAliases, required: true },
-  { id: "paidAt", label: "Data", aliases: payoutPaidAtAliases, required: false },
-  { id: "grossAmount", label: "Bruto", aliases: payoutGrossAliases, required: false },
-  { id: "feeAmount", label: "Taxas", aliases: payoutFeeAliases, required: false },
-  { id: "shippingAmount", label: "Frete", aliases: payoutShippingAliases, required: false },
-];
-
-const noPayoutColumnSelectValue = "__none__";
-
-const buildPayoutInputId = (fileName: string, marketplace: string, orderKey: string, sourceRow: number) => {
-  const marketplacePart = normalizeConciliationPayoutOrderKey(marketplace) || "MARKETPLACE";
-  const orderPart = normalizeConciliationPayoutOrderKey(orderKey) || "SEMCHAVE";
-  const filePart = normalizeConciliationPayoutOrderKey(fileName).slice(0, 40) || "ARQUIVO";
-
-  return `${marketplacePart}-${orderPart}-${filePart}-${sourceRow}`;
-};
-
-const buildUniqueImportHeaders = (headerRow: unknown[]): string[] => {
-  const counts = new Map<string, number>();
-
-  return headerRow.map((value, index) => {
-    const baseHeader = String(value || `Coluna ${index + 1}`).trim() || `Coluna ${index + 1}`;
-    const count = counts.get(baseHeader) || 0;
-
-    counts.set(baseHeader, count + 1);
-
-    return count === 0 ? baseHeader : `${baseHeader} (${count + 1})`;
-  });
-};
-
-const readPayoutWorksheet = (
-  worksheet: XLSX.WorkSheet
-): {
-  headers: string[];
-  rows: PayoutImportRawRow[];
-} => {
-  const matrix = XLSX.utils.sheet_to_json<unknown[]>(worksheet, {
-    header: 1,
-    defval: "",
-    raw: false,
-  }) as unknown[][];
-  const headerRow = matrix[0] || [];
-  const headers = buildUniqueImportHeaders(headerRow);
-  const rows = matrix.slice(1).map<PayoutImportRawRow>((row, index) => {
-    const values = headers.reduce<Record<string, unknown>>((record, header, columnIndex) => {
-      record[header] = row[columnIndex] ?? "";
-
-      return record;
-    }, {});
-
-    return {
-      sourceRow: index + 2,
-      values,
-      hasAnyValue: Object.values(values).some((value) => String(value ?? "").trim()),
-    };
-  });
-
-  return { headers, rows };
-};
-
-const buildSuggestedPayoutMapping = (headers: string[]): PayoutImportMapping =>
-  payoutImportFieldDefinitions.reduce<PayoutImportMapping>(
-    (mapping, field) => ({
-      ...mapping,
-      [field.id]: findImportColumn(headers, field.aliases),
-    }),
-    emptyPayoutImportMapping
-  );
-
-const parsePayoutRowsFromMapping = (
-  rows: PayoutImportRawRow[],
-  fileName: string,
-  marketplace: string,
-  mapping: PayoutImportMapping
-): {
-  payouts: ConciliationMarketplacePayoutInput[];
-  invalidRows: number;
-} => {
-  let invalidRows = 0;
-  const payouts = rows.reduce<ConciliationMarketplacePayoutInput[]>((parsedRows, row) => {
-    const orderKey = String(row.values[mapping.orderKey] ?? "").trim();
-    const netAmount = parseImportMoney(row.values[mapping.netAmount]);
-
-    if (!row.hasAnyValue) return parsedRows;
-    if (!orderKey || netAmount === null) {
-      invalidRows += 1;
-      return parsedRows;
-    }
-
-    const grossAmount = parseImportMoney(row.values[mapping.grossAmount]);
-    const feeAmount = parseImportMoney(row.values[mapping.feeAmount]);
-    const shippingAmount = parseImportMoney(row.values[mapping.shippingAmount]);
-
-    parsedRows.push({
-      id: buildPayoutInputId(fileName, marketplace, orderKey, row.sourceRow),
-      marketplace,
-      orderKey,
-      paidAt: parseImportDate(row.values[mapping.paidAt]),
-      grossAmount: grossAmount ?? netAmount,
-      feeAmount: feeAmount ?? 0,
-      shippingAmount: shippingAmount ?? 0,
-      netAmount,
-      sourceFileName: fileName,
-      sourceRow: row.sourceRow,
-    });
-
-    return parsedRows;
-  }, []);
-
-  return {
-    payouts,
-    invalidRows,
-  };
-};
-
-const getOrderPayoutImportKeys = (order: ConciliationOrder): string[] => {
-  const originalOrder = order.originalOrder as unknown as Record<string, unknown>;
-  const notaFiscal = originalOrder.notaFiscal as Record<string, unknown> | undefined;
-  const keys = [
-    order.id,
-    order.orderId,
-    order.number,
-    order.storeNumber,
-    originalOrder.numeroPedidoCompra,
-    notaFiscal?.numeroPedidoLoja,
-  ].map(normalizeConciliationPayoutOrderKey);
-
-  return Array.from(new Set(keys.filter(Boolean)));
-};
-
-type PayoutImportGroup = {
-  id: string;
-  importBatchId: string | null;
-  sourceFileName: string;
-  marketplace: string;
-  importedAt: string | null;
-  importedBy: ConciliationMarketplacePayout["importedBy"];
-  payouts: ConciliationMarketplacePayout[];
-  matchedCount: number;
-  orphanCount: number;
-  netAmount: number;
-};
-
-const getPayoutImportGroupId = (payout: ConciliationMarketplacePayout) =>
-  payout.importBatchId || `${payout.sourceFileName}::${payout.importedAt || "sem-data"}`;
-
-const buildPayoutImportGroups = (
-  payouts: ConciliationMarketplacePayout[],
-  orderKeySet: Set<string>
-): PayoutImportGroup[] => {
-  const groups = payouts.reduce<Map<string, PayoutImportGroup>>((map, payout) => {
-    const groupId = getPayoutImportGroupId(payout);
-    const existing = map.get(groupId) || {
-      id: groupId,
-      importBatchId: payout.importBatchId,
-      sourceFileName: payout.sourceFileName,
-      marketplace: payout.marketplace,
-      importedAt: payout.importedAt,
-      importedBy: payout.importedBy,
-      payouts: [],
-      matchedCount: 0,
-      orphanCount: 0,
-      netAmount: 0,
-    };
-    const matched = orderKeySet.has(normalizeConciliationPayoutOrderKey(payout.orderKey));
-
-    existing.payouts.push(payout);
-    existing.netAmount += payout.netAmount;
-    existing.matchedCount += matched ? 1 : 0;
-    existing.orphanCount += matched ? 0 : 1;
-    map.set(groupId, existing);
-
-    return map;
-  }, new Map());
-
-  return Array.from(groups.values()).sort(
-    (first, second) => new Date(second.importedAt || "").getTime() - new Date(first.importedAt || "").getTime()
-  );
-};
-
-const PayoutImportDialog = ({
-  open,
-  onOpenChange,
-  orders,
-  marketplaceOptions,
-  isSaving,
-  onSave,
-}: {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  orders: ConciliationOrder[];
-  marketplaceOptions: string[];
-  isSaving: boolean;
-  onSave: (payouts: ConciliationMarketplacePayoutInput[]) => Promise<void>;
-}) => {
-  const availableMarketplaces = React.useMemo(
-    () => marketplaceOptions.filter((option) => option !== "Todos"),
-    [marketplaceOptions]
-  );
-  const [selectedMarketplace, setSelectedMarketplace] = React.useState("");
-  const [fileName, setFileName] = React.useState("");
-  const [headers, setHeaders] = React.useState<string[]>([]);
-  const [rawRows, setRawRows] = React.useState<PayoutImportRawRow[]>([]);
-  const [columnMapping, setColumnMapping] = React.useState<PayoutImportMapping>(emptyPayoutImportMapping);
-  const [parseError, setParseError] = React.useState("");
-  const [isParsing, setIsParsing] = React.useState(false);
-
-  React.useEffect(() => {
-    if (!open) return;
-
-    setSelectedMarketplace((previous) => previous || availableMarketplaces[0] || "Marketplace");
-    setFileName("");
-    setHeaders([]);
-    setRawRows([]);
-    setColumnMapping(emptyPayoutImportMapping);
-    setParseError("");
-  }, [availableMarketplaces, open]);
-
-  const orderKeySet = React.useMemo(() => {
-    const keys = new Set<string>();
-
-    orders.forEach((order) => {
-      getOrderPayoutImportKeys(order).forEach((key) => keys.add(key));
-    });
-
-    return keys;
-  }, [orders]);
-  const mappingReady = Boolean(columnMapping.orderKey && columnMapping.netAmount);
-  const parsedPayoutResult = React.useMemo(
-    () =>
-      mappingReady
-        ? parsePayoutRowsFromMapping(rawRows, fileName, selectedMarketplace, columnMapping)
-        : { payouts: [], invalidRows: rawRows.filter((row) => row.hasAnyValue).length },
-    [columnMapping, fileName, mappingReady, rawRows, selectedMarketplace]
-  );
-  const payouts = parsedPayoutResult.payouts;
-  const invalidRows = parsedPayoutResult.invalidRows;
-  const matchedPayoutCount = React.useMemo(
-    () => payouts.filter((payout) => orderKeySet.has(normalizeConciliationPayoutOrderKey(payout.orderKey))).length,
-    [orderKeySet, payouts]
-  );
-  const netAmount = React.useMemo(
-    () => payouts.reduce((total, payout) => total + payout.netAmount, 0),
-    [payouts]
-  );
-  const previewRows = payouts.slice(0, 8);
-  const hasFileRows = rawRows.length > 0;
-  const mappingMissingMessage =
-    hasFileRows && !mappingReady ? "Mapeie as colunas obrigatórias de pedido e líquido para gerar a prévia." : "";
-
-  const handleMappingChange = (fieldId: PayoutImportColumnKey, value: string) => {
-    setColumnMapping((previous) => ({
-      ...previous,
-      [fieldId]: value === noPayoutColumnSelectValue ? "" : value,
-    }));
+  const handleSaveStatusMappings = () => {
+    onSaveStatusMappings(draftStatusMappings);
   };
 
-  const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-
-    setFileName(file?.name || "");
-    setHeaders([]);
-    setRawRows([]);
-    setColumnMapping(emptyPayoutImportMapping);
-    setParseError("");
-
-    if (!file) return;
-
-    setIsParsing(true);
-    try {
-      const arrayBuffer = await file.arrayBuffer();
-      const workbook = XLSX.read(arrayBuffer, { type: "array", cellDates: true });
-      const firstSheetName = workbook.SheetNames[0];
-
-      if (!firstSheetName) {
-        throw new Error("O arquivo não possui abas para leitura.");
-      }
-
-      const result = readPayoutWorksheet(workbook.Sheets[firstSheetName]);
-
-      setHeaders(result.headers);
-      setRawRows(result.rows);
-      setColumnMapping(buildSuggestedPayoutMapping(result.headers));
-      if (result.headers.length === 0 || result.rows.length === 0) {
-        setParseError("Nenhuma linha encontrada. Confira se a primeira linha possui cabeçalhos e se há dados abaixo.");
-      }
-    } catch (error) {
-      setParseError(error instanceof Error ? error.message : "Não foi possível ler o arquivo.");
-    } finally {
-      setIsParsing(false);
-      event.target.value = "";
-    }
-  };
-
-  const handleSave = async () => {
-    if (payouts.length === 0) return;
-
-    await onSave(payouts);
-  };
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-5xl">
-        <DialogHeader>
-          <DialogTitle>Importar Repasses</DialogTitle>
-          <DialogDescription>
-            Carregue um CSV ou XLSX do marketplace para comparar o líquido repassado com os pedidos do período.
-          </DialogDescription>
-        </DialogHeader>
-
-        <div className="grid gap-4 lg:grid-cols-[280px_1fr]">
-          <div className="space-y-4 rounded-lg border p-4">
-            <label className="grid gap-1.5">
-              <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Marketplace</span>
-              <Select value={selectedMarketplace} onValueChange={setSelectedMarketplace} disabled={isSaving || isParsing}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Marketplace" />
-                </SelectTrigger>
-                <SelectContent>
-                  {availableMarketplaces.length > 0 ? (
-                    availableMarketplaces.map((option) => (
-                      <SelectItem key={option} value={option}>
-                        {option}
-                      </SelectItem>
-                    ))
-                  ) : (
-                    <SelectItem value="Marketplace">Marketplace</SelectItem>
-                  )}
-                </SelectContent>
-              </Select>
-            </label>
-
-            <label className="grid gap-1.5">
-              <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Arquivo</span>
-              <Input
-                type="file"
-                accept=".xlsx,.xls,.csv"
-                onChange={handleFileChange}
-                disabled={isSaving || isParsing}
-              />
-            </label>
-
-            {parseError ? (
-              <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
-                {parseError}
-              </div>
-            ) : null}
-
-            {headers.length > 0 ? (
-              <div className="space-y-3 rounded-lg border bg-muted/20 p-3">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <p className="text-sm font-medium">Mapeamento de colunas</p>
-                    <p className="mt-1 text-xs text-muted-foreground">Ajuste os campos reconhecidos antes de importar.</p>
-                  </div>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    className="h-8"
-                    onClick={() => setColumnMapping(buildSuggestedPayoutMapping(headers))}
-                    disabled={isSaving || isParsing}
-                  >
-                    <RotateCcw className="mr-2 h-4 w-4" />
-                    Sugerir
-                  </Button>
-                </div>
-                <div className="grid gap-3">
-                  {payoutImportFieldDefinitions.map((field) => (
-                    <label key={field.id} className="grid gap-1.5">
-                      <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                        {field.label}
-                        {field.required ? " *" : ""}
-                      </span>
-                      <Select
-                        value={columnMapping[field.id] || noPayoutColumnSelectValue}
-                        onValueChange={(value) => handleMappingChange(field.id, value)}
-                        disabled={isSaving || isParsing}
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="Selecionar coluna" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value={noPayoutColumnSelectValue}>Não usar</SelectItem>
-                          {headers.map((header) => (
-                            <SelectItem key={`${field.id}-${header}`} value={header}>
-                              {header}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </label>
-                  ))}
-                </div>
-              </div>
-            ) : null}
-          </div>
-
-          <div className="space-y-4">
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-              <div className="rounded-lg border bg-muted/30 p-3">
-                <DetailItem label="Linhas lidas" value={formatNumber(rawRows.length)} />
-              </div>
-              <div className="rounded-lg border bg-muted/30 p-3">
-                <DetailItem label="Repasses válidos" value={formatNumber(payouts.length)} />
-              </div>
-              <div className="rounded-lg border bg-muted/30 p-3">
-                <DetailItem label="Com pedido" value={formatNumber(matchedPayoutCount)} />
-              </div>
-              <div className="rounded-lg border bg-muted/30 p-3">
-                <DetailItem label="Líquido arquivo" value={formatCurrency(netAmount)} />
-              </div>
-            </div>
-
-            <div className="rounded-lg border">
-              <div className="flex flex-col gap-1 border-b p-3 sm:flex-row sm:items-center sm:justify-between">
-                <div>
-                  <p className="text-sm font-medium">Prévia</p>
-                  <p className="text-xs text-muted-foreground">
-                    {fileName || "Nenhum arquivo selecionado"}
-                    {invalidRows > 0 ? `, ${formatNumber(invalidRows)} linha(s) ignorada(s)` : ""}
-                  </p>
-                </div>
-                {isParsing ? <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" /> : null}
-              </div>
-
-              {mappingMissingMessage ? (
-                <div className="p-3">
-                  <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
-                    {mappingMissingMessage}
-                  </div>
-                </div>
-              ) : previewRows.length > 0 ? (
-                <div className="overflow-x-auto">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Pedido</TableHead>
-                        <TableHead>Data</TableHead>
-                        <TableHead className="text-right">Bruto</TableHead>
-                        <TableHead className="text-right">Taxas</TableHead>
-                        <TableHead className="text-right">Frete</TableHead>
-                        <TableHead className="text-right">Líquido</TableHead>
-                        <TableHead>Status</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {previewRows.map((payout) => {
-                        const matched = orderKeySet.has(normalizeConciliationPayoutOrderKey(payout.orderKey));
-
-                        return (
-                          <TableRow key={payout.id}>
-                            <TableCell className="font-medium">{payout.orderKey}</TableCell>
-                            <TableCell>{formatDateTime(payout.paidAt)}</TableCell>
-                            <TableCell className="text-right">{formatCurrency(payout.grossAmount)}</TableCell>
-                            <TableCell className="text-right">{formatCurrency(payout.feeAmount)}</TableCell>
-                            <TableCell className="text-right">{formatCurrency(payout.shippingAmount)}</TableCell>
-                            <TableCell className="text-right font-medium">{formatCurrency(payout.netAmount)}</TableCell>
-                            <TableCell>
-                              {matched ? (
-                                <Badge className="whitespace-nowrap">Pedido encontrado</Badge>
-                              ) : (
-                                <Badge variant="outline" className="whitespace-nowrap">Sem pedido</Badge>
-                              )}
-                            </TableCell>
-                          </TableRow>
-                        );
-                      })}
-                    </TableBody>
-                  </Table>
-                </div>
-              ) : (
-                <EmptyDetailState>
-                  {hasFileRows
-                    ? "Nenhuma linha válida encontrada para o mapeamento atual."
-                    : "Selecione um arquivo de repasse para visualizar as primeiras linhas."}
-                </EmptyDetailState>
-              )}
-            </div>
-          </div>
-        </div>
-
-        <DialogFooter>
-          <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={isSaving || isParsing}>
-            Fechar
-          </Button>
-          <Button type="button" onClick={handleSave} disabled={payouts.length === 0 || isSaving || isParsing}>
-            {isSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Upload className="mr-2 h-4 w-4" />}
-            Importar {payouts.length > 0 ? formatNumber(payouts.length) : ""}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-};
-
-const PayoutHistoryDialog = ({
-  open,
-  onOpenChange,
-  groups,
-  orderKeySet,
-  isSaving,
-  onDeleteImport,
-}: {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  groups: PayoutImportGroup[];
-  orderKeySet: Set<string>;
-  isSaving: boolean;
-  onDeleteImport: (group: PayoutImportGroup) => void;
-}) => {
-  const totalLines = groups.reduce((total, group) => total + group.payouts.length, 0);
-  const totalMatched = groups.reduce((total, group) => total + group.matchedCount, 0);
-  const totalOrphan = groups.reduce((total, group) => total + group.orphanCount, 0);
-  const totalNetAmount = groups.reduce((total, group) => total + group.netAmount, 0);
-  const orphanRows = React.useMemo(
-    () =>
-      groups.flatMap((group) =>
-        group.payouts
-          .filter((payout) => !orderKeySet.has(normalizeConciliationPayoutOrderKey(payout.orderKey)))
-          .map((payout) => ({ group, payout }))
-      ),
-    [groups, orderKeySet]
-  );
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-6xl">
-        <DialogHeader>
-          <DialogTitle>Repasses Importados</DialogTitle>
-          <DialogDescription>
-            Consulte lotes importados, linhas sem pedido encontrado e desfaça importações quando necessário.
-          </DialogDescription>
-        </DialogHeader>
-
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <div className="rounded-lg border bg-muted/30 p-3">
-            <DetailItem label="Importações" value={formatNumber(groups.length)} />
-          </div>
-          <div className="rounded-lg border bg-muted/30 p-3">
-            <DetailItem label="Linhas importadas" value={formatNumber(totalLines)} />
-          </div>
-          <div className="rounded-lg border bg-muted/30 p-3">
-            <DetailItem label="Com pedido" value={formatNumber(totalMatched)} />
-          </div>
-          <div className="rounded-lg border bg-muted/30 p-3">
-            <DetailItem label="Líquido importado" value={formatCurrency(totalNetAmount)} />
-          </div>
-        </div>
-
-        <Tabs defaultValue="imports" className="mt-2">
-          <TabsList>
-            <TabsTrigger value="imports">Importações</TabsTrigger>
-            <TabsTrigger value="orphans">Linhas sem pedido ({formatNumber(totalOrphan)})</TabsTrigger>
-          </TabsList>
-
-          <TabsContent value="imports" className="mt-4">
-            {groups.length > 0 ? (
-              <ScrollArea className="h-[46vh] rounded-lg border">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Arquivo</TableHead>
-                      <TableHead>Marketplace</TableHead>
-                      <TableHead>Importado em</TableHead>
-                      <TableHead className="text-right">Linhas</TableHead>
-                      <TableHead className="text-right">Com pedido</TableHead>
-                      <TableHead className="text-right">Sem pedido</TableHead>
-                      <TableHead className="text-right">Líquido</TableHead>
-                      <TableHead className="text-right">Ação</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {groups.map((group) => (
-                      <TableRow key={group.id}>
-                        <TableCell>
-                          <div className="max-w-72">
-                            <p className="truncate font-medium">{group.sourceFileName}</p>
-                            <p className="text-xs text-muted-foreground">{formatActor(group.importedBy)}</p>
-                          </div>
-                        </TableCell>
-                        <TableCell>{group.marketplace}</TableCell>
-                        <TableCell>{formatDateTime(group.importedAt)}</TableCell>
-                        <TableCell className="text-right">{formatNumber(group.payouts.length)}</TableCell>
-                        <TableCell className="text-right">{formatNumber(group.matchedCount)}</TableCell>
-                        <TableCell className="text-right">
-                          {group.orphanCount > 0 ? (
-                            <Badge variant="outline" className="border-amber-200 bg-amber-50 text-amber-800">
-                              {formatNumber(group.orphanCount)}
-                            </Badge>
-                          ) : (
-                            formatNumber(0)
-                          )}
-                        </TableCell>
-                        <TableCell className="text-right font-medium">{formatCurrency(group.netAmount)}</TableCell>
-                        <TableCell className="text-right">
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="outline"
-                            onClick={() => onDeleteImport(group)}
-                            disabled={isSaving}
-                          >
-                            {isSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Trash2 className="mr-2 h-4 w-4" />}
-                            Desfazer
-                          </Button>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </ScrollArea>
-            ) : (
-              <EmptyDetailState>Nenhuma importação de repasse registrada.</EmptyDetailState>
-            )}
-          </TabsContent>
-
-          <TabsContent value="orphans" className="mt-4">
-            {orphanRows.length > 0 ? (
-              <ScrollArea className="h-[46vh] rounded-lg border">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Pedido do arquivo</TableHead>
-                      <TableHead>Arquivo</TableHead>
-                      <TableHead>Marketplace</TableHead>
-                      <TableHead>Data repasse</TableHead>
-                      <TableHead className="text-right">Líquido</TableHead>
-                      <TableHead>Importação</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {orphanRows.map(({ group, payout }) => (
-                      <TableRow key={payout.id}>
-                        <TableCell className="font-medium">{payout.orderKey}</TableCell>
-                        <TableCell>
-                          <div className="max-w-60">
-                            <p className="truncate">{payout.sourceFileName}</p>
-                            <p className="text-xs text-muted-foreground">Linha {formatNumber(payout.sourceRow)}</p>
-                          </div>
-                        </TableCell>
-                        <TableCell>{payout.marketplace}</TableCell>
-                        <TableCell>{formatDateTime(payout.paidAt)}</TableCell>
-                        <TableCell className="text-right font-medium">{formatCurrency(payout.netAmount)}</TableCell>
-                        <TableCell>
-                          <div className="text-sm">
-                            <p>{formatDateTime(group.importedAt)}</p>
-                            <p className="text-xs text-muted-foreground">{formatActor(group.importedBy)}</p>
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </ScrollArea>
-            ) : (
-              <EmptyDetailState>Nenhuma linha órfã nas importações atuais.</EmptyDetailState>
-            )}
-          </TabsContent>
-        </Tabs>
-
-        <DialogFooter>
-          <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={isSaving}>
-            Fechar
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-};
-
-const OrderDetailsDialog = ({
-  order,
-  onClose,
-  isSaving,
-  onSaveSystemStatus,
-  onSaveFinancialAdjustments,
-}: {
-  order: ConciliationOrder | null;
-  onClose: () => void;
-  isSaving: boolean;
-  onSaveSystemStatus: (order: ConciliationOrder, manualSystemStatus: ConciliationSystemStatus | null) => void;
-  onSaveFinancialAdjustments: (order: ConciliationOrder, adjustments: ConciliationFinancialAdjustmentInput[]) => void;
-}) => {
-  const [systemStatusValue, setSystemStatusValue] = React.useState<SystemStatusSelectValue>(automaticStatusSelectValue);
-  const [activeDetailTab, setActiveDetailTab] = React.useState("geral");
-  const [financialAdjustmentDraft, setFinancialAdjustmentDraft] = React.useState<FinancialAdjustmentDraft>(() =>
-    financialAdjustmentFields.reduce((draft, field) => {
-      draft[field.id] = { value: "", reason: "" };
-      return draft;
-    }, {} as FinancialAdjustmentDraft)
-  );
-
-  React.useEffect(() => {
-    setSystemStatusValue(order?.manualSystemStatus ?? automaticStatusSelectValue);
-    setActiveDetailTab("geral");
-    setFinancialAdjustmentDraft(
-      financialAdjustmentFields.reduce((draft, field) => {
-        const adjustment = order?.financialAdjustments[field.id];
-        draft[field.id] = {
-          value: adjustment?.active ? formatCurrencyInput(adjustment.adjustedValue) : "",
-          reason: adjustment?.reason || "",
-        };
-        return draft;
-      }, {} as FinancialAdjustmentDraft)
-    );
-  }, [order?.id, order?.manualSystemStatus, order?.financialAdjustments]);
-
-  if (!order) return null;
-
-  const original = order.originalOrder;
-  const originalRecord = original as unknown as Record<string, unknown>;
-  const deliveryAddress = original.transporte?.etiqueta;
-  const volumes = original.transporte?.volumes || [];
-  const returnRecords = [
-    originalRecord.devolucoes,
-    originalRecord.devolutions,
-    originalRecord.returns,
-    originalRecord.operationalReturns,
-  ].find(Array.isArray) as unknown[] | undefined;
-  const hasObservations = Boolean(original.observacoes || original.observacoesInternas);
-  const selectedManualSystemStatus =
-    systemStatusValue === automaticStatusSelectValue ? null : systemStatusValue;
-  const hasSystemStatusChanges = selectedManualSystemStatus !== order.manualSystemStatus;
-  const auditEvents = buildConciliationAuditEvents(order);
-  const hasFinancialWarning = order.financialDivergence.severity !== "ok";
-  const hasPayoutWarning = order.payoutComparison.status !== "matched";
-  const financialAdjustmentRows = financialAdjustmentFields.map((field) => {
-    const adjustment = order.financialAdjustments[field.id];
-    const draft = financialAdjustmentDraft[field.id] || { value: "", reason: "" };
-    const originalValue = adjustment?.active ? adjustment.originalValue : order[field.id];
-    const appliedValue = order[field.id];
-    const hasDraftValue = draft.value.trim() !== "";
-    const draftReason = draft.reason.trim();
-    const parsedValue = hasDraftValue ? parseCurrencyInput(draft.value) : null;
-    const isValueInvalid = hasDraftValue && parsedValue === null;
-    const shouldActivate =
-      hasDraftValue && parsedValue !== null && Math.abs(parsedValue - originalValue) > 0.004;
-    const isReasonMissing = shouldActivate && draftReason === "";
-    const nextAdjustedValue = shouldActivate ? parsedValue : null;
-    const currentAdjustedValue = adjustment?.active ? adjustment.adjustedValue : null;
-    const valueChanged =
-      shouldActivate || adjustment?.active
-        ? Math.abs((nextAdjustedValue || 0) - (currentAdjustedValue || 0)) > 0.004 ||
-          Boolean(shouldActivate) !== Boolean(adjustment?.active)
-        : false;
-    const reasonChanged =
-      Boolean(shouldActivate || adjustment?.active) && draftReason !== (adjustment?.reason || "");
-
-    return {
-      ...field,
-      adjustment,
-      originalValue,
-      appliedValue,
-      draft,
-      draftReason,
-      parsedValue,
-      isInvalid: isValueInvalid || isReasonMissing,
-      isValueInvalid,
-      isReasonMissing,
-      shouldActivate,
-      nextAdjustedValue,
-      hasChanged: valueChanged || reasonChanged,
-    };
-  });
-  const hasInvalidFinancialAdjustment = financialAdjustmentRows.some((row) => row.isInvalid);
-  const hasFinancialAdjustmentChanges = financialAdjustmentRows.some((row) => row.hasChanged);
-  const activeFinancialAdjustmentCount = financialAdjustmentRows.filter((row) => row.adjustment?.active).length;
-  const hasFinancialAdjustments = activeFinancialAdjustmentCount > 0;
-
-  const updateFinancialAdjustmentDraft = (
-    fieldId: ConciliationFinancialAdjustmentFieldId,
-    key: "value" | "reason",
-    value: string
+  const updateSystemStatusDefinition = (
+    statusId: ConciliationSystemStatus,
+    updates: Partial<Pick<ConciliationSystemStatusDefinition, "active" | "color" | "displayName">>
   ) => {
-    setFinancialAdjustmentDraft((current) => ({
-      ...current,
-      [fieldId]: {
-        ...(current[fieldId] || { value: "", reason: "" }),
-        [key]: value,
-      },
-    }));
+    setDraftSystemStatusSettings((previous) =>
+      normalizeConciliationSystemStatusSettings({
+        ...previous,
+        statuses: previous.statuses.map((definition) =>
+          definition.id === statusId
+            ? {
+                ...definition,
+                ...updates,
+                updatedAt: new Date().toISOString(),
+              }
+            : definition
+        ),
+      })
+    );
   };
 
-  const clearFinancialAdjustmentDraft = (fieldId: ConciliationFinancialAdjustmentFieldId) => {
-    setFinancialAdjustmentDraft((current) => ({
-      ...current,
-      [fieldId]: { value: "", reason: "" },
-    }));
+  const resetSystemStatusSettings = () => {
+    setDraftSystemStatusSettings(normalizeConciliationSystemStatusSettings(defaultConciliationSystemStatusSettings));
   };
 
-  const handleSaveFinancialAdjustmentDrafts = () => {
-    if (hasInvalidFinancialAdjustment) return;
-
-    const inputs: ConciliationFinancialAdjustmentInput[] = financialAdjustmentRows.map((row) => ({
-      fieldId: row.id,
-      label: row.label,
-      originalValue: row.originalValue,
-      adjustedValue: row.nextAdjustedValue,
-      reason: row.shouldActivate ? row.draftReason : "",
-      active: row.shouldActivate,
-    }));
-
-    onSaveFinancialAdjustments(order, inputs);
+  const handleSaveSystemStatusSettings = () => {
+    onSaveSystemStatusSettings(normalizeConciliationSystemStatusSettings(draftSystemStatusSettings));
   };
 
   return (
-    <Dialog open={Boolean(order)} onOpenChange={onClose}>
-      <DialogContent className="flex h-[90vh] w-[95vw] max-w-5xl flex-col overflow-hidden p-0">
-        <DialogHeader className="px-6 pb-2 pt-6">
-          <DialogTitle className="text-xl">Detalhes do Pedido: #{order.number || order.orderId}</DialogTitle>
-          <DialogDescription>
-            Pedido {order.storeNumber} em {order.marketplace}
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="flex h-[90vh] w-[98vw] max-w-[1800px] flex-col overflow-x-hidden p-4 sm:p-6">
+        <DialogHeader className="pr-8 text-left">
+          <DialogTitle className="text-lg leading-tight sm:text-xl">Configurações da conciliação</DialogTitle>
+          <DialogDescription className="break-words leading-relaxed">
+            Ajuste contas, status do sistema e mapeamentos da conciliação.
           </DialogDescription>
-
-          {order.isReconciled ? (
-            <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 rounded-md border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-800">
-              <span className="flex items-center gap-1 font-medium">
-                <CheckCircle2 className="h-4 w-4" />
-                Conciliado
-              </span>
-              {order.conciliation?.reconciledAt ? (
-                <span>
-                  em <strong>{formatDateTime(order.conciliation.reconciledAt)}</strong>
-                </span>
-              ) : null}
-              {order.conciliation?.reconciledBy ? (
-                <span>
-                  por <strong>{formatActor(order.conciliation.reconciledBy)}</strong>
-                </span>
-              ) : null}
-            </div>
-          ) : null}
-
-          {hasFinancialWarning || hasPayoutWarning || hasFinancialAdjustments ? (
-            <div className="mt-3 grid gap-2 sm:grid-cols-2">
-              {hasFinancialWarning ? (
-                <div className="flex items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-                  <AlertTriangle className="h-4 w-4 shrink-0" />
-                  <span>
-                    {order.financialDivergence.label}: {formatCurrency(order.financialDivergence.riskAmount)}
-                  </span>
-                </div>
-              ) : null}
-              {hasPayoutWarning ? (
-                <div className="flex items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-800">
-                  <Wallet className="h-4 w-4 shrink-0" />
-                  <span>
-                    {order.payoutComparison.label}: {formatCurrency(order.payoutComparison.differenceAmount)}
-                  </span>
-                </div>
-              ) : null}
-              {hasFinancialAdjustments ? (
-                <div
-                  className="flex items-center gap-2 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-900"
-                  title={getFinancialAdjustmentSummary(order)}
-                >
-                  <Banknote className="h-4 w-4 shrink-0" />
-                  <span>{formatNumber(activeFinancialAdjustmentCount)} ajuste(s) financeiro(s) manual(is)</span>
-                </div>
-              ) : null}
-            </div>
-          ) : null}
         </DialogHeader>
 
-        <div className="flex-1 overflow-hidden px-6 pb-2">
-          <Tabs value={activeDetailTab} onValueChange={setActiveDetailTab} className="flex h-full flex-col">
-            <TabsList className="grid h-auto w-full grid-cols-2 gap-1 sm:grid-cols-3 lg:grid-cols-6">
-              <TabsTrigger value="geral" className="px-2 text-xs leading-tight">Geral</TabsTrigger>
-              <TabsTrigger value="cliente" className="px-2 text-xs leading-tight">Cliente</TabsTrigger>
-	              <TabsTrigger value="itens" className="px-2 text-xs leading-tight">Itens</TabsTrigger>
-	              <TabsTrigger value="financeiro" className="px-2 text-xs leading-tight">Financeiro</TabsTrigger>
-	              <TabsTrigger value="calculos" className="px-2 text-xs leading-tight">Cálculos</TabsTrigger>
-	              <TabsTrigger value="repasse" className="px-2 text-xs leading-tight">Repasse</TabsTrigger>
-              <TabsTrigger value="transporte" className="px-2 text-xs leading-tight">Transporte</TabsTrigger>
-              <TabsTrigger value="observacoes" className="px-2 text-xs leading-tight">Observações</TabsTrigger>
-              <TabsTrigger value="marketplace" className="px-2 text-xs leading-tight">Marketplace</TabsTrigger>
-              <TabsTrigger value="devolucoes" className="px-2 text-xs leading-tight">Devoluções</TabsTrigger>
-              <TabsTrigger value="historico" className="px-2 text-xs leading-tight">Histórico</TabsTrigger>
-              <TabsTrigger value="sistema" className="px-2 text-xs leading-tight">Sistema</TabsTrigger>
-            </TabsList>
+        <div className="flex min-h-0 flex-1 flex-col gap-4">
+          <div
+            role="tablist"
+            className="inline-flex max-w-full flex-wrap items-center gap-1 self-start rounded-full bg-muted p-1"
+          >
+            {settingsHubTabItems.map((item) => {
+              const active = item.value === activeTab;
+              const Icon = item.icon;
+              const count =
+                item.value === "account-mapping"
+                  ? accountEntries.length
+                  : item.value === "order-status"
+                    ? statusRows.length
+                    : item.value === "auto-reconciliation"
+                      ? 1
+                      : systemStatusActiveCount;
 
-            <ScrollArea className="mt-4 flex-1 pr-2">
-            <TabsContent value="geral" className="mt-0">
-              <DetailCard title="Informações Gerais" icon={FileText}>
-                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-                <DetailItem label="Pedido Bling" value={order.number || order.orderId} />
-                <DetailItem label="Pedido loja" value={order.storeNumber} />
-                <DetailItem label="Data" value={formatDate(order.date)} />
-                <DetailItem label="Conta" value={order.accountName} />
-                <DetailItem label="Marketplace" value={order.marketplace} />
-                <DetailItem label="Status" value={<Badge variant={getStatusVariant(order.statusName)}>{order.statusName}</Badge>} />
-                <DetailItem
-                  label="Status sistema"
-                  value={<Badge variant={getSystemStatusVariant(order.systemStatus)}>{order.systemStatus}</Badge>}
-                />
-                <DetailItem
-                  label="Conciliação"
-                  value={
-                    order.isReconciled ? (
-                      <Badge className="gap-1">
-                        <CheckCircle2 className="h-3 w-3" />
-                        Conciliado
-                      </Badge>
-                    ) : (
-                      <Badge variant="outline">Pendente</Badge>
-                    )
-                  }
-                />
-                <DetailItem
-                  label="Sugestão"
-                  value={<ConciliationSuggestionBadge order={order} />}
-                />
-                <DetailItem
-                  label="Alerta financeiro"
-                  value={<FinancialDivergenceBadge divergence={order.financialDivergence} compact />}
-                />
-                <DetailItem
-                  label="Repasse"
-                  value={<PayoutComparisonBadge order={order} compact />}
-                />
-	                <DetailItem
-	                  label="Ajustes financeiros"
-	                  value={<FinancialAdjustmentsBadge order={order} />}
-	                />
-	                <DetailItem
-	                  label="Cálculos"
-	                  value={<CalculatedColumnsBadge order={order} />}
-	                />
-	                <DetailItem label="Conciliado em" value={formatDateTime(order.conciliation?.reconciledAt)} />
-                <DetailItem label="Conciliado por" value={formatActor(order.conciliation?.reconciledBy ?? null)} />
-                <DetailItem label="Nota fiscal" value={original.notaFiscal?.numero || original.notaFiscal?.id} />
-                </div>
-              </DetailCard>
-            </TabsContent>
+              return (
+                <button
+                  key={item.value}
+                  type="button"
+                  role="tab"
+                  aria-selected={active}
+                  onClick={() => setActiveTab(item.value)}
+                  className={cn(
+                    "relative inline-flex items-center gap-2 rounded-full px-3.5 py-1.5 text-sm font-medium transition-all",
+                    active
+                      ? "bg-white text-slate-950 shadow-sm"
+                      : "text-muted-foreground hover:text-slate-950"
+                  )}
+                >
+                  <Icon className="h-4 w-4" />
+                  <span className="truncate">{item.label}</span>
+                  <span
+                    className={cn(
+                      "ml-0.5 inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-full px-1 text-[10px] font-semibold",
+                      active ? "bg-blue-50 text-blue-700" : "bg-zinc-200 text-zinc-600"
+                    )}
+                  >
+                    {formatNumber(count)}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
 
-            <TabsContent value="cliente" className="mt-0">
-              <DetailCard title="Informações do Cliente" icon={User}>
-                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                  <DetailItem label="Nome" value={original.contato?.nome} />
-                  <DetailItem label="Documento" value={original.contato?.numeroDocumento} />
-                  <DetailItem label="Tipo pessoa" value={original.contato?.tipoPessoa} />
-                </div>
-              </DetailCard>
-            </TabsContent>
-
-            <TabsContent value="itens" className="mt-0 space-y-3">
-              <DetailCard title="Itens do Pedido" icon={Package}>
-                {order.items.length > 0 ? (
-                  <div className="space-y-3">
-                    {order.items.map((item) => (
-                      <div key={item.id} className="rounded-lg border bg-white p-3">
-                        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                          <div className="min-w-0">
-                            <p className="font-medium leading-snug">{item.description}</p>
-                            <p className="mt-1 text-xs text-muted-foreground">SKU: {item.sku}</p>
-                          </div>
-                          <div className="grid grid-cols-3 gap-4 text-right text-sm sm:min-w-64">
-                            <DetailItem label="Qtd" value={formatNumber(item.quantity)} />
-                            <DetailItem label="Unitário" value={formatCurrency(item.unitValue)} />
-                            <DetailItem label="Total" value={formatCurrency(item.grossValue)} />
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <EmptyDetailState>Pedido sem itens registrados.</EmptyDetailState>
-                )}
-              </DetailCard>
-            </TabsContent>
-
-            <TabsContent value="financeiro" className="mt-0 space-y-5">
-              <DetailCard title="Informações Financeiras" icon={Banknote}>
-                <div className="rounded-lg border bg-muted/20 p-4">
-                <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                  <div>
-                    <h4 className="text-sm font-semibold">Divergência financeira</h4>
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      Regras aplicadas sobre os valores disponíveis no pedido.
-                    </p>
-                  </div>
-                  <FinancialDivergenceBadge divergence={order.financialDivergence} compact />
-                </div>
-                <div className="mb-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-                  <DetailItem label="Total esperado" value={formatCurrency(order.financialDivergence.expectedGrossRevenue)} />
-                  <DetailItem label="Diferença bruto" value={formatCurrency(order.financialDivergence.grossRevenueDifference)} />
-                  <DetailItem label="Cobertura deduções" value={formatPercentage(order.financialDivergence.deductionCoveragePercentage)} />
-                  <DetailItem label="Risco estimado" value={formatCurrency(order.financialDivergence.riskAmount)} />
-                </div>
-                <FinancialDivergenceReasons divergence={order.financialDivergence} />
-                </div>
-
-                <div className="mt-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-                <DetailItem label="Faturamento bruto" value={formatCurrency(order.grossRevenue)} />
-                <DetailItem label="Produtos" value={formatCurrency(order.productRevenue)} />
-                <DetailItem label="Frete cliente" value={formatCurrency(order.customerShippingRevenue)} />
-                <DetailItem label="Desconto" value={formatCurrency(order.discountAmount)} />
-                <DetailItem label="Outras despesas" value={formatCurrency(order.otherExpenses)} />
-                <DetailItem label="Líquido estimado" value={formatCurrency(order.netRevenue)} />
-                <DetailItem label="Custo produto" value={formatCurrency(order.productCost)} />
-                <DetailItem label="Frete custo" value={formatCurrency(order.shippingCost)} />
-                <DetailItem label="Comissão" value={formatCurrency(order.commissionFee)} />
-                <DetailItem label="Impostos" value={formatCurrency(order.taxes)} />
-                <DetailItem label="Margem" value={formatCurrency(order.contributionMargin)} />
-                <DetailItem label="Margem %" value={formatPercentage(order.contributionMarginPercentage)} />
-                </div>
-
-                <Separator className="my-5" />
-
-                <div className="space-y-3">
-                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                    <div>
-                      <h4 className="text-sm font-semibold">Ajustes manuais</h4>
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        Corrija campos financeiros de origem e informe o motivo da alteração.
-                      </p>
+          {activeTab === "account-mapping" ? (
+            <div className="mt-0 flex min-h-0 flex-1 flex-col">
+              <div className="min-h-0 flex-1 overflow-auto rounded-md border bg-gradient-to-b from-zinc-50/60 to-white">
+                <div className="space-y-6 p-4 sm:p-5">
+                  <div className="grid gap-3 sm:grid-cols-3">
+                    <div className="rounded-lg border bg-white p-3">
+                      <SettingsDetailLine label="Contas detectadas" value={formatNumber(accountEntries.length)} />
                     </div>
-                    <Badge variant={activeFinancialAdjustmentCount > 0 ? "default" : "outline"} className="w-fit">
-                      {formatNumber(activeFinancialAdjustmentCount)} ativo(s)
-                    </Badge>
-                  </div>
-
-                  <div className="overflow-x-auto rounded-lg border">
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>Campo</TableHead>
-                          <TableHead className="text-right">Original</TableHead>
-                          <TableHead className="text-right">Aplicado</TableHead>
-                          <TableHead>Correção</TableHead>
-                          <TableHead>Motivo</TableHead>
-                          <TableHead className="text-right">Ação</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {financialAdjustmentRows.map((row) => (
-                          <TableRow key={row.id}>
-                            <TableCell>
-                              <div>
-                                <p className="font-medium">{row.label}</p>
-                                <p className="text-xs text-muted-foreground">{row.helper}</p>
-                              </div>
-                            </TableCell>
-                            <TableCell className="whitespace-nowrap text-right">
-                              {formatCurrency(row.originalValue)}
-                            </TableCell>
-                            <TableCell className="whitespace-nowrap text-right font-medium">
-                              {formatCurrency(row.appliedValue)}
-                            </TableCell>
-                            <TableCell className="min-w-36">
-                              <Input
-                                inputMode="decimal"
-                                value={row.draft.value}
-                                placeholder={formatCurrencyInput(row.originalValue)}
-                                onChange={(event) => updateFinancialAdjustmentDraft(row.id, "value", event.target.value)}
-                                className={cn(row.isValueInvalid && "border-red-300 focus-visible:ring-red-300")}
-                              />
-                              {row.isValueInvalid ? (
-                                <p className="mt-1 text-xs text-red-600">Valor inválido.</p>
-                              ) : null}
-                            </TableCell>
-                            <TableCell className="min-w-52">
-                              <Input
-                                value={row.draft.reason}
-                                placeholder="Motivo da correção"
-                                onChange={(event) => updateFinancialAdjustmentDraft(row.id, "reason", event.target.value)}
-                                className={cn(row.isReasonMissing && "border-red-300 focus-visible:ring-red-300")}
-                              />
-                              {row.isReasonMissing ? (
-                                <p className="mt-1 text-xs text-red-600">Informe o motivo do ajuste.</p>
-                              ) : null}
-                            </TableCell>
-                            <TableCell className="text-right">
-                              <Button
-                                type="button"
-                                size="sm"
-                                variant="ghost"
-                                onClick={() => clearFinancialAdjustmentDraft(row.id)}
-                                disabled={isSaving || (!row.draft.value && !row.draft.reason)}
-                              >
-                                Limpar
-                              </Button>
-                            </TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </div>
-
-                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                    <p className="text-xs text-muted-foreground">
-                      Líquido, margem e alertas serão recalculados após salvar.
-                    </p>
-                    <Button
-                      type="button"
-                      size="sm"
-                      onClick={handleSaveFinancialAdjustmentDrafts}
-                      disabled={!hasFinancialAdjustmentChanges || hasInvalidFinancialAdjustment || isSaving}
-                    >
-                      {isSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                      Salvar ajustes
-                    </Button>
-                  </div>
-                </div>
-
-                {original.parcelas?.length ? (
-                  <>
-                    <Separator className="my-5" />
-                    <div>
-                      <h4 className="mb-3 text-sm font-semibold">Parcelas</h4>
-                      <div className="space-y-2">
-                        {original.parcelas.map((parcel) => (
-                          <div key={parcel.id} className="flex items-center justify-between rounded-lg bg-muted/40 p-3 text-sm">
-                            <span>Vencimento: {formatDate(parcel.dataVencimento)}</span>
-                            <span className="font-medium">{formatCurrency(parcel.valor)}</span>
-                          </div>
-                        ))}
-                      </div>
+                    <div className="rounded-lg border bg-white p-3">
+                      <SettingsDetailLine label="Pedidos no escopo" value={formatNumber(orders.length)} />
                     </div>
-                  </>
-                ) : null}
-              </DetailCard>
-	            </TabsContent>
-
-	            <TabsContent value="calculos" className="mt-0">
-	              <DetailCard title="Colunas Calculadas" icon={Calculator}>
-	                {getOrderCalculationValues(order).length > 0 ? (
-	                  <div className="space-y-3">
-	                    {getOrderCalculationValues(order).map((calculation) => (
-	                      <div
-	                        key={calculation.id}
-	                        className={cn(
-	                          "rounded-lg border p-4",
-	                          calculation.error ? "border-red-200 bg-red-50" : "bg-muted/20"
-	                        )}
-	                      >
-	                        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-	                          <div className="min-w-0">
-	                            <p className="font-medium">{calculation.name}</p>
-	                            {calculation.description ? (
-	                              <p className="mt-1 text-xs text-muted-foreground">{calculation.description}</p>
-	                            ) : null}
-	                            <p className="mt-2 break-all font-mono text-[11px] text-muted-foreground">
-	                              {calculation.expression}
-	                            </p>
-	                          </div>
-	                          <div className="text-left sm:text-right">
-	                            {calculation.error ? (
-	                              <Badge variant="destructive">Erro</Badge>
-	                            ) : (
-	                              <p className="text-lg font-semibold">
-	                                {formatCalculationValue(calculation.value, calculation.isPercentage)}
-	                              </p>
-	                            )}
-	                            {calculation.error ? (
-	                              <p className="mt-2 max-w-sm text-xs text-red-700">{calculation.error}</p>
-	                            ) : null}
-	                          </div>
-	                        </div>
-	                      </div>
-	                    ))}
-	                  </div>
-	                ) : (
-	                  <EmptyDetailState>Nenhuma coluna calculada configurada para este pedido.</EmptyDetailState>
-	                )}
-	              </DetailCard>
-	            </TabsContent>
-
-	            <TabsContent value="repasse" className="mt-0 space-y-5">
-              <DetailCard title="Comparação de Repasse" icon={Wallet}>
-                <div className="rounded-lg border bg-muted/20 p-4">
-                  <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                    <div>
-                      <h4 className="text-sm font-semibold">Resumo do repasse</h4>
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        Comparação entre o líquido estimado do pedido e as linhas importadas do marketplace.
-                      </p>
-                    </div>
-                    <PayoutComparisonBadge order={order} compact />
-                  </div>
-                  <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
-                    <DetailItem label="Líquido esperado" value={formatCurrency(order.payoutComparison.expectedNetAmount)} />
-                    <DetailItem label="Líquido repassado" value={formatCurrency(order.payoutComparison.paidNetAmount)} />
-                    <DetailItem label="Diferença" value={formatCurrency(order.payoutComparison.differenceAmount)} />
-                    <DetailItem label="Tolerância" value={formatCurrency(order.payoutComparison.toleranceAmount)} />
-                    <DetailItem label="Linhas" value={formatNumber(order.payoutComparison.payoutCount)} />
-                  </div>
-                </div>
-
-                {order.marketplacePayouts.length > 0 ? (
-                  <div className="mt-5 overflow-x-auto rounded-lg border">
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>Pedido</TableHead>
-                          <TableHead>Arquivo</TableHead>
-                          <TableHead>Data</TableHead>
-                          <TableHead className="text-right">Bruto</TableHead>
-                          <TableHead className="text-right">Taxas</TableHead>
-                          <TableHead className="text-right">Frete</TableHead>
-                          <TableHead className="text-right">Líquido</TableHead>
-                          <TableHead>Importado por</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {order.marketplacePayouts.map((payout) => (
-                          <TableRow key={payout.id}>
-                            <TableCell className="font-medium">{payout.orderKey}</TableCell>
-                            <TableCell>
-                              <div className="max-w-56">
-                                <p className="truncate">{payout.sourceFileName}</p>
-                                <p className="text-xs text-muted-foreground">Linha {formatNumber(payout.sourceRow)}</p>
-                              </div>
-                            </TableCell>
-                            <TableCell>{formatDateTime(payout.paidAt)}</TableCell>
-                            <TableCell className="text-right">{formatCurrency(payout.grossAmount)}</TableCell>
-                            <TableCell className="text-right">{formatCurrency(payout.feeAmount)}</TableCell>
-                            <TableCell className="text-right">{formatCurrency(payout.shippingAmount)}</TableCell>
-                            <TableCell className="text-right font-medium">{formatCurrency(payout.netAmount)}</TableCell>
-                            <TableCell>
-                              <div className="text-sm">
-                                <p>{formatActor(payout.importedBy)}</p>
-                                <p className="text-xs text-muted-foreground">{formatDateTime(payout.importedAt)}</p>
-                              </div>
-                            </TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </div>
-                ) : (
-                  <div className="mt-5">
-                    <EmptyDetailState>Nenhuma linha de repasse importada para este pedido.</EmptyDetailState>
-                  </div>
-                )}
-              </DetailCard>
-            </TabsContent>
-
-            <TabsContent value="transporte" className="mt-0 space-y-5">
-              <DetailCard title="Transporte e Entrega" icon={Truck}>
-                {original.transporte ? (
-                  <div className="space-y-5">
-                    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-                    <DetailItem
-                      label="Frete por conta"
-                      value={original.transporte.fretePorConta === 1 ? "Destinatário" : "Emitente"}
-                    />
-                    <DetailItem label="Transportadora" value={original.transporte.contato?.nome} />
-                    <DetailItem label="Frete cliente" value={formatCurrency(original.transporte.frete)} />
-                    <DetailItem label="Custo frete" value={formatCurrency(order.shippingCost)} />
-                    <DetailItem label="Volumes" value={formatNumber(original.transporte.quantidadeVolumes)} />
-                    <DetailItem label="Peso bruto" value={`${formatNumber(original.transporte.pesoBruto)} kg`} />
-                    <DetailItem label="Prazo entrega" value={`${formatNumber(original.transporte.prazoEntrega)} dia(s)`} />
-                    <DetailItem label="Rastreamento" value={volumes[0]?.codigoRastreamento} />
-                    </div>
-
-                    {deliveryAddress ? (
-                      <div className="rounded-lg border bg-muted/30 p-4">
-                        <h4 className="mb-3 text-sm font-semibold">Endereço de entrega</h4>
-                        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                          <DetailItem label="Nome" value={deliveryAddress.nome} />
-                          <DetailItem label="Endereço" value={`${deliveryAddress.endereco}, ${deliveryAddress.numero}`} />
-                          <DetailItem label="Complemento" value={deliveryAddress.complemento} />
-                          <DetailItem label="Bairro" value={deliveryAddress.bairro} />
-                          <DetailItem label="Cidade/UF" value={`${deliveryAddress.municipio}/${deliveryAddress.uf}`} />
-                          <DetailItem label="CEP" value={deliveryAddress.cep} />
-                        </div>
-                      </div>
-                    ) : null}
-
-                    {volumes.length > 0 ? (
-                      <div className="space-y-2">
-                        <h4 className="text-sm font-semibold">Volumes</h4>
-                        {volumes.map((volume) => (
-                          <div key={volume.id} className="grid gap-3 rounded-lg border bg-white p-3 sm:grid-cols-3">
-                            <DetailItem label="Serviço" value={volume.servico} />
-                            <DetailItem label="Código rastreio" value={volume.codigoRastreamento} />
-                            <DetailItem label="ID volume" value={volume.id} />
-                          </div>
-                        ))}
-                      </div>
-                    ) : null}
-                  </div>
-                ) : (
-                  <EmptyDetailState>Pedido sem dados de transporte.</EmptyDetailState>
-                )}
-              </DetailCard>
-            </TabsContent>
-
-            <TabsContent value="observacoes" className="mt-0 space-y-4">
-              <DetailCard title="Observações" icon={FileSearch}>
-                {hasObservations ? (
-                  <div className="space-y-4">
-                    <div className="rounded-lg border bg-white p-4">
-                      <DetailItem
-                        label="Observações do pedido"
-                        value={<pre className="whitespace-pre-wrap font-sans text-sm">{original.observacoes}</pre>}
-                      />
-                    </div>
-                    <div className="rounded-lg border bg-white p-4">
-                      <DetailItem
-                        label="Observações internas"
-                        value={<pre className="whitespace-pre-wrap font-sans text-sm">{original.observacoesInternas}</pre>}
+                    <div className="rounded-lg border bg-white p-3">
+                      <SettingsDetailLine
+                        label="Sem conta"
+                        value={formatNumber(
+                          accountEntries.filter((account) => !(draftAccountMappings[account.accountId] || "").trim()).length
+                        )}
                       />
                     </div>
                   </div>
-                ) : (
-                  <EmptyDetailState>Pedido sem observações registradas.</EmptyDetailState>
-                )}
-              </DetailCard>
-            </TabsContent>
 
-            <TabsContent value="marketplace" className="mt-0 space-y-5">
-              <DetailCard title="Dados do Marketplace" icon={Files}>
-                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-                  <DetailItem label="Marketplace" value={order.marketplace} />
-                  <DetailItem label="Intermediador" value={original.intermediador?.nomeUsuario} />
-                  <DetailItem label="CNPJ intermediador" value={original.intermediador?.cnpj} />
-                  <DetailItem label="Pedido loja" value={order.storeNumber} />
-                  <DetailItem label="Pedido compra" value={original.numeroPedidoCompra} />
-                  <DetailItem label="Pedido loja NF" value={original.notaFiscal?.numeroPedidoLoja} />
-                  <DetailItem label="Valor base taxa" value={formatCurrency(original.taxas?.valorBase)} />
-                  <DetailItem label="Taxa comissão" value={formatCurrency(original.taxas?.taxaComissao)} />
-                  <DetailItem label="Custo frete" value={formatCurrency(original.taxas?.custoFrete)} />
-                  <DetailItem label="Rastreamento" value={volumes[0]?.codigoRastreamento} />
+                  {accountSections.length > 0 ? (
+                    accountSections.map((section) => {
+                      const totalOrders = section.entries.reduce((total, account) => total + account.orderCount, 0);
+                      const unnamedCount = section.entries.filter(
+                        (account) => !(draftAccountMappings[account.accountId] || "").trim()
+                      ).length;
+
+                      return (
+                        <section key={section.marketplace}>
+                          <header className="mb-3 flex items-center justify-between gap-2">
+                            <div className="flex min-w-0 items-center gap-3">
+                              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border bg-white text-slate-600 shadow-sm">
+                                <BadgeCheck className="h-4 w-4" />
+                              </span>
+                              <div className="min-w-0">
+                                <h3 className="truncate text-sm font-semibold text-slate-950">{section.marketplace}</h3>
+                                <p className="text-xs text-muted-foreground">
+                                  {formatNumber(section.entries.length)}{" "}
+                                  {section.entries.length === 1 ? "conta" : "contas"} ·{" "}
+                                  {formatNumber(totalOrders)} pedidos
+                                </p>
+                              </div>
+                            </div>
+                            {unnamedCount > 0 ? (
+                              <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-amber-50 px-2 py-1 text-[11px] font-semibold text-amber-700 ring-1 ring-amber-200">
+                                <AlertTriangle className="h-3 w-3" />
+                                {formatNumber(unnamedCount)} sem nome
+                              </span>
+                            ) : null}
+                          </header>
+
+                          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                            {section.entries.map((account) => {
+                              const draftValue = draftAccountMappings[account.accountId] ?? "";
+                              const isNamed = draftValue.trim() !== "";
+
+                              return (
+                                <div
+                                  key={`${section.marketplace}-${account.accountId}`}
+                                  className={cn(
+                                    "group relative rounded-xl border bg-white p-3.5 transition-all hover:shadow-md",
+                                    isNamed ? "border-border" : "border-amber-300/70 ring-1 ring-amber-200/40"
+                                  )}
+                                >
+                                  <div className="flex items-start gap-3">
+                                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border bg-slate-50 text-slate-600">
+                                      <BadgeCheck className="h-4 w-4" />
+                                    </span>
+
+                                    <div className="min-w-0 flex-1">
+                                      <Input
+                                        value={draftValue}
+                                        placeholder="Defina um nome..."
+                                        aria-label={`Nome exibido da conta ${account.accountId}`}
+                                        disabled={isSaving}
+                                        onChange={(event) => updateAccountMapping(account.accountId, event.target.value)}
+                                        className={cn(
+                                          "h-7 border-transparent bg-transparent px-0 text-sm font-semibold shadow-none focus-visible:border-blue-300 focus-visible:bg-blue-50/30 focus-visible:px-2 focus-visible:ring-0",
+                                          isNamed ? "text-slate-950" : "italic text-zinc-400"
+                                        )}
+                                      />
+                                      <div className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
+                                        <code className="truncate font-mono">{account.accountId}</code>
+                                      </div>
+                                      {account.originalAccountName !== "Conta não informada" ? (
+                                        <div className="mt-0.5 truncate text-[11px] text-muted-foreground">
+                                          Atual: {account.originalAccountName}
+                                        </div>
+                                      ) : null}
+                                    </div>
+
+                                    <div className="shrink-0 text-right">
+                                      <div className="text-xl font-bold leading-none tabular-nums text-slate-950">
+                                        {formatNumber(account.orderCount)}
+                                      </div>
+                                      <div className="mt-1 text-[10px] uppercase tracking-wide text-muted-foreground">
+                                        Pedidos
+                                      </div>
+                                    </div>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </section>
+                      );
+                    })
+                  ) : (
+                    <div className="rounded-lg border border-dashed bg-white p-8 text-center text-sm text-muted-foreground">
+                      Nenhuma conta detectada no período carregado.
+                    </div>
+                  )}
                 </div>
+              </div>
 
-                <Separator className="my-5" />
+              <div className="mt-4 flex flex-wrap justify-end gap-2 border-t pt-4">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setDraftAccountMappings({})}
+                  disabled={isLoading || isSaving || Object.keys(normalizedDraftAccountMappings).length === 0}
+                >
+                  <RotateCcw className="mr-2 h-4 w-4" />
+                  Limpar nomes
+                </Button>
+                <Button
+                  type="button"
+                  onClick={handleSaveAccountMappings}
+                  disabled={isLoading || isSaving || !accountMappingsChanged || accountEntries.length === 0}
+                >
+                  <Save className="mr-2 h-4 w-4" />
+                  Salvar mapeamento
+                </Button>
+              </div>
+            </div>
+          ) : null}
 
-                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-                  <DetailItem label="Nota fiscal" value={original.notaFiscal?.numero || original.notaFiscal?.id} />
-                  <DetailItem label="Chave acesso" value={original.notaFiscal?.chaveAcesso} />
-                  <DetailItem label="Data emissão NF" value={formatDate(original.notaFiscal?.dataEmissao)} />
-                  <DetailItem label="Valor NF" value={formatCurrency(original.notaFiscal?.valorNota)} />
-                  <DetailItem label="Frete NF" value={formatCurrency(original.notaFiscal?.valorFrete)} />
-                  <DetailItem label="XML disponível" value={original.notaFiscal?.xmlAvailable ? "Sim" : "Não"} />
-                  <DetailItem label="Detalhes fiscais" value={original.notaFiscal?.hasFiscalDetails ? "Sim" : "Não"} />
-                  <DetailItem label="Erro fiscal" value={original.notaFiscal?.fiscalDetailsError || original.notaFiscal?.xmlFetchError} />
+          {activeTab === "order-status" ? (
+            <div className="flex min-h-0 flex-1 flex-col gap-4">
+              <div className="grid gap-3 sm:grid-cols-3">
+                <div className="rounded-lg border bg-white p-3">
+                  <SettingsDetailLine label="Status encontrados" value={formatNumber(statusRows.length)} />
                 </div>
-              </DetailCard>
-            </TabsContent>
-
-            <TabsContent value="devolucoes" className="mt-0 space-y-3">
-              <DetailCard title="Devoluções" icon={Undo2}>
-                {returnRecords && returnRecords.length > 0 ? (
-                  <div className="space-y-3">
-                    {returnRecords.map((returnRecord, index) => (
-                      <div key={index} className="rounded-lg border bg-white p-4">
-                        <DetailItem
-                          label={`Registro ${index + 1}`}
-                          value={<pre className="whitespace-pre-wrap font-mono text-xs">{JSON.stringify(returnRecord, null, 2)}</pre>}
-                        />
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <EmptyDetailState>Nenhuma devolução registrada para este pedido.</EmptyDetailState>
-                )}
-              </DetailCard>
-            </TabsContent>
-
-            <TabsContent value="historico" className="mt-0 space-y-4">
-              <DetailCard title="Histórico da Conciliação" icon={History}>
-                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-                  <DetailItem label="Eventos" value={formatNumber(auditEvents.length)} />
-                  <DetailItem label="Última ação" value={formatDateTime(auditEvents[0]?.at)} />
-                  <DetailItem label="Último usuário" value={formatActor(auditEvents[0]?.actor ?? null)} />
-                  <DetailItem
-                    label="Status atual"
-                    value={<Badge variant={getSystemStatusVariant(order.systemStatus)}>{order.systemStatus}</Badge>}
+                <div className="rounded-lg border bg-white p-3">
+                  <SettingsDetailLine label="Pedidos no escopo" value={formatNumber(orders.length)} />
+                </div>
+                <div className="rounded-lg border bg-white p-3">
+                  <SettingsDetailLine
+                    label="Preview de impacto"
+                    value={`${formatNumber(previewStatusAffectedCount)} pedido(s)`}
                   />
                 </div>
-                <div className="mt-5">
-                  <AuditTimeline events={auditEvents} />
-                </div>
-              </DetailCard>
-            </TabsContent>
+              </div>
 
-            <TabsContent value="sistema" className="mt-0 space-y-5">
-              <DetailCard title="Sistema" icon={SlidersHorizontal}>
-                <div className="rounded-lg border bg-muted/30 p-4">
-                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                    <div>
-                      <h4 className="text-sm font-semibold">Status de sistema</h4>
-                      <div className="mt-3 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-                        <DetailItem label="Status pedido" value={order.statusName} />
-                        <DetailItem label="Automático" value={order.automaticSystemStatus} />
-                        <DetailItem
-                          label="Aplicado"
-                          value={<Badge variant={getSystemStatusVariant(order.systemStatus)}>{order.systemStatus}</Badge>}
-                        />
-                        <DetailItem
-                          label="Origem"
-                          value={order.manualSystemStatus ? <Badge variant="outline">Manual</Badge> : <Badge variant="secondary">Automático</Badge>}
-                        />
+              <div className="min-h-0 flex-1 overflow-auto rounded-md border bg-gradient-to-b from-zinc-50/60 to-white">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Status Pedido</TableHead>
+                      <TableHead className="text-right">Pedidos</TableHead>
+                      <TableHead className="text-right">Overrides</TableHead>
+                      <TableHead>Padrão</TableHead>
+                      <TableHead>Status Sistema</TableHead>
+                      <TableHead className="text-right">Afeta</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {statusRows.length > 0 ? (
+                      statusRows.map((row) => {
+                        const defaultStatus = resolveAutomaticSystemStatus(row.statusName);
+                        const selectedStatus = draftStatusMappings[row.statusName] ?? automaticStatusSelectValue;
+                        const proposedStatus = draftStatusMappings[row.statusName] ?? defaultStatus;
+                        const affectedCount = orders.filter(
+                          (order) =>
+                            order.statusName === row.statusName &&
+                            !order.manualSystemStatus &&
+                            order.automaticSystemStatus !== proposedStatus
+                        ).length;
+
+                        return (
+                          <TableRow key={row.statusName}>
+                            <TableCell className="min-w-52 font-medium">{row.statusName}</TableCell>
+                            <TableCell className="text-right">{formatNumber(row.orderCount)}</TableCell>
+                            <TableCell className="text-right">{formatNumber(row.manualCount)}</TableCell>
+                            <TableCell>
+                              <SystemStatusBadge
+                                status={defaultStatus}
+                                systemStatusSettings={normalizedSystemStatusSettings}
+                              />
+                            </TableCell>
+                            <TableCell className="min-w-56">
+                              <Select
+                                value={selectedStatus}
+                                onValueChange={(value) =>
+                                  handleStatusMappingChange(row.statusName, value as SystemStatusSelectValue)
+                                }
+                                disabled={isSaving}
+                              >
+                                <SelectTrigger className="h-9 bg-white">
+                                  <SelectValue placeholder="Status de sistema" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value={automaticStatusSelectValue}>
+                                    {`Automático (${getConciliationSystemStatusDisplayName(
+                                      normalizedSystemStatusSettings,
+                                      defaultStatus
+                                    )})`}
+                                  </SelectItem>
+                                  {conciliationSystemStatusOptions.map((statusOption) => {
+                                    const statusDefinition = getConciliationSystemStatusDefinition(
+                                      normalizedSystemStatusSettings,
+                                      statusOption
+                                    );
+
+                                    return (
+                                      <SelectItem key={statusOption} value={statusOption}>
+                                        {statusDefinition.displayName}
+                                        {!statusDefinition.active ? " (inativo)" : ""}
+                                      </SelectItem>
+                                    );
+                                  })}
+                                </SelectContent>
+                              </Select>
+                            </TableCell>
+                            <TableCell className="text-right">{formatNumber(affectedCount)}</TableCell>
+                          </TableRow>
+                        );
+                      })
+                    ) : (
+                      <TableRow>
+                        <TableCell colSpan={6} className="h-24 text-center text-sm text-muted-foreground">
+                          Nenhum status encontrado no período carregado.
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
+
+              <div className="grid gap-4 rounded-lg border bg-muted/30 p-3 sm:grid-cols-3">
+                <SettingsDetailLine label="Regras salvas" value={formatNumber(statusMappingsCount)} />
+                <SettingsDetailLine label="Atualizado em" value={formatDateTime(statusSettings.updatedAt)} />
+                <SettingsDetailLine label="Atualizado por" value={formatActor(statusSettings.updatedBy)} />
+              </div>
+
+              <div className="flex flex-wrap justify-end gap-2 border-t pt-4">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setDraftStatusMappings({})}
+                  disabled={isSaving || Object.keys(draftStatusMappings).length === 0}
+                >
+                  <RotateCcw className="mr-2 h-4 w-4" />
+                  Resetar regras
+                </Button>
+                <Button
+                  type="button"
+                  onClick={handleSaveStatusMappings}
+                  disabled={isLoading || isSaving || !statusMappingsChanged}
+                >
+                  <Save className="mr-2 h-4 w-4" />
+                  Salvar mapeamento
+                </Button>
+              </div>
+            </div>
+          ) : null}
+
+          {activeTab === "auto-reconciliation" ? (
+            <div className="flex min-h-0 flex-1 flex-col gap-4">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-blue-50 px-2.5 py-1 text-xs font-semibold text-blue-700 ring-1 ring-blue-200">
+                  <span className="text-[10px] uppercase tracking-wide opacity-75">Regras ativas</span>
+                  1
+                </span>
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-zinc-50 px-2.5 py-1 text-xs font-semibold text-zinc-700 ring-1 ring-zinc-200">
+                  <span className="text-[10px] uppercase tracking-wide opacity-75">Encontrados na tela</span>
+                  {formatNumber(autoReconciliationMatchedOrders.length)}
+                </span>
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700 ring-1 ring-emerald-200">
+                  <span className="text-[10px] uppercase tracking-wide opacity-75">Pendentes na tela</span>
+                  {formatNumber(autoReconciliationPendingOrders.length)}
+                </span>
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-50 px-2.5 py-1 text-xs font-semibold text-slate-600 ring-1 ring-slate-200">
+                  <span className="text-[10px] uppercase tracking-wide opacity-75">Já conciliados</span>
+                  {formatNumber(autoReconciliationAlreadyOrders.length)}
+                </span>
+              </div>
+
+              <div className="min-h-0 flex-1 overflow-auto rounded-md border bg-gradient-to-b from-zinc-50/60 to-white">
+                <div className="grid gap-4 p-4 sm:p-5 xl:grid-cols-[minmax(0,1fr)_380px]">
+                  <section className="rounded-md border bg-white p-4 shadow-sm">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div className="flex min-w-[240px] flex-1 items-start gap-3">
+                        <span className="mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-blue-50 text-xs font-bold text-blue-700 ring-1 ring-blue-100">
+                          1
+                        </span>
+                        <div className="min-w-0 flex-1">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <div className="min-w-[220px] max-w-md flex-1 rounded-md border bg-slate-50 px-3 py-1.5 text-sm font-semibold text-slate-950">
+                              Conciliar pedidos sugeridos
+                            </div>
+                            <SystemStatusBadge
+                              status="Entregue"
+                              systemStatusSettings={normalizedSystemStatusSettings}
+                            />
+                            <Badge variant="outline" className="bg-emerald-50 text-emerald-700">
+                              Ativa
+                            </Badge>
+                          </div>
+                          <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                            <span className="inline-flex items-center gap-1 rounded-full bg-zinc-50 px-2 py-0.5 text-[10px] font-semibold uppercase text-zinc-600 ring-1 ring-zinc-200">
+                              Encontrados <strong className="text-[11px]">{formatNumber(autoReconciliationMatchedOrders.length)}</strong>
+                            </span>
+                            <span className="inline-flex items-center gap-1 rounded-full bg-slate-50 px-2 py-0.5 text-[10px] font-semibold uppercase text-slate-600 ring-1 ring-slate-200">
+                              Já conciliados <strong className="text-[11px]">{formatNumber(autoReconciliationAlreadyOrders.length)}</strong>
+                            </span>
+                            <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold uppercase text-emerald-700 ring-1 ring-emerald-200">
+                              Pendentes <strong className="text-[11px]">{formatNumber(autoReconciliationPendingOrders.length)}</strong>
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                      <div className="flex shrink-0 items-center gap-2">
+                        <Badge variant="secondary" className="gap-1">
+                          <Zap className="h-3.5 w-3.5" />
+                          Sistema
+                        </Badge>
                       </div>
                     </div>
-                    <div className="flex w-full flex-col gap-2 sm:w-72">
-                      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Definição manual</p>
-                      <Select
-                        value={systemStatusValue}
-                        onValueChange={(value) => setSystemStatusValue(value as SystemStatusSelectValue)}
-                        disabled={isSaving}
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="Status de sistema" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value={automaticStatusSelectValue}>
-                            Automático ({order.automaticSystemStatus})
-                          </SelectItem>
-                          {conciliationSystemStatusOptions.map((statusOption) => (
-                            <SelectItem key={statusOption} value={statusOption}>
-                              {statusOption}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      <Button
-                        type="button"
-                        size="sm"
-                        onClick={() => onSaveSystemStatus(order, selectedManualSystemStatus)}
-                        disabled={!hasSystemStatusChanges || isSaving}
-                      >
-                        {isSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                        Salvar status
-                      </Button>
-                    </div>
-                  </div>
-                  <Separator className="my-4" />
-                  <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-                    <DetailItem label="Status alterado em" value={formatDateTime(order.conciliation?.systemStatusUpdatedAt)} />
-                    <DetailItem label="Status alterado por" value={formatActor(order.conciliation?.systemStatusUpdatedBy ?? null)} />
-                    <DetailItem label="Atualizado em" value={formatDateTime(order.conciliation?.updatedAt)} />
-                    <DetailItem label="Atualizado por" value={formatActor(order.conciliation?.updatedBy ?? null)} />
-                  </div>
-                </div>
 
-                <div className="mt-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                  <DetailItem label="ID interno" value={order.orderId} />
-                  <DetailItem label="Loja Bling" value={original.loja?.nome} />
-                  <DetailItem label="Vendedor" value={original.vendedor?.nome} />
-                  <DetailItem label="Intermediador" value={original.intermediador?.nomeUsuario} />
-                  <DetailItem label="Rastreamento" value={original.transporte?.volumes?.[0]?.codigoRastreamento} />
-                  <DetailItem label="Transportadora" value={original.transporte?.contato?.nome} />
+                    <div className="mt-4 grid gap-3 lg:grid-cols-[minmax(220px,320px)_minmax(0,1fr)]">
+                      <div>
+                        <p className="text-[11px] font-semibold uppercase tracking-wide text-zinc-500">Status Pedido</p>
+                        <div className="relative mt-1.5 rounded-md border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-800">
+                          <span className="mr-2 inline-flex h-2 w-2 rounded-full bg-emerald-500" />
+                          Entregue
+                        </div>
+                      </div>
+
+                      <div>
+                        <div className="mb-1.5 flex flex-wrap items-center justify-between gap-2">
+                          <p className="text-[11px] font-semibold uppercase tracking-wide text-zinc-500">Condições</p>
+                          <Badge variant="outline" className="text-[10px]">
+                            3 critérios
+                          </Badge>
+                        </div>
+                        <div className="grid gap-2 md:grid-cols-3">
+                          <div className="rounded-md border border-zinc-200 bg-zinc-50/80 px-3 py-2">
+                            <p className="text-[10px] font-semibold uppercase tracking-wide text-zinc-500">Alerta</p>
+                            <p className="mt-1 text-xs font-medium text-zinc-800">Sem alerta financeiro</p>
+                          </div>
+                          <div className="rounded-md border border-zinc-200 bg-zinc-50/80 px-3 py-2">
+                            <p className="text-[10px] font-semibold uppercase tracking-wide text-zinc-500">Repasse</p>
+                            <p className="mt-1 text-xs font-medium text-zinc-800">Repasse OK</p>
+                          </div>
+                          <div className="rounded-md border border-zinc-200 bg-zinc-50/80 px-3 py-2">
+                            <p className="text-[10px] font-semibold uppercase tracking-wide text-zinc-500">Conciliação</p>
+                            <p className="mt-1 text-xs font-medium text-zinc-800">Somente pendentes</p>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {autoReconciliationExamples.length > 0 ? (
+                      <div className="mt-3 flex flex-wrap items-center gap-1.5 text-xs text-zinc-500">
+                        <FileSearch className="h-3.5 w-3.5 text-blue-500" />
+                        {autoReconciliationExamples.map((orderNumber) => (
+                          <span
+                            key={orderNumber}
+                            className="rounded bg-zinc-100 px-1.5 py-0.5 font-mono text-[10px] text-zinc-600"
+                          >
+                            {orderNumber}
+                          </span>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="mt-3 rounded-md border border-dashed border-zinc-200 bg-zinc-50 px-3 py-2 text-xs text-zinc-500">
+                        Nenhum pedido pendente atende todos os critérios no escopo carregado.
+                      </div>
+                    )}
+                  </section>
+
+                  <aside className="space-y-3">
+                    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
+                      <div className="rounded-lg border bg-white p-3">
+                        <SettingsDetailLine label="Bloqueados para revisão" value={formatNumber(autoReconciliationBlockedCount)} />
+                      </div>
+                      <div className="rounded-lg border bg-white p-3">
+                        <SettingsDetailLine label="Limite por aplicação" value="450 pedidos" />
+                      </div>
+                    </div>
+                    <div className="rounded-md border bg-white p-2 shadow-sm">
+                      <SettingsMenuItem
+                        icon={Calculator}
+                        title="Colunas calculadas"
+                        description="Crie fórmulas e colunas financeiras para a grade."
+                        badge={`${formatNumber(calculationColumnsCount)} colunas`}
+                        disabled={isLoading}
+                        onClick={() => openNestedSettings(onOpenCalculationSettings)}
+                      />
+                      <SettingsMenuItem
+                        icon={AlertTriangle}
+                        title="Alertas financeiros"
+                        description="Configure tolerâncias e divergências por marketplace."
+                        badge={`${formatNumber(divergenceRulesCount)} regras`}
+                        disabled={isLoading}
+                        onClick={() => openNestedSettings(onOpenDivergenceSettings)}
+                      />
+                      <SettingsMenuItem
+                        icon={BarChart3}
+                        title="Resumo da página"
+                        description="Escolha quais cards aparecem no topo e em qual ordem."
+                        badge={`${formatNumber(summaryCardsCount)} cards`}
+                        disabled={isLoading}
+                        onClick={() => openNestedSettings(onOpenSummarySettings)}
+                      />
+                      <SettingsMenuItem
+                        icon={Upload}
+                        title="Importar repasses"
+                        description="Adicione arquivos de repasse do marketplace à conciliação."
+                        badge={`${formatNumber(payoutRowsCount)} linhas`}
+                        disabled={isLoading}
+                        onClick={() => openNestedSettings(onOpenPayoutImport)}
+                      />
+                    </div>
+                  </aside>
                 </div>
-              </DetailCard>
-            </TabsContent>
-            </ScrollArea>
-          </Tabs>
+              </div>
+
+              <div className="flex flex-wrap items-center justify-between gap-3 border-t pt-4">
+                <p className="text-xs text-muted-foreground">
+                  A prévia considera os pedidos carregados na tela e respeita os filtros aplicados.
+                </p>
+                <Button
+                  type="button"
+                  onClick={onApplySuggestedConciliations}
+                  disabled={
+                    isLoading ||
+                    isSaving ||
+                    autoReconciliationPendingOrders.length === 0 ||
+                    autoReconciliationPendingOrders.length > 450
+                  }
+                >
+                  <CheckCheck className="mr-2 h-4 w-4" />
+                  Conciliar sugeridos
+                </Button>
+              </div>
+            </div>
+          ) : null}
+
+          {activeTab === "system-status" ? (
+            <div className="flex min-h-0 flex-1 flex-col gap-4">
+              <div className="grid gap-3 rounded-md border bg-white p-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-end">
+                <div className="space-y-1.5">
+                  <Label>Status do sistema</Label>
+                  <div className="flex flex-wrap gap-2">
+                    <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700 ring-1 ring-emerald-200">
+                      {formatNumber(systemStatusActiveCount)} ativos
+                    </span>
+                    <span className="inline-flex items-center gap-1.5 rounded-full bg-zinc-50 px-2.5 py-1 text-xs font-semibold text-zinc-600 ring-1 ring-zinc-200">
+                      {formatNumber(systemStatusInactiveCount)} inativos
+                    </span>
+                    <span className="inline-flex items-center gap-1.5 rounded-full bg-blue-50 px-2.5 py-1 text-xs font-semibold text-blue-700 ring-1 ring-blue-200">
+                      {formatNumber(draftSystemStatusSettings.statuses.length)} configurados
+                    </span>
+                  </div>
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={resetSystemStatusSettings}
+                  disabled={isLoading || isSaving || !systemStatusDefaultChanged}
+                >
+                  <RotateCcw className="mr-2 h-4 w-4" />
+                  Restaurar padrão
+                </Button>
+              </div>
+
+              <div className="min-h-0 flex-1 overflow-auto rounded-md border bg-gradient-to-b from-zinc-50/60 to-white">
+                <div className="grid grid-cols-1 gap-3 p-4 lg:grid-cols-2">
+                  {draftSystemStatusSettings.statuses.map((statusDefinition) => {
+                    const selectedColor = statusDefinition.color;
+
+                    return (
+                      <div
+                        key={statusDefinition.id}
+                        className={cn(
+                          "group relative rounded-xl border bg-white p-4 transition-all",
+                          statusDefinition.active ? "shadow-sm" : "opacity-60"
+                        )}
+                      >
+                        <div className="flex items-start gap-3">
+                          <div
+                            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg ring-1 ring-inset"
+                            style={{
+                              backgroundColor: `${selectedColor}14`,
+                              borderColor: `${selectedColor}33`,
+                            }}
+                          >
+                            <span className="h-3 w-3 rounded-full" style={{ backgroundColor: selectedColor }} />
+                          </div>
+
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-2">
+                              <Input
+                                value={statusDefinition.displayName}
+                                aria-label={`Nome exibido para ${statusDefinition.label}`}
+                                disabled={isSaving}
+                                onChange={(event) =>
+                                  updateSystemStatusDefinition(statusDefinition.id, {
+                                    displayName: event.target.value,
+                                  })
+                                }
+                                className="h-7 border-transparent bg-transparent px-0 text-sm font-semibold text-slate-950 shadow-none focus-visible:border-blue-300 focus-visible:bg-blue-50/30 focus-visible:px-2 focus-visible:ring-0"
+                              />
+                              <Lock className="h-3.5 w-3.5 shrink-0 text-zinc-400" />
+                            </div>
+                            <p className="mt-1 text-[11px] text-muted-foreground">Status padrão do sistema</p>
+                          </div>
+
+                          <Switch
+                            checked={statusDefinition.active}
+                            disabled={isSaving}
+                            onCheckedChange={(checked) =>
+                              updateSystemStatusDefinition(statusDefinition.id, { active: checked })
+                            }
+                            aria-label={`Ativar ou desativar ${statusDefinition.label}`}
+                          />
+                        </div>
+
+                        <div className="mt-3 flex items-center justify-between border-t border-zinc-100 pt-3">
+                          <span className="text-[11px] font-medium text-muted-foreground">Cor</span>
+                          <div className="flex flex-wrap items-center justify-end gap-1.5">
+                            {conciliationSystemStatusColorSwatches.map((color) => {
+                              const selected = selectedColor === color;
+
+                              return (
+                                <button
+                                  key={`${statusDefinition.id}-${color}`}
+                                  type="button"
+                                  aria-label={`Aplicar cor ${color} em ${statusDefinition.label}`}
+                                  aria-pressed={selected}
+                                  disabled={isSaving}
+                                  onClick={() => updateSystemStatusDefinition(statusDefinition.id, { color })}
+                                  className={cn(
+                                    "h-5 w-5 rounded-full ring-2 ring-offset-1 transition-all",
+                                    selected ? "ring-zinc-900" : "ring-transparent hover:ring-zinc-300",
+                                    isSaving && "cursor-not-allowed opacity-50"
+                                  )}
+                                  style={{ backgroundColor: color }}
+                                />
+                              );
+                            })}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="flex justify-end border-t pt-4">
+                <Button
+                  type="button"
+                  onClick={handleSaveSystemStatusSettings}
+                  disabled={isLoading || isSaving || !systemStatusSettingsChanged}
+                >
+                  <Save className="mr-2 h-4 w-4" />
+                  Salvar Status Sistema
+                </Button>
+              </div>
+            </div>
+          ) : null}
         </div>
       </DialogContent>
     </Dialog>
   );
+};
+
+const parseStoredDate = (value: unknown): Date | null => {
+  if (typeof value !== "string") return null;
+
+  const parsed = new Date(value);
+
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+};
+
+const readStoredOption = <T extends string>(value: unknown, options: readonly T[], fallback: T): T =>
+  typeof value === "string" && (options as readonly string[]).includes(value) ? (value as T) : fallback;
+
+const readStoredAppliedQuery = (): StoredAppliedQuery | null => {
+  if (typeof window === "undefined") return null;
+
+  try {
+    const stored = window.localStorage.getItem(appliedQueryStorageKey);
+    const parsed = stored ? JSON.parse(stored) : null;
+
+    if (!parsed || typeof parsed !== "object" || !parsed.filters || typeof parsed.filters !== "object") {
+      return null;
+    }
+
+    const rawFilters = parsed.filters as Record<string, unknown>;
+    const rawDate = (rawFilters.date ?? null) as { from?: unknown; to?: unknown } | null;
+    const from = parseStoredDate(rawDate?.from);
+    const to = parseStoredDate(rawDate?.to);
+    const systemStatusValue = rawFilters.systemStatus;
+    const systemStatus: SystemStatusFilter =
+      typeof systemStatusValue === "string" &&
+      (conciliationSystemStatusOptions as readonly string[]).includes(systemStatusValue)
+        ? (systemStatusValue as SystemStatusFilter)
+        : "Todos";
+
+    const filters: AppliedFilters = {
+      date: from && to ? { from, to } : undefined,
+      marketplace: typeof rawFilters.marketplace === "string" ? rawFilters.marketplace : "Todos",
+      account: typeof rawFilters.account === "string" ? rawFilters.account : "Todos",
+      orderStatus: typeof rawFilters.orderStatus === "string" ? rawFilters.orderStatus : "Todos",
+      systemStatus,
+      financialAlert: readStoredOption(rawFilters.financialAlert, financialAlertOptions, "Todos"),
+      adjustmentStatus: readStoredOption(rawFilters.adjustmentStatus, adjustmentStatusOptions, "Todos"),
+      payoutStatus: readStoredOption(rawFilters.payoutStatus, payoutStatusOptions, "Todos"),
+      suggestion: readStoredOption(rawFilters.suggestion, suggestionOptions, "Todos"),
+      reconciliationStatus: readStoredOption(rawFilters.reconciliationStatus, reconciliationStatusOptions, "Todos"),
+      searchTerm: typeof rawFilters.searchTerm === "string" ? rawFilters.searchTerm : "",
+    };
+
+    return {
+      filters,
+      appliedAt: parseStoredDate(parsed.appliedAt),
+    };
+  } catch {
+    return null;
+  }
 };
 
 export default function ConciliacaoClient() {
   const { toast } = useToast();
+  const router = useRouter();
   const [baseOrders, setBaseOrders] = React.useState<ConciliationOrder[]>([]);
   const [conciliationRecords, setConciliationRecords] = React.useState<Map<string, ConciliationRecord>>(
     () => new Map()
@@ -4572,6 +1447,14 @@ export default function ConciliacaoClient() {
   const [payoutRecords, setPayoutRecords] = React.useState<ConciliationMarketplacePayout[]>([]);
   const [statusSettings, setStatusSettings] = React.useState<ConciliationStatusSettings>({
     statusMappings: {},
+    updatedAt: null,
+    updatedBy: null,
+  });
+  const [systemStatusSettings, setSystemStatusSettings] = React.useState<ConciliationSystemStatusSettings>(
+    defaultConciliationSystemStatusSettings
+  );
+  const [accountSettings, setAccountSettings] = React.useState<ConciliationAccountSettings>({
+    accountMappings: {},
     updatedAt: null,
     updatedBy: null,
   });
@@ -4601,10 +1484,20 @@ export default function ConciliacaoClient() {
   const [isCalculationSettingsOpen, setIsCalculationSettingsOpen] = React.useState(false);
   const [isPayoutImportOpen, setIsPayoutImportOpen] = React.useState(false);
   const [isPayoutHistoryOpen, setIsPayoutHistoryOpen] = React.useState(false);
+  const [isSettingsHubOpen, setIsSettingsHubOpen] = React.useState(false);
   const queryPreparationTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const sortFeedbackTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const columnMoveFeedbackTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const storedAppliedQueryRef = React.useRef<StoredAppliedQuery | null | undefined>(undefined);
+
+  if (storedAppliedQueryRef.current === undefined) {
+    storedAppliedQueryRef.current = readStoredAppliedQuery();
+  }
+
+  const storedAppliedQuery = storedAppliedQueryRef.current;
   const [date, setDate] = React.useState<DateRange | undefined>(() => {
+    if (storedAppliedQuery?.filters.date) return storedAppliedQuery.filters.date;
+
     const today = new Date();
 
     return {
@@ -4612,19 +1505,34 @@ export default function ConciliacaoClient() {
       to: today,
     };
   });
-  const [marketplace, setMarketplace] = React.useState("Todos");
-  const [account, setAccount] = React.useState("Todos");
-  const [orderStatus, setOrderStatus] = React.useState("Todos");
-  const [systemStatus, setSystemStatus] = React.useState<SystemStatusFilter>("Todos");
-  const [financialAlert, setFinancialAlert] = React.useState<FinancialAlertFilter>("Todos");
-  const [adjustmentStatus, setAdjustmentStatus] = React.useState<AdjustmentStatusFilter>("Todos");
-  const [payoutStatus, setPayoutStatus] = React.useState<PayoutStatusFilter>("Todos");
-  const [suggestion, setSuggestion] = React.useState<SuggestionFilter>("Todos");
-  const [reconciliationStatus, setReconciliationStatus] = React.useState<ReconciliationStatusFilter>("Todos");
-  const [searchTerm, setSearchTerm] = React.useState("");
-  const [hasAppliedFilters, setHasAppliedFilters] = React.useState(false);
-  const [lastAppliedAt, setLastAppliedAt] = React.useState<Date | null>(null);
+  const [marketplace, setMarketplace] = React.useState(storedAppliedQuery?.filters.marketplace ?? "Todos");
+  const [account, setAccount] = React.useState(storedAppliedQuery?.filters.account ?? "Todos");
+  const [orderStatus, setOrderStatus] = React.useState(storedAppliedQuery?.filters.orderStatus ?? "Todos");
+  const [systemStatus, setSystemStatus] = React.useState<SystemStatusFilter>(
+    storedAppliedQuery?.filters.systemStatus ?? "Todos"
+  );
+  const [financialAlert, setFinancialAlert] = React.useState<FinancialAlertFilter>(
+    storedAppliedQuery?.filters.financialAlert ?? "Todos"
+  );
+  const [adjustmentStatus, setAdjustmentStatus] = React.useState<AdjustmentStatusFilter>(
+    storedAppliedQuery?.filters.adjustmentStatus ?? "Todos"
+  );
+  const [payoutStatus, setPayoutStatus] = React.useState<PayoutStatusFilter>(
+    storedAppliedQuery?.filters.payoutStatus ?? "Todos"
+  );
+  const [suggestion, setSuggestion] = React.useState<SuggestionFilter>(
+    storedAppliedQuery?.filters.suggestion ?? "Todos"
+  );
+  const [reconciliationStatus, setReconciliationStatus] = React.useState<ReconciliationStatusFilter>(
+    storedAppliedQuery?.filters.reconciliationStatus ?? "Todos"
+  );
+  const [searchTerm, setSearchTerm] = React.useState(storedAppliedQuery?.filters.searchTerm ?? "");
+  const [isAdvancedFiltersOpen, setIsAdvancedFiltersOpen] = React.useState(false);
+  const [hasAppliedFilters, setHasAppliedFilters] = React.useState(Boolean(storedAppliedQuery));
+  const [lastAppliedAt, setLastAppliedAt] = React.useState<Date | null>(storedAppliedQuery?.appliedAt ?? null);
   const [appliedFilters, setAppliedFilters] = React.useState<AppliedFilters>(() => {
+    if (storedAppliedQuery) return storedAppliedQuery.filters;
+
     const today = new Date();
 
     return {
@@ -4686,12 +1594,7 @@ export default function ConciliacaoClient() {
     const stored = window.localStorage.getItem(viewModeStorageKey);
     return stored === "cards" ? "cards" : "table";
   });
-  const [tableDensity, setTableDensity] = React.useState<TableDensity>(() => {
-    if (typeof window === "undefined") return "comfortable";
-
-    const stored = window.localStorage.getItem(tableDensityStorageKey);
-    return stored === "compact" ? "compact" : "comfortable";
-  });
+  const tableDensity = "comfortable" as TableDensity;
   const [sortConfig, setSortConfig] = React.useState<SortConfig>({
     columnId: "date",
     direction: "desc",
@@ -4729,9 +1632,21 @@ export default function ConciliacaoClient() {
     () => calculationColumnOptions.map((column) => column.id as ConciliationCalculationColumnId),
     [calculationColumnOptions]
   );
+  const [sheetAssociations, setSheetAssociations] = React.useState<ConciliationSheetAssociation[]>([]);
+  const sheetColumnOptions = React.useMemo(() => {
+    const keys = new Set<string>();
+
+    sheetAssociations.forEach((association) => {
+      if (association.targetField === "sku") return;
+
+      Object.keys(association.dataFields || {}).forEach((key) => keys.add(key));
+    });
+
+    return buildSheetColumnOptions(Array.from(keys).sort());
+  }, [sheetAssociations]);
   const availableColumnOptions = React.useMemo<ConciliationColumnOption[]>(
-    () => [...conciliationColumnOptions, ...calculationColumnOptions],
-    [calculationColumnOptions]
+    () => [...conciliationColumnOptions, ...calculationColumnOptions, ...sheetColumnOptions],
+    [calculationColumnOptions, sheetColumnOptions]
   );
   const availableColumnIds = React.useMemo(
     () => availableColumnOptions.map((column) => column.id),
@@ -4742,24 +1657,65 @@ export default function ConciliacaoClient() {
     () => new Map(availableColumnOptions.map((column) => [column.id, column])),
     [availableColumnOptions]
   );
+  const normalizedSystemStatusSettings = React.useMemo(
+    () => normalizeConciliationSystemStatusSettings(systemStatusSettings),
+    [systemStatusSettings]
+  );
 
   const isLoading = isOrdersLoading || isRecordsLoading;
   const isQueryLoading = hasAppliedFilters && (isLoading || isQueryApplying);
   const allOrders = React.useMemo(() => {
-    const statusMappedOrders = applyStatusMappings(baseOrders, statusSettings.statusMappings);
+    const accountMappedOrders = applyAccountMappings(baseOrders, accountSettings.accountMappings);
+    const statusMappedOrders = applyStatusMappings(accountMappedOrders, statusSettings.statusMappings);
     const recordMappedOrders = applyConciliationRecords(statusMappedOrders, conciliationRecords);
     const divergenceMappedOrders = applyFinancialDivergenceRules(recordMappedOrders, divergenceSettings);
     const payoutMappedOrders = applyMarketplacePayouts(divergenceMappedOrders, payoutRecords);
+    const sheetMappedOrders = applySheetAssociationsToOrders(payoutMappedOrders, sheetAssociations);
 
-    return applyCustomCalculationsToOrders(payoutMappedOrders, calculationSettings.calculations);
+    return applyCustomCalculationsToOrders(sheetMappedOrders, calculationSettings.calculations);
   }, [
+    accountSettings.accountMappings,
     baseOrders,
     calculationSettings.calculations,
     conciliationRecords,
     divergenceSettings,
     payoutRecords,
+    sheetAssociations,
     statusSettings.statusMappings,
   ]);
+
+  // Carrega associações de planilhas para os meses da consulta aplicada.
+  React.useEffect(() => {
+    if (!hasAppliedFilters) return;
+
+    const from = appliedFilters.date?.from;
+    const to = appliedFilters.date?.to;
+
+    if (!from || !to) return;
+
+    const months: string[] = [];
+    const cursor = new Date(from.getFullYear(), from.getMonth(), 1);
+
+    while (cursor <= to && months.length < 24) {
+      months.push(`${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, "0")}`);
+      cursor.setMonth(cursor.getMonth() + 1);
+    }
+
+    let isMounted = true;
+
+    fetchSheetAssociations(months)
+      .then((associations) => {
+        if (isMounted) setSheetAssociations(associations);
+      })
+      .catch((error) => {
+        console.error("Erro ao carregar associações de planilhas:", error);
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [appliedFilters.date, hasAppliedFilters]);
+
 
   React.useEffect(() => {
     setIsOrdersLoading(true);
@@ -4791,7 +1747,9 @@ export default function ConciliacaoClient() {
 
         setConciliationRecords(state.records);
         setPayoutRecords(state.payouts);
+        setAccountSettings(state.accountSettings);
         setStatusSettings(state.statusSettings);
+        setSystemStatusSettings(state.systemStatusSettings);
         setSummarySettings(state.summarySettings);
         setDivergenceSettings(state.divergenceSettings);
         setCalculationSettings(state.calculationSettings);
@@ -4868,6 +1826,14 @@ export default function ConciliacaoClient() {
         next.splice(insertIndex, 0, ...missingCalculationColumnIds);
       }
 
+      const missingSheetColumnIds = sheetColumnOptions
+        .map((column) => column.id)
+        .filter((columnId) => !next.includes(columnId));
+
+      if (missingSheetColumnIds.length > 0) {
+        next.push(...missingSheetColumnIds);
+      }
+
       const changed = next.length !== previous.length || next.some((columnId, index) => columnId !== previous[index]);
 
       return changed ? next : previous;
@@ -4899,14 +1865,34 @@ export default function ConciliacaoClient() {
   React.useEffect(() => {
     if (typeof window === "undefined") return;
 
-    window.localStorage.setItem(viewModeStorageKey, viewMode);
-  }, [viewMode]);
+    if (!hasAppliedFilters) {
+      window.localStorage.removeItem(appliedQueryStorageKey);
+      return;
+    }
+
+    const dateFrom = appliedFilters.date?.from;
+    const dateTo = appliedFilters.date?.to;
+
+    window.localStorage.setItem(
+      appliedQueryStorageKey,
+      JSON.stringify({
+        filters: {
+          ...appliedFilters,
+          date:
+            dateFrom && dateTo
+              ? { from: dateFrom.toISOString(), to: dateTo.toISOString() }
+              : undefined,
+        },
+        appliedAt: lastAppliedAt ? lastAppliedAt.toISOString() : null,
+      })
+    );
+  }, [appliedFilters, hasAppliedFilters, lastAppliedAt]);
 
   React.useEffect(() => {
     if (typeof window === "undefined") return;
 
-    window.localStorage.setItem(tableDensityStorageKey, tableDensity);
-  }, [tableDensity]);
+    window.localStorage.setItem(viewModeStorageKey, viewMode);
+  }, [viewMode]);
 
   React.useEffect(() => {
     return () => {
@@ -4954,6 +1940,21 @@ export default function ConciliacaoClient() {
 
     return ["Todos", ...Array.from(names).sort(compareString)];
   }, [allOrders]);
+
+  const activeAdvancedFilterCount = [
+    orderStatus,
+    systemStatus,
+    financialAlert,
+    adjustmentStatus,
+    payoutStatus,
+    suggestion,
+    reconciliationStatus,
+  ].filter((value) => value !== "Todos").length;
+  const activePedidoFilterCount = [orderStatus, systemStatus, reconciliationStatus].filter((value) => value !== "Todos").length;
+  const activeFinanceiroFilterCount = [financialAlert, adjustmentStatus, payoutStatus].filter((value) => value !== "Todos").length;
+  const activeOperacaoFilterCount = suggestion !== "Todos" ? 1 : 0;
+  const activeCompactFilterCount =
+    activeAdvancedFilterCount + (account !== "Todos" ? 1 : 0) + (searchTerm.trim() ? 1 : 0);
 
   const filteredOrders = React.useMemo(() => {
     if (!hasAppliedFilters) return [];
@@ -5018,6 +2019,114 @@ export default function ConciliacaoClient() {
     () => filteredOrders.filter(isConciliationSuggestionCandidate),
     [filteredOrders]
   );
+  const orderStatusCounts = React.useMemo(() => {
+    const counts = new Map<string, number>();
+
+    filteredOrders.forEach((order) => {
+      counts.set(order.statusName, (counts.get(order.statusName) || 0) + 1);
+    });
+
+    return counts;
+  }, [filteredOrders]);
+  const systemStatusCounts = React.useMemo(() => {
+    const counts = new Map<string, number>();
+
+    filteredOrders.forEach((order) => {
+      counts.set(order.systemStatus, (counts.get(order.systemStatus) || 0) + 1);
+    });
+
+    return counts;
+  }, [filteredOrders]);
+  const financialAlertCounts = React.useMemo(() => {
+    const counts: Record<FinancialAlertFilter, number> = {
+      Todos: filteredOrders.length,
+      "Com alerta": 0,
+      Críticos: 0,
+      Atenção: 0,
+      "Sem alerta": 0,
+    };
+
+    filteredOrders.forEach((order) => {
+      if (order.financialDivergence.severity === "critical") {
+        counts["Com alerta"] += 1;
+        counts["Críticos"] += 1;
+      } else if (order.financialDivergence.severity === "attention") {
+        counts["Com alerta"] += 1;
+        counts.Atenção += 1;
+      } else {
+        counts["Sem alerta"] += 1;
+      }
+    });
+
+    return counts;
+  }, [filteredOrders]);
+  const adjustmentStatusCounts = React.useMemo(() => {
+    const counts: Record<AdjustmentStatusFilter, number> = {
+      Todos: filteredOrders.length,
+      "Com ajustes": 0,
+      "Sem ajustes": 0,
+    };
+
+    filteredOrders.forEach((order) => {
+      if (getActiveFinancialAdjustments(order).length > 0) {
+        counts["Com ajustes"] += 1;
+      } else {
+        counts["Sem ajustes"] += 1;
+      }
+    });
+
+    return counts;
+  }, [filteredOrders]);
+  const payoutStatusCounts = React.useMemo(() => {
+    const counts: Record<PayoutStatusFilter, number> = {
+      Todos: filteredOrders.length,
+      "Sem repasse": 0,
+      "Repasse OK": 0,
+      Divergente: 0,
+    };
+
+    filteredOrders.forEach((order) => {
+      if (order.payoutComparison.status === "missing") counts["Sem repasse"] += 1;
+      if (order.payoutComparison.status === "matched") counts["Repasse OK"] += 1;
+      if (order.payoutComparison.status === "divergent") counts.Divergente += 1;
+    });
+
+    return counts;
+  }, [filteredOrders]);
+  const suggestionCounts = React.useMemo(() => {
+    const counts: Record<SuggestionFilter, number> = {
+      Todos: filteredOrders.length,
+      Sugeridos: 0,
+      Revisar: 0,
+    };
+
+    filteredOrders.forEach((order) => {
+      if (isConciliationSuggestionCandidate(order)) {
+        counts.Sugeridos += 1;
+      } else {
+        counts.Revisar += 1;
+      }
+    });
+
+    return counts;
+  }, [filteredOrders]);
+  const reconciliationStatusCounts = React.useMemo(() => {
+    const counts: Record<ReconciliationStatusFilter, number> = {
+      Todos: filteredOrders.length,
+      Pendentes: 0,
+      Conciliados: 0,
+    };
+
+    filteredOrders.forEach((order) => {
+      if (order.isReconciled) {
+        counts.Conciliados += 1;
+      } else {
+        counts.Pendentes += 1;
+      }
+    });
+
+    return counts;
+  }, [filteredOrders]);
 
   const sortedOrders = React.useMemo(() => {
     const directionModifier = sortConfig.direction === "asc" ? 1 : -1;
@@ -5074,56 +2183,23 @@ export default function ConciliacaoClient() {
     [availableColumnIdSet, columnOrderIds, visibleColumnIds]
   );
   const visibleDataColumnCount = orderedVisibleColumnIds.length;
-  const tableColSpan = visibleDataColumnCount + 2;
+  const tableColSpan = visibleDataColumnCount + 1;
   const tableStyle = React.useMemo<React.CSSProperties>(
-    () => ({ minWidth: Math.max(1760, 260 + visibleDataColumnCount * 150) }),
+    () => ({ minWidth: Math.max(1640, 220 + visibleDataColumnCount * 150) }),
     [visibleDataColumnCount]
   );
   const tableHeaderClassName = cn(
-    "sticky top-0 z-20 bg-zinc-50/95 shadow-[0_1px_0_0_rgba(0,0,0,0.06)] backdrop-blur supports-[backdrop-filter]:bg-zinc-50/80 [&_th]:whitespace-nowrap [&_th]:font-medium [&_th]:text-slate-500 [&_tr]:border-slate-200",
-    tableDensity === "compact" ? "[&_th]:h-10" : "[&_th]:h-12"
+    "sticky top-0 z-20 bg-zinc-50/95 shadow-[0_1px_0_0_rgba(0,0,0,0.06)] backdrop-blur supports-[backdrop-filter]:bg-zinc-50/80 [&_th]:h-12 [&_th]:whitespace-nowrap [&_th]:font-medium [&_th]:text-slate-500 [&_tr]:border-slate-200"
   );
   const tableBodyClassName = cn(
-    "[&_td]:text-slate-950 [&_tr]:border-slate-200",
-    tableDensity === "compact" ? "[&_td]:py-2 [&_td]:text-xs" : "[&_td]:py-4 [&_td]:text-sm"
+    "[&_td]:py-4 [&_td]:text-sm [&_td]:text-slate-950 [&_tr]:border-slate-200"
   );
   const mainTableRowClassName = cn(
-    "group cursor-pointer hover:bg-zinc-50/80",
-    tableDensity === "compact" ? "h-[48px]" : "h-[66px]"
+    "group h-[66px] cursor-pointer hover:bg-zinc-50/80"
   );
   const itemTableRowClassName = cn(
-    "bg-zinc-50/70 hover:bg-zinc-50",
-    tableDensity === "compact" ? "h-[40px]" : "h-[52px]"
+    "h-[52px] bg-zinc-50/70 hover:bg-zinc-50"
   );
-  const stickyActionHeaderClassName =
-    "sticky right-0 top-0 z-30 w-[132px] bg-zinc-50/95 text-right shadow-[-8px_0_14px_-14px_rgba(15,23,42,0.45)]";
-  const stickyActionCellClassName =
-    "sticky right-0 z-10 bg-white text-right shadow-[-8px_0_14px_-14px_rgba(15,23,42,0.45)] transition-colors group-hover:bg-zinc-50";
-  const stickyItemActionCellClassName =
-    "sticky right-0 z-10 bg-zinc-50 text-right text-xs text-zinc-400 shadow-[-8px_0_14px_-14px_rgba(15,23,42,0.45)]";
-  const tableOperationMetrics = [
-    {
-      label: "Resultado",
-      value: `${formatNumber(sortedOrders.length)} pedido(s)`,
-      helper: hasAppliedFilters ? "consulta aplicada" : "aguardando filtros",
-    },
-    {
-      label: "Selecionados",
-      value: formatNumber(selectedOrders.length),
-      helper: `${formatNumber(selectedFilteredCount)} no filtro atual`,
-    },
-    {
-      label: "Alertas",
-      value: `${formatNumber(summary.financialCriticalCount)} críticos`,
-      helper: `${formatNumber(summary.financialAttentionCount)} em atenção`,
-    },
-    {
-      label: "Colunas",
-      value: `${formatNumber(visibleDataColumnCount)} visíveis`,
-      helper: `${formatNumber(availableColumnOptions.length)} disponíveis`,
-    },
-  ];
-
   React.useEffect(() => {
     setCurrentPage(1);
     setSelectedOrderIds(new Set());
@@ -5181,6 +2257,57 @@ export default function ConciliacaoClient() {
     setSelectedOrderIds(new Set());
   };
 
+  const handleCompactSearchChange = (value: string) => {
+    setSearchTerm(value);
+
+    if (!hasAppliedFilters) return;
+
+    setAppliedFilters((previous) => ({ ...previous, searchTerm: value }));
+    setCurrentPage(1);
+    setSelectedOrderIds(new Set());
+  };
+
+  const clearAdvancedFilters = () => {
+    setOrderStatus("Todos");
+    setSystemStatus("Todos");
+    setFinancialAlert("Todos");
+    setAdjustmentStatus("Todos");
+    setPayoutStatus("Todos");
+    setSuggestion("Todos");
+    setReconciliationStatus("Todos");
+
+    if (!hasAppliedFilters) return;
+
+    setAppliedFilters((previous) => ({
+      ...previous,
+      orderStatus: "Todos",
+      systemStatus: "Todos",
+      financialAlert: "Todos",
+      adjustmentStatus: "Todos",
+      payoutStatus: "Todos",
+      suggestion: "Todos",
+      reconciliationStatus: "Todos",
+    }));
+    setCurrentPage(1);
+    setSelectedOrderIds(new Set());
+  };
+
+  const clearCompactFilters = () => {
+    setSearchTerm("");
+    setAccount("Todos");
+    clearAdvancedFilters();
+
+    if (!hasAppliedFilters) return;
+
+    setAppliedFilters((previous) => ({
+      ...previous,
+      account: "Todos",
+      searchTerm: "",
+    }));
+    setCurrentPage(1);
+    setSelectedOrderIds(new Set());
+  };
+
   const handleRefreshConciliationState = async () => {
     setIsRecordsLoading(true);
 
@@ -5189,7 +2316,9 @@ export default function ConciliacaoClient() {
 
       setConciliationRecords(state.records);
       setPayoutRecords(state.payouts);
+      setAccountSettings(state.accountSettings);
       setStatusSettings(state.statusSettings);
+      setSystemStatusSettings(state.systemStatusSettings);
       setSummarySettings(state.summarySettings);
       setDivergenceSettings(state.divergenceSettings);
       setCalculationSettings(state.calculationSettings);
@@ -5275,18 +2404,6 @@ export default function ConciliacaoClient() {
 
     showColumnMoveFeedback(sourceColumnId, `Reposicionada perto de ${targetLabel}`);
   }, [availableColumnOptionById, showColumnMoveFeedback]);
-
-  const moveVisibleColumn = React.useCallback(
-    (columnId: ConciliationColumnId, direction: -1 | 1) => {
-      const currentIndex = orderedVisibleColumnIds.indexOf(columnId);
-      const targetColumnId = orderedVisibleColumnIds[currentIndex + direction];
-
-      if (currentIndex < 0 || !targetColumnId) return;
-
-      moveColumn(columnId, targetColumnId);
-    },
-    [moveColumn, orderedVisibleColumnIds]
-  );
 
   const handleColumnDragStart = (
     event: React.DragEvent<HTMLElement>,
@@ -5525,6 +2642,7 @@ export default function ConciliacaoClient() {
           row["Pedido loja"] = order.storeNumber;
         }
         if (isColumnVisible("date")) row["Data"] = formatDate(order.date);
+        if (isColumnVisible("customer")) row["Cliente"] = order.customerName;
         if (isColumnVisible("account")) row["Conta"] = order.accountName;
         if (isColumnVisible("marketplace")) row["Marketplace"] = order.marketplace;
         if (isColumnVisible("items")) {
@@ -5543,9 +2661,17 @@ export default function ConciliacaoClient() {
         }
         if (isColumnVisible("status")) row["Status Pedido"] = order.statusName;
         if (isColumnVisible("systemStatus")) {
-          row["Status Sistema"] = order.systemStatus;
-          row["Status Sistema Automático"] = order.automaticSystemStatus;
-          row["Status Sistema Manual"] = order.manualSystemStatus || "";
+          row["Status Sistema"] = getConciliationSystemStatusDisplayName(
+            normalizedSystemStatusSettings,
+            order.systemStatus
+          );
+          row["Status Sistema Automático"] = getConciliationSystemStatusDisplayName(
+            normalizedSystemStatusSettings,
+            order.automaticSystemStatus
+          );
+          row["Status Sistema Manual"] = order.manualSystemStatus
+            ? getConciliationSystemStatusDisplayName(normalizedSystemStatusSettings, order.manualSystemStatus)
+            : "";
         }
         if (isColumnVisible("grossRevenue")) row["Faturamento Bruto"] = order.grossRevenue;
         if (isColumnVisible("netRevenue")) row["Líquido"] = order.netRevenue;
@@ -5553,6 +2679,17 @@ export default function ConciliacaoClient() {
         if (isColumnVisible("productCost")) row["Custo Produto"] = order.productCost;
         if (isColumnVisible("margin")) row["Margem de Contribuição"] = order.contributionMargin;
         if (isColumnVisible("marginPercentage")) row["Margem %"] = order.contributionMarginPercentage;
+
+        orderedVisibleColumnIds.forEach((columnId) => {
+          const sheetKey = getSheetKeyFromColumnId(columnId);
+
+          if (sheetKey === null) return;
+
+          const label = availableColumnOptionById.get(columnId)?.label ?? `Planilha ${sheetKey}`;
+          const value = order.sheetFields?.[sheetKey];
+
+          row[label] = value === null || value === undefined ? "" : (value as string | number);
+        });
 
         return row;
       });
@@ -5649,7 +2786,10 @@ export default function ConciliacaoClient() {
 
       toast({
         title: "Status atualizado",
-        description: `Pedido #${order.number || order.orderId} atualizado para ${updatedRecord.systemStatus}.`,
+        description: `Pedido #${order.number || order.orderId} atualizado para ${getConciliationSystemStatusDisplayName(
+          normalizedSystemStatusSettings,
+          updatedRecord.systemStatus
+        )}.`,
       });
     } catch (error) {
       toast({
@@ -5692,6 +2832,28 @@ export default function ConciliacaoClient() {
     }
   };
 
+  const handleSaveAccountMappings = async (accountMappings: ConciliationAccountMappings) => {
+    setIsSaving(true);
+    try {
+      const updatedSettings = await saveConciliationAccountMappings(accountMappings);
+
+      setAccountSettings(updatedSettings);
+
+      toast({
+        title: "Mapeamento de contas salvo",
+        description: `${formatNumber(Object.keys(updatedSettings.accountMappings).length)} conta(s) com nome configurado.`,
+      });
+    } catch (error) {
+      toast({
+        variant: "destructive",
+        title: "Erro ao salvar contas",
+        description: error instanceof Error ? error.message : "Não foi possível salvar o mapeamento de contas.",
+      });
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
   const handleSaveStatusMappings = async (statusMappings: ConciliationStatusMappings) => {
     setIsSaving(true);
     try {
@@ -5709,6 +2871,28 @@ export default function ConciliacaoClient() {
         variant: "destructive",
         title: "Erro ao salvar mapeamento",
         description: error instanceof Error ? error.message : "Não foi possível salvar as regras de status.",
+      });
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleSaveSystemStatusSettings = async (settings: ConciliationSystemStatusSettings) => {
+    setIsSaving(true);
+    try {
+      const updatedSettings = await saveConciliationSystemStatusSettings(settings);
+
+      setSystemStatusSettings(updatedSettings);
+
+      toast({
+        title: "Status do sistema salvos",
+        description: `${formatNumber(updatedSettings.statuses.length)} status configurado(s) no painel.`,
+      });
+    } catch (error) {
+      toast({
+        variant: "destructive",
+        title: "Erro ao salvar status",
+        description: error instanceof Error ? error.message : "Não foi possível salvar os status do sistema.",
       });
     } finally {
       setIsSaving(false);
@@ -5911,6 +3095,26 @@ export default function ConciliacaoClient() {
       );
     }
 
+    const sheetFieldKey = getSheetKeyFromColumnId(columnId);
+
+    if (sheetFieldKey !== null) {
+      const sheetValue = order.sheetFields?.[sheetFieldKey];
+
+      return (
+        <TableCell key={columnId} className="whitespace-nowrap text-right tabular-nums">
+          {sheetValue === null || sheetValue === undefined ? (
+            <span className="text-zinc-400">-</span>
+          ) : typeof sheetValue === "number" ? (
+            sheetValue.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+          ) : (
+            <span className="block max-w-44 truncate" title={String(sheetValue)}>
+              {String(sheetValue)}
+            </span>
+          )}
+        </TableCell>
+      );
+    }
+
     if (!isStaticConciliationColumnId(columnId)) return null;
 
     switch (columnId) {
@@ -6014,6 +3218,14 @@ export default function ConciliacaoClient() {
             {formatDate(order.date)}
           </TableCell>
         );
+      case "customer":
+        return (
+          <TableCell key={columnId} className="max-w-56">
+            <span className="block truncate" title={order.customerName}>
+              {order.customerName}
+            </span>
+          </TableCell>
+        );
       case "account":
         return <TableCell key={columnId}>{order.accountName}</TableCell>;
       case "marketplace":
@@ -6055,6 +3267,7 @@ export default function ConciliacaoClient() {
               order={order}
               isSaving={isSaving}
               onSave={handleSaveSystemStatus}
+              systemStatusSettings={normalizedSystemStatusSettings}
             />
           </TableCell>
         );
@@ -6124,7 +3337,7 @@ export default function ConciliacaoClient() {
     const itemContributionMargin = allocateOrderAmountToItem(order, item, order.contributionMargin);
     const itemMarginPercentage = itemNetRevenue !== 0 ? (itemContributionMargin / itemNetRevenue) * 100 : 0;
 
-    if (isCalculationColumnId(columnId)) {
+    if (isCalculationColumnId(columnId) || getSheetKeyFromColumnId(columnId) !== null) {
       return <TableCell key={columnId}>{mutedDash}</TableCell>;
     }
 
@@ -6210,6 +3423,7 @@ export default function ConciliacaoClient() {
       case "calculatedColumns":
       case "payout":
       case "date":
+      case "customer":
       case "account":
       case "marketplace":
       case "status":
@@ -6227,39 +3441,49 @@ export default function ConciliacaoClient() {
     () => filteredOrders.reduce((total, order) => total + order.commissionFee, 0),
     [filteredOrders]
   );
-  const periodSummaryMetrics = [
-    {
-      title: "Faturamento Bruto",
-      value: formatCurrency(summary.grossRevenue),
-      tone: "blue" as const,
-    },
-    {
-      title: "Custo do Produto (CMV)",
-      value: formatCurrency(summary.productCost),
-      tone: "red" as const,
-    },
-    {
-      title: "Margem de Contribuição",
-      value: formatCurrency(summary.contributionMargin),
-      tone: "green" as const,
-    },
-    {
+  const periodSummaryMetrics = React.useMemo(() => {
+    const metrics = summarySettings.metricIds.flatMap((metricId) => {
+      const definition = summaryMetricDefinitionById.get(metricId);
+
+      if (!definition) return [];
+
+      return [
+        {
+          title: definition.title,
+          value: definition.value(summary),
+          tone: summaryToneByMetricId[metricId] ?? ("blue" as SummaryMetricTone),
+        },
+      ];
+    });
+
+    metrics.push({
       title: "Taxa de Afiliados",
       value: formatCurrency(postQueryCommissionAmount),
-      tone: "cyan" as const,
-    },
-  ];
+      tone: "cyan",
+    });
+
+    return metrics;
+  }, [postQueryCommissionAmount, summary, summarySettings.metricIds]);
 
   return (
     <DashboardLayout>
       <div className="flex-1 space-y-5 bg-slate-50 p-4 pt-6 text-slate-950 md:p-8" style={{ fontFamily: "Manrope, sans-serif" }}>
-        <div>
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <div>
             <h1 className="text-3xl font-bold tracking-tight">Conciliação de Vendas</h1>
             <p className="mt-1 max-w-3xl text-sm text-slate-500">
               Analise suas vendas, adicione custos e encontre o lucro líquido de cada operação.
             </p>
           </div>
+          <Button
+            type="button"
+            variant="outline"
+            className={referenceOutlineButtonClassName}
+            onClick={() => router.push("/financeiro/planilhas")}
+          >
+            <FileSpreadsheet className="mr-2 h-4 w-4" />
+            Planilhas
+          </Button>
         </div>
 
         <Card className={referencePanelClassName}>
@@ -6280,12 +3504,12 @@ export default function ConciliacaoClient() {
               </Button>
               <Button
                 type="button"
-	                variant="outline"
-	                className={referenceOutlineButtonClassName}
-	                onClick={() => setIsCalculationSettingsOpen(true)}
-	                disabled={isLoading}
-	              >
-	                Calcular
+                variant="outline"
+                onClick={() => setIsCalculationSettingsOpen(true)}
+                disabled={!hasAppliedFilters || isLoading || isQueryApplying || isSaving}
+              >
+                <Calculator className="mr-2 h-4 w-4" />
+                Calcular
               </Button>
               <Button
                 type="button"
@@ -6297,73 +3521,17 @@ export default function ConciliacaoClient() {
                 {isManualRefreshLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
                 {isManualRefreshLoading ? "Atualizando..." : "Atualizar"}
               </Button>
-              <Popover>
-                <PopoverTrigger asChild>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className={cn(referenceOutlineButtonClassName, "h-10 w-10 px-0")}
-                    aria-label="Configurações da conciliação"
-                    title="Configurações da conciliação"
-                  >
-                    <SlidersHorizontal className="h-4 w-4" />
-                  </Button>
-                </PopoverTrigger>
-                <PopoverContent className="w-64" align="end">
-                  <div className="grid gap-2">
-	                    <Button
-	                      type="button"
-	                      variant="ghost"
-	                      className="justify-start"
-	                      onClick={() => setIsCalculationSettingsOpen(true)}
-	                      disabled={isLoading}
-	                    >
-	                      <Calculator className="mr-2 h-4 w-4" />
-	                      Colunas calculadas
-	                    </Button>
-	                    <Button
-	                      type="button"
-	                      variant="ghost"
-	                      className="justify-start"
-	                      onClick={() => setIsDivergenceSettingsOpen(true)}
-	                      disabled={isLoading}
-	                    >
-                      <AlertTriangle className="mr-2 h-4 w-4" />
-                      Configurar alertas
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      className="justify-start"
-                      onClick={() => setIsStatusSettingsOpen(true)}
-                      disabled={isLoading}
-                    >
-                      <SlidersHorizontal className="mr-2 h-4 w-4" />
-                      Configurar status
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      className="justify-start"
-                      onClick={() => setIsPayoutImportOpen(true)}
-                      disabled={isLoading}
-                    >
-                      <Upload className="mr-2 h-4 w-4" />
-                      Importar repasses
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      className="justify-start"
-                      onClick={() => setIsPayoutHistoryOpen(true)}
-                      disabled={isLoading}
-                    >
-                      <Files className="mr-2 h-4 w-4" />
-                      Repasses importados
-                    </Button>
-                  </div>
-                </PopoverContent>
-              </Popover>
+              <Button
+                type="button"
+                variant="outline"
+                className={cn(referenceOutlineButtonClassName, "h-10 w-10 px-0")}
+                onClick={() => setIsSettingsHubOpen(true)}
+                disabled={isLoading || isQueryApplying}
+                aria-label="Configurações da conciliação"
+                title="Configurações da conciliação"
+              >
+                <Settings2 className="h-4 w-4" />
+              </Button>
             </div>
           </CardHeader>
           <CardContent>
@@ -6539,8 +3707,35 @@ export default function ConciliacaoClient() {
               </CardContent>
             </Card>
 
-            <div className="flex flex-col gap-3 rounded-2xl border border-zinc-200 bg-white p-3 shadow-sm lg:flex-row lg:items-center lg:justify-between">
-              <div className="text-sm text-slate-500">
+            <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-zinc-200 bg-white p-3 shadow-sm">
+              <div className="relative min-w-[260px] flex-1">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
+                <Input
+                  type="search"
+                  value={searchTerm}
+                  onChange={(event) => handleCompactSearchChange(event.target.value)}
+                  className="h-10 rounded-lg border-zinc-200 bg-zinc-50/60 pl-10 pr-20"
+                  placeholder="Buscar pedido, cliente, SKU..."
+                  aria-label="Buscar pedido, cliente ou SKU"
+                  disabled={isQueryLoading}
+                />
+                <div className="absolute right-2 top-1/2 flex -translate-y-1/2 items-center gap-1">
+                  {isQueryLoading ? <Loader2 className="h-4 w-4 animate-spin text-zinc-400" /> : null}
+                  {searchTerm.trim() ? (
+                    <button
+                      type="button"
+                      onClick={() => handleCompactSearchChange("")}
+                      className="rounded p-1 transition-colors hover:bg-zinc-100"
+                      aria-label="Limpar busca"
+                      title="Limpar busca"
+                    >
+                      <X className="h-4 w-4 text-zinc-500" />
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+
+              <div className="hidden items-center whitespace-nowrap rounded-lg bg-zinc-50 px-3 py-2 text-sm text-slate-500 xl:flex">
                 {isQueryLoading ? (
                   <Skeleton className="h-5 w-36" />
                 ) : (
@@ -6549,7 +3744,25 @@ export default function ConciliacaoClient() {
                   </>
                 )}
               </div>
-              <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-end">
+
+              <div className="w-full sm:w-52">
+                <Select value={account} onValueChange={handlePostQueryAccountChange}>
+                  <SelectTrigger className={cn(referenceControlClassName, "h-10 w-full rounded-lg")}>
+                    <SelectValue placeholder="Todas as contas" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {accountOptions.map((option) => (
+                      <SelectItem key={option} value={option}>
+                        {option === "Todos" ? "Todas as contas" : option}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="mx-1 hidden h-8 w-px bg-zinc-200 md:block" />
+
+              <div className="flex flex-wrap items-center gap-2">
                 {suggestedOrders.length > 0 ? (
                   <Button
                     type="button"
@@ -6562,136 +3775,251 @@ export default function ConciliacaoClient() {
                     Conciliar sugeridos
                   </Button>
                 ) : null}
-                <Select value={account} onValueChange={handlePostQueryAccountChange}>
-                  <SelectTrigger className={cn(referenceControlClassName, "h-10 w-full rounded-lg sm:w-52")}>
-                    <SelectValue placeholder="Todas as contas" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {accountOptions.map((option) => (
-                      <SelectItem key={option} value={option}>
-                        {option === "Todos" ? "Todas as contas" : option}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-
-                <Popover>
+                <Popover open={isAdvancedFiltersOpen} onOpenChange={setIsAdvancedFiltersOpen}>
                   <PopoverTrigger asChild>
-                    <Button type="button" variant="outline" className={cn(referenceCompactButtonClassName, "h-8 rounded-lg")}>
-                      <SlidersHorizontal className="mr-2 h-4 w-4" />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className={cn(
+                        "h-10 gap-2 rounded-lg px-3 text-sm font-medium",
+                        activeAdvancedFilterCount > 0 &&
+                          "border-primary/30 bg-primary/10 text-primary hover:border-primary/40 hover:bg-primary/10 hover:text-primary"
+                      )}
+                      disabled={isQueryLoading}
+                    >
+                      <Filter className="h-4 w-4" />
                       Filtros Adicionais
+                      {activeAdvancedFilterCount > 0 ? (
+                        <span className="flex h-5 w-5 items-center justify-center rounded-full bg-primary text-[10px] font-bold text-primary-foreground">
+                          {activeAdvancedFilterCount}
+                        </span>
+                      ) : null}
                     </Button>
                   </PopoverTrigger>
-                  <PopoverContent className="w-[min(92vw,780px)]" align="end">
-                    <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-                      <Select value={orderStatus} onValueChange={setOrderStatus}>
-                        <SelectTrigger className={referenceControlClassName}>
-                          <SelectValue placeholder="Status pedido" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {orderStatusOptions.map((option) => (
-                            <SelectItem key={option} value={option}>
-                              {option === "Todos" ? "Todos status" : option}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-
-                      <Select value={systemStatus} onValueChange={(value) => setSystemStatus(value as SystemStatusFilter)}>
-                        <SelectTrigger className={referenceControlClassName}>
-                          <SelectValue placeholder="Status sistema" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="Todos">Todos sistemas</SelectItem>
-                          {conciliationSystemStatusOptions.map((option) => (
-                            <SelectItem key={option} value={option}>
-                              {option}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-
-                      <Select value={financialAlert} onValueChange={(value) => setFinancialAlert(value as FinancialAlertFilter)}>
-                        <SelectTrigger className={referenceControlClassName}>
-                          <SelectValue placeholder="Alerta financeiro" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {financialAlertOptions.map((option) => (
-                            <SelectItem key={option} value={option}>
-                              {option === "Todos" ? "Todos alertas" : option}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-
-                      <Select
-                        value={adjustmentStatus}
-                        onValueChange={(value) => setAdjustmentStatus(value as AdjustmentStatusFilter)}
-                      >
-                        <SelectTrigger className={referenceControlClassName}>
-                          <SelectValue placeholder="Ajustes" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {adjustmentStatusOptions.map((option) => (
-                            <SelectItem key={option} value={option}>
-                              {option === "Todos" ? "Todos ajustes" : option}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-
-                      <Select value={payoutStatus} onValueChange={(value) => setPayoutStatus(value as PayoutStatusFilter)}>
-                        <SelectTrigger className={referenceControlClassName}>
-                          <SelectValue placeholder="Repasse" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {payoutStatusOptions.map((option) => (
-                            <SelectItem key={option} value={option}>
-                              {option === "Todos" ? "Todos repasses" : option}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-
-                      <Select value={suggestion} onValueChange={(value) => setSuggestion(value as SuggestionFilter)}>
-                        <SelectTrigger className={referenceControlClassName}>
-                          <SelectValue placeholder="Sugestão" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {suggestionOptions.map((option) => (
-                            <SelectItem key={option} value={option}>
-                              {option === "Todos" ? "Todas sugestões" : option}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-
-                      <Select value={reconciliationStatus} onValueChange={(value) => setReconciliationStatus(value as ReconciliationStatusFilter)}>
-                        <SelectTrigger className={referenceControlClassName}>
-                          <SelectValue placeholder="Conciliação" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {reconciliationStatusOptions.map((option) => (
-                            <SelectItem key={option} value={option}>
-                              {option === "Todos" ? "Todas conciliações" : option}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                  <PopoverContent
+                    align="end"
+                    sideOffset={8}
+                    collisionPadding={12}
+                    className="flex w-[680px] max-w-[95vw] flex-col overflow-hidden p-0"
+                    style={{ maxHeight: "min(560px, calc(var(--radix-popover-content-available-height) - 8px))" }}
+                  >
+                    <div className="flex-shrink-0 border-b border-zinc-200 p-4">
+                      <div className="flex items-start justify-between gap-4">
+                        <div>
+                          <h4 className="flex items-center gap-2 text-lg font-bold text-zinc-950">
+                            <SlidersHorizontal className="h-5 w-5 text-primary" />
+                            Filtros Adicionais
+                          </h4>
+                          <p className="mt-1 text-sm text-zinc-500">
+                            Refine sua busca utilizando critérios específicos.
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setIsAdvancedFiltersOpen(false)}
+                          className="rounded-full p-2 transition-colors hover:bg-zinc-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
+                          aria-label="Fechar filtros"
+                        >
+                          <X className="h-4 w-4 text-zinc-500" />
+                        </button>
+                      </div>
                     </div>
-                    <div className="mt-3 flex justify-end">
-                      <Button
-                        type="button"
-                        className={referencePrimaryButtonClassName}
-                        onClick={handleApplyFilters}
-                        disabled={isQueryApplying}
-                      >
-                        {isQueryApplying ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                        {isQueryApplying ? "Preparando..." : "Aplicar filtros"}
-                      </Button>
+
+                    <Tabs defaultValue="pedido" className="flex min-h-0 flex-1 flex-col">
+                      <TabsList className="mx-4 mt-3 h-auto justify-start gap-1 rounded-none border-b border-zinc-200 bg-transparent p-0">
+                        <TabsTrigger
+                          value="pedido"
+                          className="gap-1.5 rounded-md data-[state=active]:bg-primary/10 data-[state=active]:text-primary data-[state=active]:shadow-none"
+                        >
+                          Pedido
+                          {activePedidoFilterCount > 0 ? (
+                            <Badge variant="secondary" className="h-4 px-1 text-[10px]">
+                              {activePedidoFilterCount}
+                            </Badge>
+                          ) : null}
+                        </TabsTrigger>
+                        <TabsTrigger
+                          value="financeiro"
+                          className="gap-1.5 rounded-md data-[state=active]:bg-primary/10 data-[state=active]:text-primary data-[state=active]:shadow-none"
+                        >
+                          Financeiro
+                          {activeFinanceiroFilterCount > 0 ? (
+                            <Badge variant="secondary" className="h-4 px-1 text-[10px]">
+                              {activeFinanceiroFilterCount}
+                            </Badge>
+                          ) : null}
+                        </TabsTrigger>
+                        <TabsTrigger
+                          value="operacao"
+                          className="gap-1.5 rounded-md data-[state=active]:bg-primary/10 data-[state=active]:text-primary data-[state=active]:shadow-none"
+                        >
+                          Operação
+                          {activeOperacaoFilterCount > 0 ? (
+                            <Badge variant="secondary" className="h-4 px-1 text-[10px]">
+                              {activeOperacaoFilterCount}
+                            </Badge>
+                          ) : null}
+                        </TabsTrigger>
+                      </TabsList>
+
+                      <TabsContent value="pedido" className="mt-0 flex-1 overflow-y-auto p-4">
+                        <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
+                          <CompactFilterGroup title="Status do Pedido" active={orderStatus !== "Todos" ? 1 : 0}>
+                            {orderStatusOptions.map((option) => (
+                              <CompactFilterOption
+                                key={option}
+                                checked={orderStatus === option}
+                                count={option === "Todos" ? filteredOrders.length : orderStatusCounts.get(option)}
+                                label={option === "Todos" ? "Todos os status" : option}
+                                onClick={() => setOrderStatus(option)}
+                              />
+                            ))}
+                          </CompactFilterGroup>
+
+                          <CompactFilterGroup title="Status Sistema" active={systemStatus !== "Todos" ? 1 : 0}>
+                            <CompactFilterOption
+                              checked={systemStatus === "Todos"}
+                              count={filteredOrders.length}
+                              label="Todos os sistemas"
+                              onClick={() => setSystemStatus("Todos")}
+                            />
+                            {normalizedSystemStatusSettings.statuses.map((definition) => (
+                              <CompactFilterOption
+                                key={definition.id}
+                                checked={systemStatus === definition.id}
+                                color={definition.active ? definition.color : "#a1a1aa"}
+                                count={systemStatusCounts.get(definition.id)}
+                                label={`${definition.displayName}${definition.active ? "" : " (inativo)"}`}
+                                muted={!definition.active}
+                                onClick={() => setSystemStatus(definition.id)}
+                              />
+                            ))}
+                          </CompactFilterGroup>
+
+                          <CompactFilterGroup title="Conciliação" active={reconciliationStatus !== "Todos" ? 1 : 0}>
+                            {reconciliationStatusOptions.map((option) => (
+                              <CompactFilterOption
+                                key={option}
+                                checked={reconciliationStatus === option}
+                                count={reconciliationStatusCounts[option]}
+                                label={option === "Todos" ? "Todos" : option}
+                                onClick={() => setReconciliationStatus(option)}
+                              />
+                            ))}
+                          </CompactFilterGroup>
+                        </div>
+                      </TabsContent>
+
+                      <TabsContent value="financeiro" className="mt-0 flex-1 overflow-y-auto p-4">
+                        <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
+                          <CompactFilterGroup title="Alerta Financeiro" active={financialAlert !== "Todos" ? 1 : 0}>
+                            {financialAlertOptions.map((option) => (
+                              <CompactFilterOption
+                                key={option}
+                                checked={financialAlert === option}
+                                count={financialAlertCounts[option]}
+                                label={option === "Todos" ? "Todos os alertas" : option}
+                                onClick={() => setFinancialAlert(option)}
+                              />
+                            ))}
+                          </CompactFilterGroup>
+
+                          <CompactFilterGroup title="Ajustes Financeiros" active={adjustmentStatus !== "Todos" ? 1 : 0}>
+                            {adjustmentStatusOptions.map((option) => (
+                              <CompactFilterOption
+                                key={option}
+                                checked={adjustmentStatus === option}
+                                count={adjustmentStatusCounts[option]}
+                                label={option === "Todos" ? "Todos os ajustes" : option}
+                                onClick={() => setAdjustmentStatus(option)}
+                              />
+                            ))}
+                          </CompactFilterGroup>
+
+                          <CompactFilterGroup title="Repasse" active={payoutStatus !== "Todos" ? 1 : 0}>
+                            {payoutStatusOptions.map((option) => (
+                              <CompactFilterOption
+                                key={option}
+                                checked={payoutStatus === option}
+                                count={payoutStatusCounts[option]}
+                                label={option === "Todos" ? "Todos os repasses" : option}
+                                onClick={() => setPayoutStatus(option)}
+                              />
+                            ))}
+                          </CompactFilterGroup>
+                        </div>
+                      </TabsContent>
+
+                      <TabsContent value="operacao" className="mt-0 flex-1 overflow-y-auto p-4">
+                        <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
+                          <CompactFilterGroup title="Sugestão Operacional" active={suggestion !== "Todos" ? 1 : 0}>
+                            {suggestionOptions.map((option) => (
+                              <CompactFilterOption
+                                key={option}
+                                checked={suggestion === option}
+                                count={suggestionCounts[option]}
+                                label={option === "Todos" ? "Todas as sugestões" : option}
+                                onClick={() => setSuggestion(option)}
+                              />
+                            ))}
+                          </CompactFilterGroup>
+                        </div>
+                      </TabsContent>
+                    </Tabs>
+
+                    <div className="flex flex-shrink-0 items-center justify-between gap-2 border-t border-zinc-200 bg-white px-4 py-3">
+                      <p className="text-xs text-zinc-500">
+                        {activeAdvancedFilterCount > 0
+                          ? `${activeAdvancedFilterCount} filtro(s) avançado(s) selecionado(s)`
+                          : "Nenhum filtro avançado selecionado"}
+                      </p>
+                      <div className="flex items-center gap-2">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="gap-2"
+                          onClick={() => {
+                            clearAdvancedFilters();
+                            setIsAdvancedFiltersOpen(false);
+                          }}
+                          disabled={isQueryLoading || activeAdvancedFilterCount === 0}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                          Limpar filtros adicionais
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          onClick={() => {
+                            handleApplyFilters();
+                            setIsAdvancedFiltersOpen(false);
+                          }}
+                          disabled={isQueryApplying}
+                        >
+                          {isQueryApplying ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                          {isQueryApplying ? "Preparando..." : "Aplicar filtros"}
+                        </Button>
+                      </div>
                     </div>
                   </PopoverContent>
                 </Popover>
+                {activeCompactFilterCount > 0 ? (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-10 gap-2 rounded-lg px-3 text-sm text-zinc-600 hover:bg-zinc-100 hover:text-zinc-950"
+                    onClick={clearCompactFilters}
+                    disabled={isQueryLoading}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                    Limpar
+                    <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-zinc-100 px-1 text-[10px] font-bold text-zinc-500">
+                      {activeCompactFilterCount}
+                    </span>
+                  </Button>
+                ) : null}
               </div>
             </div>
 
@@ -6724,34 +4052,6 @@ export default function ConciliacaoClient() {
                     {viewMode === "table" ? <LayoutGrid className="mr-2 h-4 w-4" /> : <Table2 className="mr-2 h-4 w-4" />}
                     {viewMode === "table" ? "Cards" : "Tabela"}
                   </Button>
-                  <div
-                    className="inline-flex h-9 rounded-md border border-slate-200 bg-white p-0.5 shadow-sm"
-                    aria-label="Densidade da tabela"
-                  >
-                    {tableDensityOptions.map((option) => {
-                      const active = tableDensity === option.id;
-
-                      return (
-                        <Button
-                          key={option.id}
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          className={cn(
-                            "h-8 rounded px-2.5 text-xs",
-                            active
-                              ? "bg-slate-900 text-white hover:bg-slate-900 hover:text-white"
-                              : "text-slate-600 hover:bg-slate-100 hover:text-slate-950"
-                          )}
-                          aria-pressed={active}
-                          onClick={() => setTableDensity(option.id)}
-                        >
-                          <SlidersHorizontal className="mr-1.5 h-3.5 w-3.5" />
-                          {option.label}
-                        </Button>
-                      );
-                    })}
-                  </div>
                   <ColumnVisibilityPopover
                     columnOptions={availableColumnOptions}
                     visibleColumnIds={visibleColumnIds}
@@ -6765,16 +4065,6 @@ export default function ConciliacaoClient() {
             </div>
           </CardHeader>
           <CardContent>
-            <div className="mb-4 grid gap-2 rounded-lg border border-slate-200 bg-slate-50/80 p-3 sm:grid-cols-2 xl:grid-cols-4">
-              {tableOperationMetrics.map((metric) => (
-                <div key={metric.label} className="min-w-0">
-                  <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">{metric.label}</p>
-                  <p className="mt-1 truncate text-sm font-semibold text-slate-950">{metric.value}</p>
-                  <p className="mt-0.5 truncate text-xs text-slate-500">{metric.helper}</p>
-                </div>
-              ))}
-            </div>
-
             {selectedOrders.length > 0 ? (
               <div className="mb-4 flex flex-col gap-3 rounded-lg border bg-muted/30 p-3 lg:flex-row lg:items-center lg:justify-between">
                 <div className="min-w-0">
@@ -6847,13 +4137,14 @@ export default function ConciliacaoClient() {
                 {isQueryLoading ? (
                   <ConciliationLoadingState />
                 ) : paginatedOrders.length > 0 ? (
-                  <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                  <div className="flex flex-col gap-3">
                     {paginatedOrders.map((order) => (
                       <OrderCard
                         key={order.id}
                         order={order}
                         selected={selectedOrderIds.has(order.id)}
                         isSaving={isSaving}
+                        systemStatusSettings={normalizedSystemStatusSettings}
                         onSelect={(checked) => toggleOrderSelection(order.id, checked)}
                         onOpen={() => setSelectedOrder(order)}
                         onToggleReconciled={() => handleSaveConciliation([order], !order.isReconciled)}
@@ -6928,8 +4219,6 @@ export default function ConciliacaoClient() {
                       const isDragging = draggedColumnId === columnId;
                       const isDropTarget =
                         dragOverColumnId === columnId && draggedColumnId !== null && draggedColumnId !== columnId;
-                      const canMoveLeft = columnIndex > 0;
-                      const canMoveRight = columnIndex < orderedVisibleColumnIds.length - 1;
 
                       if (!column) return null;
 
@@ -6970,38 +4259,6 @@ export default function ConciliacaoClient() {
                             >
                               <GripVertical className="h-4 w-4" />
                             </span>
-                            <div className="inline-flex items-center gap-0.5 rounded border border-slate-200 bg-white p-0.5 opacity-0 shadow-sm transition-opacity group-hover/header:opacity-100 group-focus-within/header:opacity-100">
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="sm"
-                                className="h-6 w-6 p-0"
-                                disabled={!canMoveLeft}
-                                aria-label={`Mover coluna ${column.label} para a esquerda`}
-                                title="Mover para a esquerda"
-                                onClick={(event) => {
-                                  event.stopPropagation();
-                                  moveVisibleColumn(columnId, -1);
-                                }}
-                              >
-                                <ChevronLeft className="h-3.5 w-3.5" />
-                              </Button>
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="sm"
-                                className="h-6 w-6 p-0"
-                                disabled={!canMoveRight}
-                                aria-label={`Mover coluna ${column.label} para a direita`}
-                                title="Mover para a direita"
-                                onClick={(event) => {
-                                  event.stopPropagation();
-                                  moveVisibleColumn(columnId, 1);
-                                }}
-                              >
-                                <ChevronRight className="h-3.5 w-3.5" />
-                              </Button>
-                            </div>
                             <SortableHeader
                               columnId={columnId}
                               label={column.label}
@@ -7014,7 +4271,6 @@ export default function ConciliacaoClient() {
                         </TableHead>
                       );
                     })}
-                    <TableHead className={stickyActionHeaderClassName}>Ação</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody className={tableBodyClassName}>
@@ -7060,30 +4316,6 @@ export default function ConciliacaoClient() {
                         {orderedVisibleColumnIds.map((columnId, columnIndex) =>
                           renderOrderColumnCell(order, columnId, isExpanded, columnIndex)
                         )}
-                        <TableCell
-                          className={stickyActionCellClassName}
-                          data-stop-row-click="true"
-                          onClick={(event) => event.stopPropagation()}
-                        >
-                          <Button
-                            size="sm"
-                            variant={order.isReconciled ? "outline" : "default"}
-                            onClick={() => handleSaveConciliation([order], !order.isReconciled)}
-                            disabled={isSaving}
-                          >
-                            {order.isReconciled ? (
-                              <>
-                                <Undo2 className="mr-2 h-4 w-4" />
-                                Desfazer
-                              </>
-                            ) : (
-                              <>
-                                <CheckCheck className="mr-2 h-4 w-4" />
-                                Conciliar
-                              </>
-                            )}
-                          </Button>
-                        </TableCell>
                       </TableRow>
                       {isExpanded
                         ? order.items.map((item, itemIndex) => (
@@ -7095,9 +4327,6 @@ export default function ConciliacaoClient() {
                               {orderedVisibleColumnIds.map((columnId, columnIndex) =>
                                 renderOrderItemColumnCell(order, item, itemIndex, columnId, columnIndex)
                               )}
-                              <TableCell className={stickyItemActionCellClassName}>
-                                Item
-                              </TableCell>
                             </TableRow>
                           ))
                         : null}
@@ -7189,6 +4418,30 @@ export default function ConciliacaoClient() {
         )}
       </div>
 
+      <ConciliationSettingsHubDialog
+        open={isSettingsHubOpen}
+        onOpenChange={setIsSettingsHubOpen}
+        orders={filteredOrders}
+        isLoading={isLoading}
+        isSaving={isSaving}
+        accountSettings={accountSettings}
+        statusSettings={statusSettings}
+        systemStatusSettings={systemStatusSettings}
+        summaryCardsCount={summarySettings.metricIds.length}
+        calculationColumnsCount={calculationSettings.calculations.length}
+        divergenceRulesCount={Object.keys(divergenceSettings.marketplaceRules || {}).length}
+        statusMappingsCount={Object.keys(statusSettings.statusMappings || {}).length}
+        payoutRowsCount={payoutRecords.length}
+        onSaveAccountMappings={handleSaveAccountMappings}
+        onSaveStatusMappings={handleSaveStatusMappings}
+        onSaveSystemStatusSettings={handleSaveSystemStatusSettings}
+        onApplySuggestedConciliations={handleSaveSuggestedConciliations}
+        onOpenSummarySettings={() => setIsSummarySettingsOpen(true)}
+        onOpenCalculationSettings={() => setIsCalculationSettingsOpen(true)}
+        onOpenDivergenceSettings={() => setIsDivergenceSettingsOpen(true)}
+        onOpenStatusSettings={() => setIsStatusSettingsOpen(true)}
+        onOpenPayoutImport={() => setIsPayoutImportOpen(true)}
+      />
       <SummarySettingsDialog
         open={isSummarySettingsOpen}
         onOpenChange={setIsSummarySettingsOpen}
@@ -7199,6 +4452,7 @@ export default function ConciliacaoClient() {
       <CalculationSettingsDialog
         open={isCalculationSettingsOpen}
         onOpenChange={setIsCalculationSettingsOpen}
+        orders={filteredOrders}
         calculationSettings={calculationSettings}
         isSaving={isSaving}
         onSave={handleSaveCalculationSettings}
@@ -7217,6 +4471,7 @@ export default function ConciliacaoClient() {
         orders={filteredOrders}
         statusMappings={statusSettings.statusMappings}
         statusSettings={statusSettings}
+        systemStatusSettings={normalizedSystemStatusSettings}
         isSaving={isSaving}
         onSave={handleSaveStatusMappings}
       />
@@ -7240,6 +4495,7 @@ export default function ConciliacaoClient() {
         order={selectedOrder}
         onClose={() => setSelectedOrder(null)}
         isSaving={isSaving}
+        systemStatusSettings={normalizedSystemStatusSettings}
         onSaveSystemStatus={handleSaveSystemStatus}
         onSaveFinancialAdjustments={handleSaveFinancialAdjustments}
       />

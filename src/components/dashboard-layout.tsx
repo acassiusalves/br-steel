@@ -12,6 +12,7 @@ import {
   ClipboardList,
   DollarSign,
   Factory,
+  FileSpreadsheet,
   Kanban,
   LayoutDashboard,
   Loader2,
@@ -88,6 +89,7 @@ const allNavItems: NavItem[] = [
     label: "Financeiro",
     subItems: [
       { href: "/financeiro/conciliacao", icon: ClipboardList, label: "Conciliação" },
+      { href: "/financeiro/planilhas", icon: FileSpreadsheet, label: "Planilhas" },
     ],
   },
   { href: "/produtos", icon: Package, label: "Produtos" },

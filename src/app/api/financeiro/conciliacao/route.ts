@@ -16,8 +16,11 @@ import {
   resolveAutomaticSystemStatus,
   type ConciliationSystemStatus,
 } from "@/lib/conciliation/status";
+import { normalizeConciliationSystemStatusSettings } from "@/lib/conciliation/system-status-settings";
 import { requirePagePermission } from "@/lib/server-auth";
 import type {
+  ConciliationAccountMappings,
+  ConciliationAccountSettings,
   ConciliationActor,
   ConciliationAuditEvent,
   ConciliationAuditEventType,
@@ -36,6 +39,7 @@ import type {
   ConciliationSummarySettings,
   ConciliationStatusMappings,
   ConciliationStatusSettings,
+  ConciliationSystemStatusSettings,
 } from "@/types/conciliation";
 
 export const dynamic = "force-dynamic";
@@ -44,7 +48,9 @@ export const runtime = "nodejs";
 const collectionName = "conciliationSales";
 const payoutCollectionName = "conciliationMarketplacePayouts";
 const settingsCollectionName = "conciliationSettings";
+const accountSettingsDocumentId = "accountMappings";
 const statusSettingsDocumentId = "statusMappings";
+const systemStatusSettingsDocumentId = "systemStatuses";
 const summarySettingsDocumentId = "summary";
 const divergenceSettingsDocumentId = "divergenceRules";
 const calculationSettingsDocumentId = "calculations";
@@ -341,11 +347,36 @@ const normalizeStatusMappings = (value: unknown): ConciliationStatusMappings => 
   }, {});
 };
 
+const normalizeAccountMappings = (value: unknown): ConciliationAccountMappings => {
+  if (!value || typeof value !== "object") return {};
+
+  return Object.entries(value as Record<string, unknown>).reduce<ConciliationAccountMappings>((mappings, [key, name]) => {
+    const accountId = key.trim();
+    const mappedName = typeof name === "string" ? name.trim().slice(0, 120) : "";
+
+    if (accountId && mappedName) {
+      mappings[accountId] = mappedName;
+    }
+
+    return mappings;
+  }, {});
+};
+
+const normalizeAccountSettings = (data: FirebaseFirestore.DocumentData | undefined): ConciliationAccountSettings => ({
+  accountMappings: normalizeAccountMappings(data?.accountMappings),
+  updatedAt: asIsoString(data?.updatedAt),
+  updatedBy: normalizeActor(data?.updatedBy),
+});
+
 const normalizeStatusSettings = (data: FirebaseFirestore.DocumentData | undefined): ConciliationStatusSettings => ({
   statusMappings: normalizeStatusMappings(data?.statusMappings),
   updatedAt: asIsoString(data?.updatedAt),
   updatedBy: normalizeActor(data?.updatedBy),
 });
+
+const normalizeSystemStatusSettings = (
+  data: FirebaseFirestore.DocumentData | undefined
+): ConciliationSystemStatusSettings => normalizeConciliationSystemStatusSettings(data);
 
 const normalizeSummarySettings = (data: FirebaseFirestore.DocumentData | undefined): ConciliationSummarySettings => ({
   metricIds: normalizeConciliationSummaryMetricIds(data?.metricIds),
@@ -377,14 +408,18 @@ export async function GET(request: Request) {
     const [
       snapshot,
       payoutSnapshot,
+      accountSettingsSnapshot,
       statusSettingsSnapshot,
+      systemStatusSettingsSnapshot,
       summarySettingsSnapshot,
       divergenceSettingsSnapshot,
       calculationSettingsSnapshot,
     ] = await Promise.all([
       adminDb.collection(collectionName).get(),
       adminDb.collection(payoutCollectionName).get(),
+      adminDb.collection(settingsCollectionName).doc(accountSettingsDocumentId).get(),
       adminDb.collection(settingsCollectionName).doc(statusSettingsDocumentId).get(),
+      adminDb.collection(settingsCollectionName).doc(systemStatusSettingsDocumentId).get(),
       adminDb.collection(settingsCollectionName).doc(summarySettingsDocumentId).get(),
       adminDb.collection(settingsCollectionName).doc(divergenceSettingsDocumentId).get(),
       adminDb.collection(settingsCollectionName).doc(calculationSettingsDocumentId).get(),
@@ -395,7 +430,9 @@ export async function GET(request: Request) {
     const payouts = payoutSnapshot.docs.map((documentSnapshot) =>
       normalizePayoutRecord(documentSnapshot.id, documentSnapshot.data())
     );
+    const accountSettings = normalizeAccountSettings(accountSettingsSnapshot.data());
     const statusSettings = normalizeStatusSettings(statusSettingsSnapshot.data());
+    const systemStatusSettings = normalizeSystemStatusSettings(systemStatusSettingsSnapshot.data());
     const summarySettings = normalizeSummarySettings(summarySettingsSnapshot.data());
     const divergenceSettings = normalizeDivergenceSettings(divergenceSettingsSnapshot.data());
     const calculationSettings = normalizeCalculationSettings(calculationSettingsSnapshot.data());
@@ -404,7 +441,9 @@ export async function GET(request: Request) {
       ok: true,
       records,
       payouts,
+      accountSettings,
       statusSettings,
+      systemStatusSettings,
       summarySettings,
       divergenceSettings,
       calculationSettings,
@@ -439,7 +478,9 @@ export async function PATCH(request: Request) {
     importBatchId?: unknown;
     sourceFileName?: unknown;
     importedAt?: unknown;
+    accountMappings?: unknown;
     statusMappings?: unknown;
+    systemStatusSettings?: unknown;
     metricIds?: unknown;
     divergenceRules?: unknown;
     calculations?: unknown;
@@ -447,21 +488,25 @@ export async function PATCH(request: Request) {
   const action =
     payload.action === "status"
       ? "status"
-      : payload.action === "statusMappings"
-        ? "statusMappings"
-        : payload.action === "summarySettings"
-          ? "summarySettings"
-          : payload.action === "divergenceRules"
-            ? "divergenceRules"
-            : payload.action === "calculationSettings"
-              ? "calculationSettings"
-              : payload.action === "payoutImport"
-                ? "payoutImport"
-                : payload.action === "payoutImportDelete"
-                  ? "payoutImportDelete"
-                  : payload.action === "financialAdjustments"
-                    ? "financialAdjustments"
-                    : "reconciliation";
+      : payload.action === "accountMappings"
+        ? "accountMappings"
+        : payload.action === "statusMappings"
+          ? "statusMappings"
+          : payload.action === "systemStatusSettings"
+            ? "systemStatusSettings"
+            : payload.action === "summarySettings"
+              ? "summarySettings"
+              : payload.action === "divergenceRules"
+                ? "divergenceRules"
+                : payload.action === "calculationSettings"
+                  ? "calculationSettings"
+                  : payload.action === "payoutImport"
+                    ? "payoutImport"
+                    : payload.action === "payoutImportDelete"
+                      ? "payoutImportDelete"
+                      : payload.action === "financialAdjustments"
+                        ? "financialAdjustments"
+                        : "reconciliation";
 
   if (action === "payoutImportDelete") {
     const importBatchId = typeof payload.importBatchId === "string" ? payload.importBatchId.trim() : "";
@@ -677,6 +722,39 @@ export async function PATCH(request: Request) {
     }
   }
 
+  if (action === "accountMappings") {
+    try {
+      const now = new Date().toISOString();
+      const actor: ConciliationActor = {
+        id: permission.user.id,
+        name: permission.user.name || permission.user.email,
+        email: permission.user.email,
+      };
+      const accountMappings = normalizeAccountMappings(payload.accountMappings);
+      const documentRef = adminDb.collection(settingsCollectionName).doc(accountSettingsDocumentId);
+
+      await documentRef.set(
+        {
+          accountMappings,
+          updatedAt: now,
+          updatedBy: actor,
+        },
+        { merge: true }
+      );
+
+      const updatedSnapshot = await documentRef.get();
+      const accountSettings = normalizeAccountSettings(updatedSnapshot.data());
+
+      return NextResponse.json({ ok: true, accountSettings });
+    } catch (error) {
+      console.error("Erro ao salvar mapeamento de contas:", error);
+      return NextResponse.json(
+        { ok: false, error: "Não foi possível salvar o mapeamento de contas." },
+        { status: 500 }
+      );
+    }
+  }
+
   if (action === "statusMappings") {
     try {
       const now = new Date().toISOString();
@@ -705,6 +783,39 @@ export async function PATCH(request: Request) {
       console.error("Erro ao salvar mapeamento de status:", error);
       return NextResponse.json(
         { ok: false, error: "Não foi possível salvar o mapeamento de status." },
+        { status: 500 }
+      );
+    }
+  }
+
+  if (action === "systemStatusSettings") {
+    try {
+      const now = new Date().toISOString();
+      const actor: ConciliationActor = {
+        id: permission.user.id,
+        name: permission.user.name || permission.user.email,
+        email: permission.user.email,
+      };
+      const systemStatusSettings = normalizeConciliationSystemStatusSettings(payload.systemStatusSettings);
+      const documentRef = adminDb.collection(settingsCollectionName).doc(systemStatusSettingsDocumentId);
+
+      await documentRef.set(
+        {
+          statuses: systemStatusSettings.statuses,
+          updatedAt: now,
+          updatedBy: actor,
+        },
+        { merge: true }
+      );
+
+      const updatedSnapshot = await documentRef.get();
+      const updatedSystemStatusSettings = normalizeSystemStatusSettings(updatedSnapshot.data());
+
+      return NextResponse.json({ ok: true, systemStatusSettings: updatedSystemStatusSettings });
+    } catch (error) {
+      console.error("Erro ao salvar status do sistema:", error);
+      return NextResponse.json(
+        { ok: false, error: "Não foi possível salvar os status do sistema." },
         { status: 500 }
       );
     }
