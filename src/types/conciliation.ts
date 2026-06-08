@@ -46,6 +46,8 @@ export interface ConciliationOrder {
   contributionMargin: number;
   contributionMarginPercentage: number;
   calculationValues: Record<string, ConciliationCalculationValue>;
+  /** Campos vindos de planilhas importadas (associações), por chave de destino. */
+  sheetFields?: Record<string, string | number | null>;
   financialDivergence: ConciliationFinancialDivergence;
   financialAdjustments: ConciliationFinancialAdjustments;
   marketplacePayouts: ConciliationMarketplacePayout[];
@@ -107,6 +109,31 @@ export interface ConciliationStatusSettings {
   updatedBy: ConciliationActor | null;
 }
 
+export type ConciliationAccountMappings = Record<string, string>;
+
+export interface ConciliationAccountSettings {
+  accountMappings: ConciliationAccountMappings;
+  updatedAt: string | null;
+  updatedBy: ConciliationActor | null;
+}
+
+export interface ConciliationSystemStatusDefinition {
+  id: ConciliationSystemStatus;
+  label: ConciliationSystemStatus;
+  displayName: string;
+  active: boolean;
+  color: string;
+  locked: boolean;
+  order: number;
+  updatedAt: string | null;
+}
+
+export interface ConciliationSystemStatusSettings {
+  statuses: ConciliationSystemStatusDefinition[];
+  updatedAt: string | null;
+  updatedBy: ConciliationActor | null;
+}
+
 export interface ConciliationSummarySettings {
   metricIds: ConciliationSummaryMetricId[];
   updatedAt: string | null;
@@ -128,11 +155,53 @@ export interface ConciliationCalculationValue {
   error: string | null;
 }
 
+export type ConciliationCalculationConditionOperator =
+  | "equals"
+  | "notEquals"
+  | "greaterThan"
+  | "greaterThanOrEqual"
+  | "lessThan"
+  | "lessThanOrEqual";
+
+export type ConciliationCalculationInlineConditionOperator =
+  | "exists"
+  | "notExists"
+  | ConciliationCalculationConditionOperator;
+
+export interface ConciliationCalculationConditionalFormula {
+  id: string;
+  name: string;
+  fieldId: string;
+  operator: ConciliationCalculationConditionOperator;
+  value: string;
+  expression: string;
+}
+
+export interface ConciliationCalculationInlineConditional {
+  id: string;
+  name: string;
+  checkFieldId: string;
+  operator: ConciliationCalculationInlineConditionOperator;
+  value: string;
+  thenFieldId: string;
+  elseFieldId: string;
+}
+
+export interface ConciliationCalculationInteraction {
+  targetFieldId: string;
+  operator: "+" | "-";
+}
+
 export interface ConciliationCustomCalculation {
   id: string;
   name: string;
   description: string;
   expression: string;
+  conditionalFormulas: ConciliationCalculationConditionalFormula[];
+  inlineConditionals: ConciliationCalculationInlineConditional[];
+  interaction: ConciliationCalculationInteraction | null;
+  marketplace: ConciliationMarketplace;
+  statusNames: string[];
   isPercentage: boolean;
   enabled: boolean;
   updatedAt: string | null;
@@ -150,6 +219,11 @@ export interface ConciliationCustomCalculationInput {
   name: string;
   description: string;
   expression: string;
+  conditionalFormulas: ConciliationCalculationConditionalFormula[];
+  inlineConditionals: ConciliationCalculationInlineConditional[];
+  interaction: ConciliationCalculationInteraction | null;
+  marketplace: ConciliationMarketplace;
+  statusNames: string[];
   isPercentage: boolean;
   enabled: boolean;
 }

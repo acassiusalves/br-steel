@@ -48,16 +48,35 @@ service cloud.firestore {
       allow read, write: if legacyClientAccess();
     }
 
+    // Conciliação financeira: acessada exclusivamente pela API route
+    // /api/financeiro/conciliacao com Admin SDK (server-side). O client
+    // nunca lê/escreve essas coleções diretamente.
     match /conciliationSales/{document=**} {
-      allow read, write: if legacyClientAccess();
+      allow read, write: if false;
     }
 
     match /conciliationMarketplacePayouts/{document=**} {
-      allow read, write: if legacyClientAccess();
+      allow read, write: if false;
     }
 
     match /conciliationSettings/{document=**} {
-      allow read, write: if legacyClientAccess();
+      allow read, write: if false;
+    }
+
+    match /conciliationImportFiles/{document=**} {
+      allow read, write: if false;
+    }
+
+    match /conciliationAssociations/{document=**} {
+      allow read, write: if false;
+    }
+
+    match /conciliationCategories/{document=**} {
+      allow read, write: if false;
+    }
+
+    match /conciliationTemplates/{document=**} {
+      allow read, write: if false;
     }
 
     match /productionColumns/{document=**} {
