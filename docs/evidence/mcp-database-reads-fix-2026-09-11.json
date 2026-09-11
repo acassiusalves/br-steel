@@ -1,0 +1,113 @@
+{
+  "checkedAt": "2026-09-11T23:08:31.750308+00:00",
+  "issue": "MCP product stock and production demand attempted live ERP reads and misrepresented empty staging results",
+  "resolution": "MCP reads persisted Firestore data only; ignores Bling and warm ERP cache; empty-result semantics identify missing database records",
+  "deployment": {
+    "id": "dpl_3K3Xt92mbCFYSdNUsiPBRswE5kqk",
+    "name": "br-steel-mcp-staging",
+    "readyState": "READY",
+    "url": "br-steel-mcp-staging-qtd8eshkd-acassius-alves-projects.vercel.app",
+    "alias": [
+      "br-steel-mcp-staging.vercel.app",
+      "br-steel-mcp-staging-acassius-alves-projects.vercel.app"
+    ],
+    "projectId": "prj_YD3ATzBPFQo4bD1ZlojrDTigUZp8",
+    "crons": []
+  },
+  "scheduledJobsDisabled": true,
+  "verification": {
+    "regressionFailuresBeforeFix": 5,
+    "targetedTestsPassed": 20,
+    "fullSuiteTestsPassed": 145,
+    "fullSuiteFilesPassed": 24,
+    "build": "passed on Vercel",
+    "typecheck": {
+      "baselineDiagnostics": 25,
+      "newDiagnostics": 0,
+      "exactBaselineMatch": true
+    },
+    "independentReview": "No blocking findings; stale specification sentence corrected",
+    "offlineProofRunnerPreflight": "passed without network",
+    "newAuthenticatedHttpsToolProof": false,
+    "hostedClaudeRetestPending": true,
+    "publicSmoke": {
+      "checkedAt": "2026-09-11T23:06:52.741Z",
+      "origin": "https://br-steel-mcp-staging.vercel.app",
+      "result": [
+        {
+          "path": "/login",
+          "status": 200
+        },
+        {
+          "path": "/.well-known/oauth-protected-resource/api/mcp",
+          "status": 200
+        },
+        {
+          "path": "/api/mcp",
+          "status": 401
+        },
+        {
+          "path": "/api/cron/ml-health",
+          "status": 401
+        },
+        {
+          "path": "/api/cron/ml-messages-drain",
+          "status": 401
+        },
+        {
+          "path": "/api/cron/ml-messages-backfill",
+          "status": 401
+        }
+      ]
+    }
+  },
+  "preservedPilotAndDatabaseInventory": {
+    "checkedAt": "2026-09-11T23:05:23.034Z",
+    "project": "brsteel-mcp-staging",
+    "counts": {
+      "salesOrders": 0,
+      "stockUpdates": 0,
+      "supplies": 0,
+      "productionLots": 0,
+      "appConfig": 0
+    },
+    "pilot": {
+      "active": true,
+      "passwordSetupCompleted": true,
+      "claudeConnectionActive": true
+    },
+    "observedToolCalls": [
+      {
+        "tool": "resumir_vendas",
+        "result": "success"
+      },
+      {
+        "tool": "consultar_estoque_produtos",
+        "result": "success"
+      },
+      {
+        "tool": "consultar_demanda_producao",
+        "result": "success"
+      },
+      {
+        "tool": "consultar_meu_acesso",
+        "result": "success"
+      }
+    ]
+  },
+  "existingClaudeAuditAppliesTo": "Calls before this correction, not a retest of the corrected deployment",
+  "writesEnabled": false,
+  "productionDataImported": false,
+  "productionDeploymentChanged": false,
+  "privateUploadScan": {
+    "regularFiles": 397,
+    "secretMatches": 0,
+    "privateFileContentsExcluded": true
+  },
+  "sourceSha256": {
+    "src/server/operations/stock.ts": "fe3350c6530fb74789a52bdfebbddde3d06765e40bbfb11ec76700ab254d2e7d",
+    "src/server/operations/production-demand.ts": "f5aa40c8436eddd35aa6158abea4a7242c86a96887a8bee2369df6a762892320",
+    "src/server/operations/sales.ts": "17068ae0f6a2f9712202fa8101456448db21d946b19c90b21309e99a9409fc7a",
+    "src/server/mcp/read-tools.ts": "e1539e8f04a3850506f6ea34598550b633fbb6d4e3b6768cb273648c905ff4ee"
+  }
+}

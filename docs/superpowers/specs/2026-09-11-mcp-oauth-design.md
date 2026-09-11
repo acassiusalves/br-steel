@@ -151,12 +151,12 @@ Todos os argumentos usam schemas estritos; usuário, papel e autoria vêm do con
 | `consultar_pedido` | Detalhes comerciais mínimos de um pedido existente. | `vendas:read` |
 | `resumir_vendas` | Totais reais do período e comparação calculada com período anterior equivalente. | `vendas:read` |
 | `sincronizar_pedidos` | Busca no Bling e grava importação no BR Steel; período máximo inicial de 7 dias por operação. | `vendas:sync` |
-| `consultar_estoque_produtos` | Saldo físico/virtual e origem por SKU; Bling/cache/webhook. | `estoque:read` |
+| `consultar_estoque_produtos` | Observações de saldo persistidas no Firestore por SKU, com data; sem consultar Bling ou seu cache. Saldo físico não registrado é nulo. | `estoque:read` |
 | `listar_insumos` | Cadastro, mínimos/máximos e saldo local. | `insumos:read` |
 | `listar_movimentacoes_insumo` | Histórico local por insumo/período. | `insumos:read` |
 | `registrar_movimentacao_insumo` | Entrada/saída local, quantidade positiva, motivo e saldo resultante. | `insumos:write` |
 | `atualizar_limites_estoque` | Mínimo/máximo local de SKU já cadastrado; mínimo ≤ máximo. | `insumos:write` |
-| `consultar_demanda_producao` | Demanda a partir de pedidos e estoque reais, com alertas de dados indisponíveis. | `producao:read` |
+| `consultar_demanda_producao` | Demanda a partir de pedidos faturados, saldos e limites persistidos no Firestore, com alertas de registros ausentes. | `producao:read` |
 | `listar_pedidos_para_producao` | Projeção operacional de itens para composição de lote. | `producao:read` |
 | `listar_colunas_producao`, `listar_lotes_producao`, `consultar_lote_producao` | Colunas, lotes e itens. | `producao:read` |
 | `criar_lote_producao` | Vincula itens reais de pedidos; valida referências e gera número sem colisão. | `producao:write` |
@@ -184,7 +184,7 @@ Separar regras/repositórios em `src/server/operations/`, marcados `server-only`
 
 Extrair apenas os trechos necessários de `src/app/actions.ts`, `order-service.ts`, `inventory-service.ts`, `supply-service.ts` e `kanban-service.ts`. Não importar cegamente o arquivo inteiro de ações como catálogo de ferramentas.
 
-Preservar fontes: produtos/Bling, insumos/Firestore e lotes/Firestore. Retorno inclui `source`, `asOf`, `warnings` e `nextCursor` quando aplicável. Se a origem não fornecer timestamp, usar instante da consulta e indicar que a atualização original é desconhecida. Zero real deve continuar zero, sem fallback com `||` que o substitua por outro saldo. Não usar saldo simulado para sugerir produção.
+Leituras MCP usam exclusivamente o Firestore, inclusive as observações persistidas de estoque de produtos. A aplicação web conserva sua consulta ao Bling/cache. Retorno inclui `source`, `asOf`, `warnings` e `nextCursor` quando aplicável. Se a origem não fornecer timestamp, usar instante da consulta e indicar que a atualização original é desconhecida. Zero real deve continuar zero, sem fallback com `||` que o substitua por outro saldo. Não usar saldo simulado para sugerir produção.
 
 Vendas e Kanban usam `onSnapshot` direto hoje. Ao fechar coleções, substituir esses consumidores por APIs autenticadas com atualização periódica de 10 segundos enquanto a página estiver visível, além de atualização imediata após mutações. Documentar a alteração de atualização visual; não fechar regras antes de substituir todos os consumidores necessários.
 

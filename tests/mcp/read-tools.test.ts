@@ -34,6 +34,16 @@ it('returns real sales totals and minimal paginated commercial items', async () 
  const order = await run('consultar_pedido', { id: 'new', limit: 1 }); expect(order.data.itens).toHaveLength(1); expect(order.nextCursor).toBeTruthy();
  expect((await run('consultar_pedido', { id: 'new', limit: 1, cursor: order.nextCursor })).data.itens[0].codigo).toBe('B');
 });
+it('identifies empty sales and production as database results, not an integration diagnosis', async () => {
+ const input = { from: '2026-09-01', to: '2026-09-11' };
+ const sales = await run('resumir_vendas', input);
+ expect(sales.source).toBe('firestore'); expect(sales.data.totalSales).toBe(0);
+ expect(sales.warnings.join(' ')).toMatch(/Nenhum pedido.*banco.*período/);
+ const demand = await run('consultar_demanda_producao', input);
+ expect(demand.source).toBe('firestore'); expect(demand.data).toEqual([]);
+ expect(demand.warnings.join(' ')).toMatch(/Nenhum pedido faturado.*banco.*período/);
+ expect([...sales.warnings, ...demand.warnings].join(' ')).not.toContain('Bling indisponível');
+});
 it('preserves zero stock and paginates SKU demand without finance', async () => {
  await adminDb.collection('stockUpdates').doc('A').set({ sku: 'A', estoqueAtual: 0, webhookReceivedAt: new Date().toISOString() });
  const stock = await run('consultar_estoque_produtos', {}); expect(stock.data[0].saldoVirtualTotal).toBe(0);

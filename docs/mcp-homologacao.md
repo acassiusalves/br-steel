@@ -1,6 +1,6 @@
 # Homologação pública do MCP
 
-Situação em 11/09/2026: acesso restabelecido pelo dashboard e CLI oficiais do Supabase. Recursos dedicados criados, configuração OAuth aplicada e primeira publicação concluída. A prova HTTPS com o SDK oficial passou; o aceite pelo Claude hospedado continua pendente. A escrita pelo MCP permanece desabilitada.
+Situação em 11/09/2026: recursos dedicados publicados, OAuth conectado pelo Claude e quatro ferramentas de leitura com execução registrada. O teste do usuário identificou consulta indevida ao Bling em estoque/produção; a correção para leitura exclusiva do banco está descrita abaixo. A prova HTTPS anterior com o SDK oficial passou; o aceite completo pelo Claude hospedado continua pendente. A escrita pelo MCP permanece desabilitada.
 
 ## Recursos e isolamento verificados
 
@@ -99,3 +99,17 @@ Este usuário foi **mantido para o teste do usuário**. Não executar a prova au
 Em 11/09/2026, o usuário confirmou que conseguiu conectar. A consulta ao servidor às 22:48:09 UTC confirmou a conta ativa, primeiro acesso concluído e uma conexão ativa com cliente **Claude**, autorizada para vendas, estoque, insumos e produção em leitura. A auditoria registrou `consultar_meu_acesso` com resultado `success`. Ver [evidência da conexão](evidence/mcp-claude-connected-2026-09-11.json).
 
 Isso comprova a autorização real e uma ferramenta executada pelo Claude. Ainda não comprova o aceite completo das leituras de vendas/estoque/produção com valores conhecidos nem revogação/reconexão pelo cliente Claude. A validação anterior dessas operações pelo SDK permanece registrada separadamente. O piloto continua ativo; não revogar ou remover como parte da limpeza das fixtures automáticas. Escrita permanece desabilitada.
+
+## Correção das fontes de leitura após o teste no Claude
+
+O usuário executou `resumir_vendas`, `consultar_estoque_produtos` e `consultar_demanda_producao`; as três chamadas foram registradas como `success`, além de `consultar_meu_acesso`. Estoque e produção, entretanto, usavam a rotina web que tenta ler o Bling e combina cache com observações persistidas. Seu aviso de indisponibilidade levou o Claude a atribuir também as vendas zeradas a uma falha do ERP. Vendas já consultava somente `salesOrders` no Firestore.
+
+A orientação corrigida é: **as ferramentas MCP de leitura usam exclusivamente o banco de dados do sistema**. Estoque lê `stockUpdates`, demanda combina `salesOrders`, `stockUpdates` e os limites de `supplies`. A seleção vem do contexto autenticado do servidor, nunca de um argumento do cliente. O caminho web de atualização pelo ERP permanece independente. Não há consulta ao Bling nem aproveitamento do seu cache pelo MCP.
+
+Os resultados informam `source: firestore`; cada saldo conserva a data da observação. Zero registrado continua zero, saldo físico ausente continua nulo, e registros simulados ou inválidos são excluídos. As descrições das ferramentas e os avisos de ausência de registros explicam que a consulta ao banco não diagnostica a situação das integrações.
+
+A conferência do ambiente encontrou **zero registros** em `salesOrders`, `stockUpdates`, `supplies`, `productionLots` e `appConfig`. Essa é a base isolada `brsteel-mcp-staging`, não a base operacional do sistema. Corrigir a consulta não preenche a homologação com dados reais. Supabase continua responsável pelo OAuth; os dados de negócio do BR Steel permanecem no Firestore. O usuário piloto e sua conexão Claude devem ser preservados.
+
+Os testes de regressão reproduziram cinco falhas antes da correção e passaram após o ajuste. Incluem isolamento do cache do ERP, ausência de chamadas ao provedor, saldos zero/nulo, datas, paginação e projeção de produção com capacidade restrita. O runner HTTPS foi atualizado para exigir origem Firestore; **não executar o runner completo com o ID reservado enquanto ele pertencer ao piloto ativo**, nem interpretar as evidências históricas como nova prova desta correção.
+
+Publicação da correção: `dpl_3K3Xt92mbCFYSdNUsiPBRswE5kqk`, estado `READY`, no mesmo domínio canônico. Build remoto concluído; 145 testes em 24 arquivos aprovados, typecheck com os mesmos 25 diagnósticos preexistentes e nenhuma ocorrência nova. Revisão independente sem bloqueios. Login e discovery respondem 200; MCP sem token e os três crons legados respondem 401. Metadados confirmam crons vazios e desabilitados; o manifesto original do checkout foi restaurado. [Evidência da correção](evidence/mcp-database-reads-fix-2026-09-11.json). O reteste autenticado no Claude após essa publicação continua pendente; nenhuma senha, concessão ou configuração OAuth do piloto foi alterada.

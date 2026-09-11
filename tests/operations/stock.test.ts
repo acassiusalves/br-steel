@@ -5,6 +5,7 @@ const provider = vi.hoisted(() => ({ blingGetPaged: vi.fn(), blingFetchWithRefre
 vi.mock('@/server/integrations/bling', () => provider);
 import { listProductStock, invalidateProductStockCache } from '@/server/operations/stock';
 import { productionDemand } from '@/server/operations/production-demand';
+const mcpContext = (role = 'Administrador') => { const ctx = context(role); return { ...ctx, actor: { ...ctx.actor, source: 'mcp' as const, clientId: 'claude-test' } }; };
 beforeEach(async () => { await seedOperations(); invalidateProductStockCache(); provider.blingGetPaged.mockReset(); provider.blingGetPaged.mockResolvedValue([{ id: 20, codigo: 'ZERO', nome: 'Chapa', estoque: { saldoVirtualTotal: 0, saldoVirtual: 9, saldoFisicoTotal: 0, saldoFisico: 7 } }]); });
 it('preserves a real zero and the observation time when serving cached data', async () => {
   const first = await listProductStock(context(), {});
@@ -46,4 +47,50 @@ it('preserves the stock observation time and cache origin in successive producti
   const second = await productionDemand(context('Operador'), { from: '2026-09-01', to: '2026-09-02' });
   expect(first.data[0]).toMatchObject({ stockSource: 'bling', stockAsOf: expect.any(String) });
   expect(second.data[0]).toMatchObject({ stockSource: 'cache', stockAsOf: first.data[0].stockAsOf });
+});
+it('reads MCP stock only from the database, ignoring even a warm ERP cache', async () => {
+  await listProductStock(context(), {});
+  provider.blingGetPaged.mockClear(); provider.blingFetchWithRefresh.mockClear();
+  const at = '2026-09-01T12:00:00.000Z';
+  await adminDb.collection('stockUpdates').doc('ZERO').set({ sku: 'ZERO', nome: 'Chapa salva', produtoId: 42, estoqueAtual: 8, webhookReceivedAt: at });
+  const response = await listProductStock(mcpContext(), {});
+  expect(response.source).toBe('firestore');
+  expect(response.data).toHaveLength(1);
+  expect(response.data[0]).toMatchObject({ produto: { id: 42, codigo: 'ZERO', nome: 'Chapa salva' }, saldoVirtualTotal: 8, saldoFisicoTotal: null, physicalAsOf: null, source: 'firestore', asOf: at, virtualAsOf: at });
+  expect(response.asOf).toBe(at);
+  expect(provider.blingGetPaged).not.toHaveBeenCalled(); expect(provider.blingFetchWithRefresh).not.toHaveBeenCalled();
+});
+it('keeps persisted zero and observation times, excluding invalid and simulated stock', async () => {
+  const at = '2026-09-02T12:00:00.000Z';
+  for (const [id, extra] of Object.entries({ ZERO: {}, OLDER: { webhookReceivedAt: '2026-09-01T12:00:00.000Z' }, INVALID_DATE: { webhookReceivedAt: 'invalid' }, INVALID_BALANCE: { estoqueAtual: '9' }, SIMULATED: { isSimulated: true }, SIMULATED_SOURCE: { source: 'simulated' }, TEST: { lastEvent: 'stock.updated (test)' } })) {
+    await adminDb.collection('stockUpdates').doc(id).set({ sku: id, estoqueAtual: 0, webhookReceivedAt: at, ...extra });
+  }
+  const first = await listProductStock(mcpContext(), { limit: 1 });
+  const second = await listProductStock(mcpContext(), { limit: 1, cursor: first.nextCursor });
+  expect([...first.data, ...second.data].map(row => row.produto.codigo)).toEqual(['OLDER', 'ZERO']);
+  expect(first.asOf).toBe(at); expect(second.asOf).toBe(at); expect(second.nextCursor).toBeNull();
+  expect(second.data[0]).toMatchObject({ saldoVirtual: 0, saldoVirtualTotal: 0, saldoFisico: null, saldoFisicoTotal: null, virtualAsOf: at });
+  expect(provider.blingGetPaged).not.toHaveBeenCalled();
+});
+it('projects MCP production from saved orders and stock without contacting the ERP', async () => {
+  const at = '2026-09-01T12:00:00.000Z';
+  await adminDb.collection('stockUpdates').doc('ZERO').set({ sku: 'ZERO', estoqueAtual: 0, webhookReceivedAt: at });
+  const operator = { ...mcpContext('Operador'), capabilities: ['producao:read' as const] };
+  const response = await productionDemand(operator, { from: '2026-09-01', to: '2026-09-02' });
+  expect(response.source).toBe('firestore');
+  expect(response.data[0]).toMatchObject({ totalQuantitySold: 6, stockLevel: 0, stockSource: 'firestore', stockAsOf: at, stockMin: 2, stockMax: 20 });
+  expect(JSON.stringify(response)).not.toMatch(/DOCUMENTO-PRIVADO|XML-PRIVADO|numeroDocumento|contato|"valor"/);
+  expect(provider.blingGetPaged).not.toHaveBeenCalled(); expect(provider.blingFetchWithRefresh).not.toHaveBeenCalled();
+  await expect(listProductStock(operator, {})).rejects.toThrow();
+});
+it('reports absent persisted stock as missing data without an ERP outage', async () => {
+  provider.blingGetPaged.mockRejectedValue(new Error('Bling unavailable'));
+  const stock = await listProductStock(mcpContext(), {});
+  expect(stock.data).toEqual([]); expect(stock.source).toBe('firestore');
+  expect(stock.warnings.join(' ')).toMatch(/Nenhum saldo.*banco/);
+  const demand = await productionDemand(mcpContext('Operador'), { from: '2026-09-01', to: '2026-09-02' });
+  expect(demand.source).toBe('firestore'); expect(demand.data[0].stockLevel).toBeNull();
+  expect(demand.warnings.join(' ')).toMatch(/não encontrado no banco/);
+  expect([...stock.warnings, ...demand.warnings].join(' ')).not.toMatch(/Bling indisponível|falha.*ERP/i);
+  expect(provider.blingGetPaged).not.toHaveBeenCalled();
 });

@@ -49,6 +49,7 @@ export async function summarizeSales(context: AccessContext, raw: unknown) {
   const previous = { from: new Date(from - (to - from + day)).toISOString().slice(0, 10), to: new Date(from - day).toISOString().slice(0, 10) };
   const [orders, previousOrders] = await Promise.all([readOrdersForPeriod(input), readOrdersForPeriod(previous)]);
   const current = totals(orders), old = totals(previousOrders); const warnings: string[] = [];
+  if (context.actor.source === 'mcp' && !orders.length) warnings.push('Nenhum pedido encontrado no banco de dados deste ambiente no período informado. Os totais representam somente os dados salvos; esta consulta não verifica o estado das integrações externas.');
   const comparison = (key: keyof typeof current) => {
     if (old[key] === 0) { warnings.push(`Comparação de ${key} indisponível: o período anterior não tem base maior que zero.`); return { value: current[key], change: null }; }
     return { value: current[key], change: (current[key] - old[key]) / Math.abs(old[key]) * 100 };

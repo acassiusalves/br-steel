@@ -294,12 +294,15 @@ async function main() {
         assert.equal(summary.data.totalRevenue, 300); assert.equal(summary.data.stats.totalRevenue.change, 100);
       }
       const stock = await call('consultar_estoque_produtos', { sku }); assert.equal(stock.data.length, 1);
-      assert.equal(stock.data[0].saldoVirtualTotal, 0); assert.equal(stock.data[0].saldoFisicoTotal, null); assert.equal(stock.data[0].source, 'webhook');
+      assert.equal(stock.source, 'firestore');
+      assert.equal(stock.data[0].saldoVirtualTotal, 0); assert.equal(stock.data[0].saldoFisicoTotal, null); assert.equal(stock.data[0].source, 'firestore');
+      assert.ok(!stock.warnings.some(warning => warning.includes('Bling indisponível')));
       if (role === 'Operador') {
         assert.equal((await mcpClient.callTool({ name: 'listar_pedidos', arguments: {} })).isError, true);
         const demand = await call('consultar_demanda_producao', { from: '2071-09-01', to: '2071-09-02' });
         assert.ok(!JSON.stringify(demand).includes('PRIVATE-STAGING-'));
         const row = demand.data.find((item: any) => item.sku === sku); assert.ok(row);
+        assert.equal(demand.source, 'firestore'); assert.equal(row.stockSource, 'firestore');
         assert.equal(row.stockLevel, 0); assert.equal(row.totalQuantitySold, 6); assert.equal(row.orderCount, 2);
         assert.ok(!['total', 'valor', 'contato', 'notaFiscal'].some(key => Object.hasOwn(row, key)));
       }
