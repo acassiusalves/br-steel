@@ -20,7 +20,9 @@ async function main() {
   const { getOAuthProvider } = await import('../src/server/oauth/supabase');
   const { requireCapability } = await import('../src/server/access/policy');
   const admin = createClient(env.SUPABASE_URL, env.SUPABASE_SECRET_KEY, { auth: { persistSession: false, autoRefreshToken: false } });
-  const userId = `oauth-e2e-${randomUUID()}`;
+  const verifyMcp = process.env.VERIFY_MCP === 'true';
+  const userId = verifyMcp ? process.env.MCP_LOCAL_VERIFY_USER_ID! : `oauth-e2e-${randomUUID()}`;
+  if (verifyMcp) assert.ok(/^mcp-e2e-[a-f0-9-]{36}$/.test(userId), 'Dedicated local MCP user required');
   const email = `${userId}@example.invalid`;
   const password = randomBytes(24).toString('base64url');
   const credential = hashPassword(password);
@@ -57,7 +59,7 @@ async function main() {
     const verifier = randomBytes(48).toString('base64url');
     const state = randomUUID();
     const query = new URLSearchParams({ response_type: 'code', client_id: clientId!, redirect_uri: callback,
-      scope: 'openid email profile offline_access', state,
+      scope: 'openid email profile offline_access', resource: env.MCP_PUBLIC_URL, state,
       code_challenge: createHash('sha256').update(verifier).digest('base64url'), code_challenge_method: 'S256' });
     const result = await http(`${metadata.authorization_endpoint}?${query}`);
     assert.equal(result.response.status, 302);
@@ -92,13 +94,13 @@ async function main() {
   }
   async function exchange(request: Awaited<ReturnType<typeof begin>>, url: URL) {
     const result = await http(metadata.token_endpoint, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({ grant_type: 'authorization_code', client_id: clientId!, redirect_uri: callback, code_verifier: request.verifier, code: url.searchParams.get('code')! }) });
+      body: new URLSearchParams({ grant_type: 'authorization_code', client_id: clientId!, redirect_uri: callback, code_verifier: request.verifier, code: url.searchParams.get('code')!, resource: env.MCP_PUBLIC_URL }) });
     assert.equal(result.response.status, 200, `Exchange: ${result.data?.error}`);
     return result.data;
   }
   async function refresh(token: string) {
     return http(metadata.token_endpoint, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({ grant_type: 'refresh_token', client_id: clientId!, refresh_token: token }) });
+      body: new URLSearchParams({ grant_type: 'refresh_token', client_id: clientId!, refresh_token: token, resource: env.MCP_PUBLIC_URL }) });
   }
   try {
     await adminDb.collection('users').doc(userId).create({ name: 'Teste OAuth HTTP', email, normalizedEmail: email, role: 'Administrador',
@@ -137,6 +139,10 @@ async function main() {
     assert.equal(access.actor.userId, userId); assert.equal(access.actor.clientId, clientId);
     assert.deepEqual(access.capabilities, ['vendas:read', 'estoque:read', 'producao:read']);
     evidence.discoveryDcrPkceLoginConsentCodeToken = true;
+    if (verifyMcp) {
+      const { verifyLocalMcp } = await import('./mcp-local-proof');
+      evidence.mcp = await verifyLocalMcp(tokens.access_token, userId);
+    }
     evidence.normalSessionRejected = true;
     const refreshed = await refresh(tokens.refresh_token);
     assert.equal(refreshed.response.status, 200);
@@ -159,6 +165,7 @@ async function main() {
     for (const token of [tokens.access_token, refreshed.data.access_token]) await assert.rejects(validateOAuthAccessToken(token));
     for (const token of [tokens.refresh_token, refreshed.data.refresh_token]) assert.equal((await refresh(token)).response.status, 400);
     evidence.localAndProviderRevocation = true;
+    if (verifyMcp) assert.equal((await fetch(env.MCP_PUBLIC_URL, { headers: { authorization: `Bearer ${tokens.access_token}` } })).status, 401);
     const next = await begin(); await prepare(next);
     const nextTokens = await exchange(next, await decide(next));
     await validateOAuthAccessToken(nextTokens.access_token);

@@ -21,9 +21,13 @@ async function identity(tx: FirebaseFirestore.Transaction, userId: string) {
   if (user.active === false || user.mustChangePassword === true || !['Administrador', 'Operador'].includes(user.role)) throw new OperationError('INVALID_USER', 'Responsável indisponível.', 400);
   return { userId, userName: String(user.name || userId) };
 }
-function project(doc: FirebaseFirestore.QueryDocumentSnapshot, view: string) {
-  const d = doc.data();
-  if (view === 'orders') return { id: doc.id, numero: d.numero, itens: (Array.isArray(d.itens) ? d.itens : []).map((i: Record<string, unknown>, index: number) => ({ id: i.id ?? index, codigo: i.codigo, descricao: i.descricao, quantidade: i.quantidade, unidade: i.unidade || 'UN' })) };
+function projectOrder(doc: FirebaseFirestore.DocumentSnapshot) {
+  const d = exists(doc);
+  return { id: doc.id, numero: d.numero, itens: (Array.isArray(d.itens) ? d.itens : []).map((i: Record<string, unknown>, index: number) => ({ id: i.id ?? index, codigo: i.codigo, descricao: i.descricao, quantidade: i.quantidade, unidade: i.unidade || 'UN' })) };
+}
+function project(doc: FirebaseFirestore.DocumentSnapshot, view: string) {
+  const d = exists(doc);
+  if (view === 'orders') return projectOrder(doc);
   const fields: Record<string, string[]> = {
     columns: ['name', 'order', 'color', 'createdAt', 'updatedAt'],
     lots: ['lotNumber', 'title', 'description', 'columnId', 'columnOrder', 'assignedTo', 'priority', 'linkedOrderIds', 'totalItems', 'totalSkus', 'dueDate', 'createdAt', 'updatedAt', 'createdBy'],
@@ -52,6 +56,30 @@ export async function listProduction(ctx: AccessContext, input: unknown) {
   }
   const { docs, nextCursor } = await paginateQuery(query, args);
   return result(serialize(docs.map(d => project(d, args.view))), 'firestore', [], nextCursor);
+}
+/** Production-authorized item continuation; never reads through the commercial service. */
+export async function getProductionOrder(ctx: AccessContext, input: unknown) {
+  requireOperation(ctx, 'producao:read', page);
+  const args = pageInputSchema.extend({ orderId: documentIdSchema }).strict().parse(input);
+  let offset = 0;
+  if (args.cursor) {
+    if (!/^\d+$/.test(args.cursor) || !Number.isSafeInteger(Number(args.cursor))) throw new OperationError('INVALID_CURSOR', 'Paginação inválida.');
+    offset = Number(args.cursor);
+  }
+  const projected = projectOrder(await ref('salesOrders', args.orderId).get());
+  const nextCursor = offset + args.limit < projected.itens.length ? String(offset + args.limit) : null;
+  return result({ ...projected, itens: projected.itens.slice(offset, offset + args.limit) }, 'firestore', [], nextCursor);
+}
+export async function getProductionLot(ctx: AccessContext, input: unknown) {
+  requireOperation(ctx, 'producao:read', page);
+  const args = pageInputSchema.extend({ lotId: documentIdSchema }).strict().parse(input);
+  const lot = await ref('productionLots', args.lotId).get(); exists(lot);
+  const items = await listProduction(ctx, { ...args, view: 'items' });
+  const projected: Record<string, unknown> = project(lot, 'lots');
+  const linked = Array.isArray(projected.linkedOrderIds) ? projected.linkedOrderIds : [];
+  projected.linkedOrderIds = linked.slice(0, 100);
+  return result(serialize({ lot: projected, items: items.data }), items.source,
+    [...items.warnings, ...(linked.length > 100 ? ['Pedidos vinculados limitados a 100 entradas.'] : [])], items.nextCursor, items.asOf);
 }
 export async function createColumn(ctx: AccessContext, input: unknown) {
   write(ctx); const data = columnSchema.parse(input); const r = adminDb.collection('productionColumns').doc(); const now = new Date().toISOString();

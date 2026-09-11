@@ -14,7 +14,9 @@
     "test:oauth": "vitest run tests/oauth",
     "test:oauth-provider": "node scripts/oauth-provider-verify.mjs",
     "test:oauth-app": "node --env-file=.env.local --import tsx scripts/oauth-app-verify.mjs",
-    "test:operations": "vitest run tests/operations"
+    "test:operations": "vitest run tests/operations",
+    "test:mcp": "vitest run tests/mcp",
+    "test:mcp-app": "VERIFY_MCP=true node --env-file=.env.local --import tsx scripts/oauth-app-verify.mjs"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
@@ -23,7 +25,7 @@
     "@genkit-ai/googleai": "^1.14.1",
     "@genkit-ai/next": "^1.14.1",
     "@hookform/resolvers": "^4.1.3",
-    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@modelcontextprotocol/sdk": "1.29.0",
     "@radix-ui/react-accordion": "^1.2.3",
     "@radix-ui/react-alert-dialog": "^1.1.6",
     "@radix-ui/react-avatar": "^1.1.3",

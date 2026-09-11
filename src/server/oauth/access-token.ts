@@ -19,6 +19,11 @@ let cachedKeys: { issuer: string; keys: ReturnType<typeof createRemoteJWKSet> } 
 
 /** Entry point for bearer tokens: signature, issuer and audience are checked before local authorization. */
 export async function validateOAuthAccessToken(token: string): Promise<AccessContext> {
+  return (await validateOAuthPrincipal(token)).context;
+}
+
+/** Verified principal also carries the durable connection key for resource audit. */
+export async function validateOAuthPrincipal(token: string): Promise<{ context: AccessContext; connectionId: string }> {
   const config = getOAuthConfig();
   try {
     if (token.length > 16384) throw rejected();
@@ -29,7 +34,8 @@ export async function validateOAuthAccessToken(token: string): Promise<AccessCon
       algorithms: ['ES256', 'RS256'], issuer: config.issuer, audience: config.resource,
       requiredClaims: ['sub', 'client_id', 'iat', 'exp'],
     });
-    return await authorizeOAuthClaims(payload);
+    const context = await authorizeOAuthClaims(payload);
+    return { context, connectionId: connectionId(payload.sub!, payload.client_id as string) };
   } catch { throw rejected(); }
 }
 

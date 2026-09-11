@@ -1,6 +1,6 @@
 # Conector Claude do BR Steel — arquitetura proposta
 
-Data: 11/09/2026. Status: proposta para revisão; implementação e publicação ainda não executadas.
+Data: 11/09/2026. Status: arquitetura adotada; etapas 1–3 concluídas e leitura MCP implementada localmente. Publicação de teste e aceite no Claude hospedado pendentes; ver [etapa 4](../../mcp-etapa-4.md).
 
 Objetivo: permitir que cada usuário conecte seu próprio Claude ao BR Steel por OAuth e use ferramentas de leitura e escrita com a sua identidade. Prioridade confirmada: **vendas, estoque e produção**.
 
@@ -220,4 +220,4 @@ Vendas e Kanban usam `onSnapshot` direto hoje. Ao fechar coleções, substituir 
 - [Node.js 20 descontinuado nos clientes Supabase](https://supabase.com/changelog/45715-deprecation-notice-dropping-support-for-node-js-20): adotar Node.js 22+; ambiente local observado: 22.19.0.
 - [Status HTTP do token OAuth](https://supabase.com/changelog/45468-breaking-change-oauth-token-endpoint-will-return-http-200-instead-of-201): tratar sucesso 2xx, não exigir 201.
 
-Próximo passo de engenharia: executar o plano associado após revisão desta proposta, começando pela proteção da identidade e pela prova OAuth em ambiente de teste.
+Próximo passo de engenharia: concluir a homologação de leitura no Claude hospedado em ambiente público isolado e então executar as etapas de escrita do plano associado.
