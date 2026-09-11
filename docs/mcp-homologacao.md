@@ -1,51 +1,85 @@
 # Homologação pública do MCP
 
-Situação: código de leitura validado localmente no commit `9eb8144`; configuração de isolamento preparada e validada localmente. Nenhum novo projeto ou deploy foi criado nesta verificação. O provisionamento e o aceite pelo Claude hospedado continuam pendentes.
+Situação em 11/09/2026: acesso restabelecido pelo dashboard e CLI oficiais do Supabase. Recursos dedicados criados, configuração OAuth aplicada e primeira publicação concluída. A prova HTTPS com o SDK oficial passou; o aceite pelo Claude hospedado continua pendente. A escrita pelo MCP permanece desabilitada.
 
-## Inventário verificado
+## Recursos e isolamento verificados
 
-- Vercel: projeto `br-steel`, equipe `team_AnjWj22RX6qtosCjGldryHxb`, ligado ao GitHub `acassiusalves/br-steel`. Domínio principal `br-steel.vercel.app`. Não há projeto identificado como homologação BR Steel na equipe consultada.
-- Preview do projeto atual compartilha variáveis de Bling e Firebase com produção. Não será utilizado como ambiente isolado.
-- Firebase: dois projetos chamados MarketFlow foram encontrados; nenhum identificado como homologação do MCP. Não assumir que o segundo é descartável ou reutilizável.
-- Supabase definido pelo usuário: projeto existente `mlumbvxpaqfzpdjnvzxc`, URL `https://mlumbvxpaqfzpdjnvzxc.supabase.co`. Não é necessário criar outro projeto. A conexão administrativa atual do Codex retornou falta de permissão; a lista de projetos retornou vazia. Organização, migrations e uso existente ainda não puderam ser inspecionados. Foi solicitada a reconexão do Supabase com uma conta autorizada.
-- Inspeção pública desse Supabase: OpenID discovery responde 200 com issuer `https://mlumbvxpaqfzpdjnvzxc.supabase.co/auth/v1`; JWKS responde 200 com chave EC/ES256. O discovery OAuth responde 404 com `feature_disabled` / `OAuth server is disabled`. Isso confirma que o serviço está acessível, mas o servidor OAuth ainda precisa ser habilitado. Não houve alteração remota.
-
-## Recursos propostos
-
-| Recurso | Preparação |
+| Recurso | Configuração efetiva |
 | --- | --- |
-| Vercel | Novo projeto `br-steel-mcp-staging` na equipe já usada pelo BR Steel, Node 22.x, domínio próprio gerado pela Vercel |
-| Firestore | Novo projeto `brsteel-mcp-staging` ou variante com sufixo disponível, sem dados reais; app web e conta de serviço pertencentes a esse projeto |
-| Supabase | Projeto existente indicado: `mlumbvxpaqfzpdjnvzxc`; acesso administrativo e inspeção do uso atual pendentes; usar identidades OAuth de teste |
-| Usuários | Três usuários sintéticos com papéis Administrador, Vendedor e Operador e senhas individuais; lista explícita de IDs no piloto |
+| Aplicação | `https://br-steel-mcp-staging.vercel.app`, projeto Vercel `br-steel-mcp-staging`, ID `prj_YD3ATzBPFQo4bD1ZlojrDTigUZp8` |
+| Vercel | Equipe `team_AnjWj22RX6qtosCjGldryHxb`, Node 22.x, 24 variáveis criptografadas no destino `production` do projeto dedicado, build com verificação de isolamento |
+| Firebase | Projeto novo `brsteel-mcp-staging`, número `630645228381`, app web `1:630645228381:web:86595a74e18a064824deb4` |
+| Firestore | Banco `(default)`, modo nativo, edição Standard, região `southamerica-east1`; regras publicadas e 11 índices compostos confirmados `READY` |
+| Conta de serviço | `mcp-staging-server@brsteel-mcp-staging.iam.gserviceaccount.com`, somente `roles/datastore.user` no novo projeto |
+| Supabase | Projeto existente escolhido pelo usuário: `mlumbvxpaqfzpdjnvzxc`, nome `BR Stell MCP / Sistema`, organização Lunneta Ads, região São Paulo |
+| MCP | Recurso `https://br-steel-mcp-staging.vercel.app/api/mcp`, escrita desligada e lista restrita a um usuário sintético temporário |
 
-Os nomes Vercel e Firebase são propostas, não recursos criados; o Supabase já foi escolhido pelo usuário. Confirmar disponibilidade dos novos recursos nas contas escolhidas. O projeto Vercel separado pode usar seu domínio canônico de deployment `production`; isso é o ambiente de homologação do BR Steel e não altera o projeto Vercel `br-steel`. Confirmar que os caminhos MCP/OAuth são alcançáveis pela infraestrutura Claude. Não remover a proteção de previews do projeto atual. [Deploy pela CLI Vercel](https://vercel.com/docs/cli/deploy).
+O destino `production` da Vercel pertence ao novo projeto de homologação. O projeto principal `br-steel`, seu domínio e seu Firebase não foram alterados. Previews do projeto principal compartilham integrações de produção e não são usados nesta prova. A proteção padrão de previews foi preservada.
 
-## Isolamento preparado no código
+O Firestore está sem conta de faturamento vinculada. A implantação encontrou seis índices de um único campo declarados indevidamente como compostos; foram removidos do arquivo, pois os índices automáticos desses campos continuam ativos. Os 11 compostos foram criados e estão prontos. A etapa seguinte de TTL foi recusada pelo provedor por exigir faturamento. A configuração TTL continua no arquivo para uma futura aplicação autorizada, mas **não está ativa na nuvem**. Não vincular uma conta paga implicitamente. A prova sintética remove seus próprios registros; o piloto contínuo ainda precisa resolver a retenção. [TTL no Firestore](https://firebase.google.com/docs/firestore/ttl).
 
-O navegador usava configuração Firebase fixa de produção fora do emulador. Agora uma seleção explícita de outro projeto exige um conjunto completo de configuração pública pertencente a esse projeto. Configurações parciais ou misturadas com os valores legados são recusadas; projetos sem override mantêm o comportamento anterior. Os acessos `NEXT_PUBLIC_*` são individuais para permitir a inclusão correta pelo build Next.js. [Configuração Firebase](https://firebase.google.com/docs/web/setup), [variáveis públicas no Next.js](https://nextjs.org/docs/app/guides/environment-variables).
+## Supabase Auth
 
-`config/mcp-staging.env.example` lista as variáveis, sem valores secretos. `config/vercel.mcp-staging.json` desativa os agendamentos e executa `npm run verify:mcp-staging` antes do build. A verificação offline recusa projeto Vercel de produção, Firebase fora da homologação, conta de serviço de outro projeto, referências divergentes, credenciais de Bling/Mercado Livre, emuladores, escrita habilitada, lista de usuários vazia, URLs inadequadas e chaves de servidor em variáveis públicas. Ela não consulta a nuvem nem comprova permissões da conta de serviço ou propriedade das chaves Supabase; essas verificações ocorrem após provisionamento.
+O inventário SQL anterior às alterações confirmou zero usuários, zero clientes OAuth, ausência do schema `private` e de tabelas/funções da aplicação. O hook hospedado foi aplicado atomicamente a esse projeto, sem usar a cadeia de migrations local, e habilitado no dashboard como `private.mcp_access_token_hook`. A seleção persistida foi conferida após recarregar a página.
 
-O build usa exclusivamente as variáveis configuradas no projeto novo. Não copiar `.env.local`, configurações privadas do emulador, variáveis do preview atual, `service-account.json` de produção ou o vínculo `.vercel` do checkout principal.
+Configuração aplicada:
 
-## Sequência de execução após restabelecer acesso ao Supabase
+- Site URL da homologação e retorno exato `/oauth/consent`.
+- Servidor OAuth e registro dinâmico de clientes (DCR) habilitados.
+- Cadastro público desabilitado; login anônimo permanece desabilitado.
+- Expiração de token de acesso: 900 segundos; rotação/ detecção de comprometimento de refresh ativa e intervalo de reutilização zero.
+- Chave assimétrica ES256 existente; descoberta OAuth pública respondendo 200, com issuer `https://mlumbvxpaqfzpdjnvzxc.supabase.co/auth/v1` e PKCE S256.
+- Audiência do hook hospedado: URL pública do recurso MCP. Tokens comuns sem `claims.client_id` devem conservar sua audiência original.
 
-1. Confirmar acesso administrativo ao projeto Supabase `mlumbvxpaqfzpdjnvzxc`; inspecionar usuários, clientes OAuth, configuração Auth e migrations existentes antes de modificar opções globais. Se já atender outro sistema, avaliar as dependências antes de aplicar a configuração do MCP. A consulta de custo para criação de outro Supabase deixou de ser necessária.
-2. Criar os projetos dedicados Vercel e Firebase, registrar o app web Firebase e provisionar Firestore. Criar credencial de servidor restrita ao projeto de teste e guardar diretamente no ambiente privado. Não versionar chave privada.
-3. Publicar as regras e índices Firestore usando explicitamente o ID de homologação; o `.firebaserc` existente ainda aponta produção e não deve ser usado implicitamente. Verificar as políticas TTL de auditoria/contadores.
-4. Configurar Supabase Auth com cadastro público/anônimo desligado, OAuth server e DCR, consentimento em `/oauth/consent`, tokens de 15 minutos e assinatura assimétrica. Aplicar o hook de audiência usando a URL pública definitiva. A migration local atual contém `http://localhost:9003/api/mcp`: não copiar essa audiência para a nuvem. Registrar a adaptação como migration de homologação e verificar issuer/JWKS/audience com token emitido nesse projeto.
-5. Preencher as variáveis do template no projeto Vercel dedicado, incluindo os IDs esperados de cada recurso, origem canônica e IDs sintéticos permitidos. Usar segredo de sessão exclusivo. Manter `MCP_WRITES_ENABLED=false`.
-6. Vincular explicitamente um checkout de publicação ao novo projeto Vercel. Usar `vercel deploy --prod --local-config config/vercel.mcp-staging.json` somente depois de confirmar o vínculo e configurar as variáveis. Não executar esse comando no projeto `br-steel`.
-7. Validar metadados públicos, 401 + challenge sem Bearer, OAuth/PKCE/refresh, catálogos por papel e três leituras pelo Claude. Comparar valores com fixtures e registros de auditoria. Revogar e confirmar bloqueio imediato.
-8. Registrar URLs, IDs dos recursos, commit implantado e evidências antes de concluir a etapa 4. A escrita segue para a etapa 5.
+Os artefatos e a recuperação estão em `supabase/hosted/README.md`. A verificação SQL pela CLI passou nas asserções funcionais e de permissões; advisors de segurança retornaram zero avisos. Essa execução usa o papel chamador. A tentativa separada de assumir `supabase_auth_admin` foi recusada pela conexão da CLI; não foram concedidas permissões extras para contornar a restrição. A emissão real de tokens comuns, de código, refresh e reconexão foi comprovada pelo fluxo HTTPS. A verificação independente pelo JWKS confirmou ES256, issuer, audiência, subject, client_id OAuth e validade de 900 segundos. A sessão comum conservou a audiência authenticated.
 
-Ao repetir apenas verificações locais, `npm run verify:mcp-staging` sem variáveis deve falhar. O template vazio não permite publicação. Custos, recursos em nuvem, IAM e conexão Claude não foram validados por esse teste offline.
+O conector MCP administrativo do Supabase continuou retornando erro de ferramenta; a execução usou CLI e dashboard já autorizados. Isso é independente do servidor MCP do BR Steel.
 
-## Verificação local em 11/09/2026
+## Configuração de publicação
 
-- Suíte completa: 139 testes aprovados em 24 arquivos, incluindo configurações Firebase e bloqueios de homologação.
-- Build Next.js aprovado. Typecheck mantém exatamente os 25 diagnósticos preexistentes, sem novos erros.
-- Execução real da CLI de verificação testada com configuração sintética válida e ambiente incompleto. Após o ajuste de tipagem do ambiente desse teste, os quatro testes de homologação foram executados novamente e aprovados.
-- Revisão independente não encontrou problemas bloqueantes. A revisão foi estática e não substitui a validação da infraestrutura criada.
-- Diff verificado sem erros de whitespace ou valores secretos locais. Nenhuma publicação, alteração em produção ou envio ao GitHub.
+`config/mcp-staging.env.example` contém os IDs e URLs públicos e mantém segredos em branco. `config/vercel.mcp-staging.json` define uma publicação sem agendamentos e executa `npm run verify:mcp-staging` antes do build. O guard recusa projetos divergentes, credenciais de integrações comerciais, emuladores, escrita habilitada, lista de usuários vazia e configuração pública contendo chaves de servidor.
+
+O navegador exige configuração Firebase pública completa ao selecionar outro projeto. Misturas com os valores legados são recusadas. [Configuração Firebase](https://firebase.google.com/docs/web/setup), [variáveis públicas Next.js](https://nextjs.org/docs/app/guides/environment-variables).
+
+O checkout de trabalho foi vinculado explicitamente ao projeto dedicado. A configuração privada de homologação fica em arquivo ignorado, com modo 600, e foi enviada diretamente às variáveis criptografadas da Vercel. O ambiente local dos emuladores foi preservado. A simulação real de upload confirmou a exclusão de `.env*`, credenciais locais, `.superpowers`, arquivos temporários e caches; a varredura dos arquivos de origem não encontrou os segredos usados na homologação.
+
+Na primeira publicação, `--local-config` não substituiu o arquivo raiz consumido pelo build remoto: os três crons do `vercel.json` principal apareceram no deployment. A conferência dos metadados identificou o problema, e os crons foram desabilitados no projeto dedicado. A prova não encontrou contas ou credenciais comerciais nesse Firestore. Uma credencial exclusiva `CRON_SECRET` foi configurada para proteger também chamadas diretas às rotas legadas.
+
+A publicação de homologação precisa **materializar o conteúdo de `config/vercel.mcp-staging.json` como `vercel.json` na raiz enviada**, além de confirmar o vínculo dedicado. A verificação do build agora lê esse arquivo efetivo; o teste de regressão reproduziu a aceitação indevida e confirmou a recusa após a correção. Preservar o arquivo original do checkout e restaurá-lo ao terminar; não publicar com o arquivo de crons do sistema principal. Após a publicação, conferir `crons: []` nos metadados do deployment e `disabledAt` no projeto. [Gerenciar crons na Vercel](https://vercel.com/docs/cron-jobs/manage-cron-jobs).
+
+## Prova HTTPS e aceite
+
+`scripts/mcp-staging-proof.ts` usa um ambiente limpo e explícito, sem carregar arquivos `.env` ou credenciais padrão. O preflight offline com os valores reais da homologação passou. O runner exige os IDs exatos dos três provedores e um único ID `staging-proof-<UUIDv4>` na lista permitida. Usa a conta de serviço explicitamente e recusa credenciais Bling salvas ou colisões com dados existentes.
+
+Na execução ao vivo, cria um usuário temporário que passa pelos perfis Administrador, Vendedor e Operador, um cliente OAuth e fixtures próprias. Valida discovery, login, primeiro acesso, consentimento, PKCE, emissão/refresh, leituras pelo SDK oficial, mudança de permissões, revogação, reconexão e auditoria. A limpeza desativa e remove somente os registros identificados como pertencentes à prova. Falhas ou resultados ambíguos de limpeza geram saída diferente de zero e IDs para recuperação, sem tokens ou senhas.
+
+Esse teste declara explicitamente `hostedClaude: false`: a aprovação depende também de conectar o Claude hospedado, autenticar um usuário autorizado, executar as três leituras e revogar a conexão. Não considerar o SDK um substituto desse aceite. Resolver retenção TTL antes de um piloto contínuo. A etapa de escrita continua posterior ao aceite de leitura.
+
+## Evidências locais
+
+- Checkpoint anterior: 139 testes em 24 arquivos aprovados e build Next.js aprovado; typecheck com exatamente os 25 diagnósticos preexistentes.
+- Novos scripts: typecheck direcionado aprovado; verificações offline de isolamento recusaram configurações inadequadas.
+- SQL do hook: sintaxe analisada, aplicação remota atômica e asserções CLI aprovadas; zero avisos do advisor de segurança.
+- Infraestrutura: regras publicadas, 11 índices prontos, domínio e vínculo Vercel confirmados, 24 variáveis criptografadas verificadas e simulação de upload sem segredos locais.
+- Publicação final sem crons e prova ao vivo registradas abaixo. Nenhum envio ao GitHub ou alteração no ambiente principal foi feito nesta etapa.
+
+## Prova ao vivo em 11/09/2026
+
+A primeira publicação `dpl_4L77G651mapH22RsvP5WZ3wyNdDa` ficou READY e o domínio canônico respondeu publicamente. O navegador exibiu a tela de login. A verificação completa iniciou em `2026-09-11T22:11:35Z`, terminou em 75 segundos com saída zero e está registrada em [evidência JSON](evidence/mcp-staging-https-2026-09-11.json).
+
+- OAuth/PKCE, login e troca inicial de senha, consentimento, código, refresh, reconexão e recusa de consentimento passaram.
+- Assinaturas ES256 e claims dos quatro tipos de token foram verificados independentemente; a audiência comum permaneceu authenticated e a OAuth correspondeu ao recurso MCP; todos tiveram 900 segundos de validade.
+- SDK oficial: vendas sintéticas de R$300, crescimento de 100%, estoque zero preservado e projeção de produção restrita; catálogos e chamadas proibidas conferidos nos três perfis.
+- Revogação produziu HTTP 401 imediatamente e rejeição de refresh; tokens antigos continuaram recusados após reconectar.
+- Auditoria de 11 chamadas sem credenciais ou payload privado; limpeza completa e sem requisições ambíguas. Conferência posterior do Firestore encontrou zero registros nas coleções de usuário, vínculos, conexões, intents, auditoria, limites, vendas e estoque, além de zero configurações/contas/eventos comerciais.
+- Data API recusou o schema private com HTTP 406/PGRST106; o dashboard mostrava zero funções expostas.
+
+Nenhum usuário de teste permanente foi criado. O aceite no Claude, o provisionamento de um usuário para esse aceite e a retenção TTL continuam pendentes. A escrita continua desabilitada.
+
+## Publicação final sem agendamentos
+
+A republicação `dpl_9qZAbDyUqoxERyFrS7nRCGvnbpsd` ficou READY no mesmo domínio. O manifesto de homologação foi materializado na raiz enviada, o guard passou durante o build remoto e o arquivo principal do checkout foi restaurado ao término. Os metadados reais confirmaram `crons: []`, nenhuma definição no projeto e agendamentos desabilitados. As três rotas de cron responderam HTTP 401 sem credencial. Login e discovery responderam 200 e o MCP sem Bearer respondeu 401. A evidência está em [metadados de publicação](evidence/mcp-staging-deployment-2026-09-11.json).
+
+O teste de regressão de configuração efetiva passou junto aos cinco testes de homologação. O typecheck direcionado passou e o projeto manteve os 25 diagnósticos anteriores. A configuração temporária da publicação não foi incorporada ao `vercel.json` principal.
+
+A prova completa foi repetida na publicação final em `2026-09-11T22:18:42.095Z`, passou em 71 segundos e encerrou com limpeza completa, nenhuma ambiguidade e saída zero. Ver [evidência da versão final](evidence/mcp-staging-https-final-2026-09-11.json). O aceite no Claude permanece separado e pendente.

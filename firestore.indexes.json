@@ -19,46 +19,6 @@
       "queryScope": "COLLECTION",
       "fields": [
         {
-          "fieldPath": "data",
-          "order": "DESCENDING"
-        }
-      ]
-    },
-    {
-      "collectionGroup": "salesOrders",
-      "queryScope": "COLLECTION",
-      "fields": [
-        {
-          "fieldPath": "notaFiscal.id",
-          "order": "ASCENDING"
-        }
-      ]
-    },
-    {
-      "collectionGroup": "salesOrders",
-      "queryScope": "COLLECTION",
-      "fields": [
-        {
-          "fieldPath": "id",
-          "order": "ASCENDING"
-        }
-      ]
-    },
-    {
-      "collectionGroup": "salesOrders",
-      "queryScope": "COLLECTION",
-      "fields": [
-        {
-          "fieldPath": "importedAt",
-          "order": "DESCENDING"
-        }
-      ]
-    },
-    {
-      "collectionGroup": "salesOrders",
-      "queryScope": "COLLECTION",
-      "fields": [
-        {
           "fieldPath": "situacao.nome",
           "order": "ASCENDING"
         },
@@ -78,26 +38,6 @@
         },
         {
           "fieldPath": "data",
-          "order": "DESCENDING"
-        }
-      ]
-    },
-    {
-      "collectionGroup": "users",
-      "queryScope": "COLLECTION",
-      "fields": [
-        {
-          "fieldPath": "email",
-          "order": "ASCENDING"
-        }
-      ]
-    },
-    {
-      "collectionGroup": "users",
-      "queryScope": "COLLECTION",
-      "fields": [
-        {
-          "fieldPath": "createdAt",
           "order": "DESCENDING"
         }
       ]

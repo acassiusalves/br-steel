@@ -1,0 +1,124 @@
+{
+  "checkedAt": "2026-09-11T22:11:35.323Z",
+  "targets": {
+    "vercel": "prj_YD3ATzBPFQo4bD1ZlojrDTigUZp8",
+    "origin": "https://br-steel-mcp-staging.vercel.app",
+    "firebase": "brsteel-mcp-staging",
+    "supabase": "mlumbvxpaqfzpdjnvzxc",
+    "supabaseUrl": "https://mlumbvxpaqfzpdjnvzxc.supabase.co",
+    "issuer": "https://mlumbvxpaqfzpdjnvzxc.supabase.co/auth/v1",
+    "jwks": "https://mlumbvxpaqfzpdjnvzxc.supabase.co/auth/v1/.well-known/jwks.json",
+    "resource": "https://br-steel-mcp-staging.vercel.app/api/mcp"
+  },
+  "userId": "staging-proof-947500b6-1d98-4a8e-9bbe-68217e0815b2",
+  "syntheticRunId": "ab870092-4c2b-4a5b-9006-defc7ee4eab2",
+  "hostedClaude": false,
+  "writesEnabled": false,
+  "oauth": {
+    "realHttps": true,
+    "discoveryDcrLoginConsentCode": true,
+    "pkceS256": true,
+    "firstAccessAndSafeReturn": true,
+    "normalProviderSessionRejected": true,
+    "independentJwt": {
+      "jwksPinnedToDedicatedProject": true,
+      "normalSession": {
+        "signatureVerified": true,
+        "algorithm": "ES256",
+        "issuerMatches": true,
+        "audienceMatches": true,
+        "subjectMatches": true,
+        "oauthClientClaimAbsent": true,
+        "lifetimeSeconds": 900
+      },
+      "authorizationCode": {
+        "signatureVerified": true,
+        "algorithm": "ES256",
+        "issuerMatches": true,
+        "audienceMatches": true,
+        "subjectMatches": true,
+        "clientIdMatches": true,
+        "lifetimeSeconds": 900
+      }
+    }
+  },
+  "mcp": {
+    "officialSdk": true,
+    "realHttps": true,
+    "salesTotal": 300,
+    "revenueChangePercent": 100,
+    "zeroStock": true,
+    "restrictedProductionProjection": true,
+    "directForbiddenToolCallsRejected": true,
+    "currentRoleEnforced": true,
+    "auditRedaction": true,
+    "auditCount": 11,
+    "roles": {
+      "Administrador": [
+        "consultar_demanda_producao",
+        "consultar_estoque_produtos",
+        "consultar_lote_producao",
+        "consultar_meu_acesso",
+        "consultar_pedido",
+        "listar_colunas_producao",
+        "listar_lotes_producao",
+        "listar_pedidos",
+        "listar_pedidos_para_producao",
+        "resumir_vendas"
+      ],
+      "Vendedor": [
+        "consultar_estoque_produtos",
+        "consultar_meu_acesso",
+        "consultar_pedido",
+        "listar_pedidos",
+        "resumir_vendas"
+      ],
+      "Operador": [
+        "consultar_demanda_producao",
+        "consultar_estoque_produtos",
+        "consultar_lote_producao",
+        "consultar_meu_acesso",
+        "listar_colunas_producao",
+        "listar_lotes_producao",
+        "listar_pedidos_para_producao"
+      ]
+    },
+    "hostedClaude": false
+  },
+  "lifecycle": {
+    "refreshAcceptedByHttpsMcp": true,
+    "revokedAccessHttpStatus": 401,
+    "providerRefreshRejected": true,
+    "reconnectAccepted": true,
+    "oldTokensRemainRejectedAfterReconnect": true,
+    "explicitDenial": true,
+    "independentJwt": {
+      "refresh": {
+        "signatureVerified": true,
+        "algorithm": "ES256",
+        "issuerMatches": true,
+        "audienceMatches": true,
+        "subjectMatches": true,
+        "clientIdMatches": true,
+        "lifetimeSeconds": 900
+      },
+      "reconnect": {
+        "signatureVerified": true,
+        "algorithm": "ES256",
+        "issuerMatches": true,
+        "audienceMatches": true,
+        "subjectMatches": true,
+        "clientIdMatches": true,
+        "lifetimeSeconds": 900
+      }
+    }
+  },
+  "cleanup": {
+    "complete": true,
+    "ambiguousHttpRequest": false,
+    "issues": [],
+    "remainingOwnedIds": []
+  },
+  "elapsedSeconds": 75,
+  "proof": "passed"
+}

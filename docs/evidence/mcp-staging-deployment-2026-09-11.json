@@ -1,0 +1,23 @@
+{
+  "checkedAt": "2026-09-11",
+  "deploymentId": "dpl_9qZAbDyUqoxERyFrS7nRCGvnbpsd",
+  "projectId": "prj_YD3ATzBPFQo4bD1ZlojrDTigUZp8",
+  "origin": "https://br-steel-mcp-staging.vercel.app",
+  "readyState": "READY",
+  "nodeVersion": "22.x",
+  "buildCommand": "npm run verify:mcp-staging && npm run build",
+  "deploymentCrons": [],
+  "projectCronsDisabled": true,
+  "projectCronDefinitions": [],
+  "httpSmoke": {
+    "/api/cron/ml-health": 401,
+    "/api/cron/ml-messages-drain": 401,
+    "/api/cron/ml-messages-backfill": 401,
+    "/api/mcp": 401,
+    "/.well-known/oauth-protected-resource/api/mcp": 200,
+    "/login": 200
+  },
+  "productionProjectModified": false,
+  "ttlActive": false,
+  "hostedClaude": false
+}

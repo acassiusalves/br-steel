@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { generateKeyPairSync } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 const key = generateKeyPairSync('rsa', { modulusLength: 2048 }).privateKey.export({ type: 'pkcs8', format: 'pem' }).toString();
 import { validateMcpStaging } from '../../scripts/lib/mcp-staging-config';
 const fixture = () => ({
@@ -15,6 +20,17 @@ const fixture = () => ({
  FIREBASE_SERVICE_ACCOUNT_KEY: JSON.stringify({ type: 'service_account', project_id: 'brsteel-mcp-staging-fixture', client_email: 'mcp@brsteel-mcp-staging-fixture.iam.gserviceaccount.com', private_key: key }),
 });
 const config = { crons: [], buildCommand: 'npm run verify:mcp-staging && npm run build' };
+function runCli(env: Record<string, string>, rootConfig: { crons: unknown[]; buildCommand: string } = config) {
+ const cwd = mkdtempSync(join(tmpdir(), 'brsteel-staging-cli-'));
+ try {
+  mkdirSync(join(cwd, 'config'));
+  writeFileSync(join(cwd, 'config/vercel.mcp-staging.json'), JSON.stringify(config));
+  writeFileSync(join(cwd, 'vercel.json'), JSON.stringify(rootConfig));
+  return spawnSync(process.execPath, ['--import', createRequire(import.meta.url).resolve('tsx'), fileURLToPath(new URL('../../scripts/mcp-staging-check.ts', import.meta.url))], {
+   encoding: 'utf8', env: { NODE_ENV: 'test', ...env }, cwd, timeout: 10000, maxBuffer: 65536,
+  });
+ } finally { rmSync(cwd, { recursive: true, force: true }); }
+}
 describe('isolated MCP staging configuration', () => {
  it('accepts a complete dedicated staging environment without returning secret values', () => {
   const result = validateMcpStaging(fixture(), config);
@@ -22,11 +38,17 @@ describe('isolated MCP staging configuration', () => {
   expect(JSON.stringify(result)).not.toContain('sb_secret'); expect(JSON.stringify(result)).not.toContain('PRIVATE KEY');
  });
  it('executes the actual staging CLI and rejects incomplete configuration with a sanitized message', () => {
-  const run = (env: Record<string, string>) => spawnSync(process.execPath, ['--import', 'tsx', 'scripts/mcp-staging-check.ts'], { encoding: 'utf8', env: { NODE_ENV: 'test', ...env }, cwd: process.cwd() });
-  const accepted = run(fixture()); expect(accepted.status).toBe(0);
+  const accepted = runCli(fixture()); expect(accepted.status).toBe(0);
   expect(JSON.parse(accepted.stdout).stagingConfiguration).toBe('valid');
-  const rejected = run({}); expect(rejected.status).toBe(1);
+  const rejected = runCli({}); expect(rejected.status).toBe(1);
   expect(rejected.stderr).toContain('Configuração de homologação recusada:');
+  expect(rejected.stderr).not.toContain('PRIVATE KEY');
+ });
+ it('refuses uploaded root crons even when the separate staging template is valid', () => {
+  const rejected = runCli(fixture(), { ...config, crons: [{ path: '/api/cron/ml-health', schedule: '* * * * *' }] });
+  expect(rejected.status).toBe(1);
+  expect(rejected.stderr).toContain('sem crons');
+  expect(rejected.stdout).toBe('');
   expect(rejected.stderr).not.toContain('PRIVATE KEY');
  });
  it('fails closed for production links, partial projects and cross-project service accounts', () => {
