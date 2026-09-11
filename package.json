@@ -16,7 +16,8 @@
     "test:oauth-app": "node --env-file=.env.local --import tsx scripts/oauth-app-verify.mjs",
     "test:operations": "vitest run tests/operations",
     "test:mcp": "vitest run tests/mcp",
-    "test:mcp-app": "VERIFY_MCP=true node --env-file=.env.local --import tsx scripts/oauth-app-verify.mjs"
+    "test:mcp-app": "VERIFY_MCP=true node --env-file=.env.local --import tsx scripts/oauth-app-verify.mjs",
+    "verify:mcp-staging": "node --import tsx scripts/mcp-staging-check.ts"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
