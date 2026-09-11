@@ -93,3 +93,9 @@ Foi criado o acesso `piloto-mcp@example.invalid`, perfil Administrador apenas ne
 A validação real confirmou login HTTP 401 antes do cadastro e 200 depois; senha incorreta continua produzindo 401. A conta exige troca de senha no primeiro acesso e o MCP recusou autorização com 403 enquanto essa troca está pendente. Ver [evidência de acesso](evidence/mcp-pilot-access-2026-09-11.json).
 
 Este usuário foi **mantido para o teste do usuário**. Não executar a prova automatizada com esse mesmo ID enquanto o aceite estiver em andamento: o preflight recusa a colisão e o cleanup só pode remover objetos com o marcador próprio da execução. A ausência de `stagingProofRunId` nesta conta distingue o piloto da fixture descartável. Ao encerrar o piloto, revogar as conexões, desativar a conta e fazer a limpeza explícita dos seus registros. O conector dentro do Claude ainda não foi validado pela tarefa principal.
+
+## Conexão real do Claude confirmada
+
+Em 11/09/2026, o usuário confirmou que conseguiu conectar. A consulta ao servidor às 22:48:09 UTC confirmou a conta ativa, primeiro acesso concluído e uma conexão ativa com cliente **Claude**, autorizada para vendas, estoque, insumos e produção em leitura. A auditoria registrou `consultar_meu_acesso` com resultado `success`. Ver [evidência da conexão](evidence/mcp-claude-connected-2026-09-11.json).
+
+Isso comprova a autorização real e uma ferramenta executada pelo Claude. Ainda não comprova o aceite completo das leituras de vendas/estoque/produção com valores conhecidos nem revogação/reconexão pelo cliente Claude. A validação anterior dessas operações pelo SDK permanece registrada separadamente. O piloto continua ativo; não revogar ou remover como parte da limpeza das fixtures automáticas. Escrita permanece desabilitada.

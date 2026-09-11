@@ -1,0 +1,26 @@
+{
+  "checkedAt": "2026-09-11T22:48:09.184Z",
+  "origin": "https://br-steel-mcp-staging.vercel.app",
+  "userConfirmedConnection": true,
+  "clientName": "Claude",
+  "connectionStatus": "active",
+  "passwordSetupCompleted": true,
+  "grantedCapabilities": [
+    "vendas:read",
+    "estoque:read",
+    "insumos:read",
+    "producao:read"
+  ],
+  "observedToolCalls": [
+    {
+      "tool": "consultar_meu_acesso",
+      "result": "success"
+    }
+  ],
+  "writesEnabled": false,
+  "remainingAcceptance": [
+    "Hosted Claude sales/stock/production reads against known fixtures",
+    "Hosted Claude revocation and reconnect acceptance"
+  ],
+  "ttlActive": false
+}
