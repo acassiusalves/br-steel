@@ -1,6 +1,7 @@
 
 "use client";
 
+
 import {
   Calendar as CalendarIcon,
   DollarSign,
@@ -37,7 +38,10 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
-import { getSalesDashboardData } from "@/app/actions";
+import { fetchOperation, subscribeOperation, notifyOperationsChanged } from '@/lib/operation-client';
+import type { summarizeSales } from '@/server/operations/sales';
+import type { OperationResult } from '@/types/operations';
+type Summary = Awaited<ReturnType<typeof summarizeSales>>['data'];
 import { Skeleton } from "./ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { ScrollArea } from "./ui/scroll-area";
@@ -63,7 +67,7 @@ const StatCard = ({ title, value, icon: Icon, change, isLoading, valueFormatter 
   title: string;
   value: number;
   icon: React.ElementType;
-  change: number;
+  change: number | null;
   isLoading: boolean;
   valueFormatter?: (value: number) => string;
 }) => {
@@ -83,7 +87,7 @@ const StatCard = ({ title, value, icon: Icon, change, isLoading, valueFormatter 
           <>
             <div className="text-2xl font-bold">{valueFormatter(value)}</div>
             <p className="text-xs text-muted-foreground">
-              {formatChange(change)} em relação ao período anterior
+              {change === null ? 'Sem base no período anterior' : `${formatChange(change)} em relação ao período anterior`}
             </p>
           </>
         )}
@@ -173,39 +177,22 @@ export default function SalesDashboard() {
   });
 
   const [isLoading, setIsLoading] = React.useState(true);
-  const [data, setData] = React.useState<Awaited<ReturnType<typeof getSalesDashboardData>> | null>(null);
+  const [data, setData] = React.useState<Summary | null>(null);
 
   const { toast } = useToast();
 
-  const fetchData = React.useCallback(async (currentDate: DateRange | undefined) => {
-      if (!currentDate?.from || !currentDate?.to) {
-        return;
-      }
-      setIsLoading(true);
-      try {
-        const result = await getSalesDashboardData({ from: currentDate.from, to: currentDate.to });
-        setData(result);
-      } catch (error: any) {
-        console.error("Failed to fetch dashboard data:", error);
-        toast({
-          variant: "destructive",
-          title: "Erro ao buscar dados",
-          description: error.message,
-        });
-        setData(null);
-      } finally {
-        setIsLoading(false);
-      }
-  }, [toast]);
-
-  // Carrega dados ao montar o componente ou quando a data muda
+  const [metadata, setMetadata] = React.useState<OperationResult<Summary> | null>(null);
+  const [loadError, setLoadError] = React.useState<string | null>(null);
   React.useEffect(() => {
-    fetchData(date);
-  }, [date, fetchData]);
-
-  const handleFilter = () => {
-    fetchData(date);
-  };
+    setData(null); setMetadata(null);
+    if (!date?.from || !date?.to) { setIsLoading(false); return; }
+    setIsLoading(true);
+    const params = new URLSearchParams({view: 'summary', from: format(date.from, 'yyyy-MM-dd'), to: format(date.to, 'yyyy-MM-dd')});
+    return subscribeOperation(() => fetchOperation<Summary>(`/api/operations/sales?${params}`), result => {
+      setData(result.data); setMetadata(result); setLoadError(null); setIsLoading(false);
+    }, error => { setData(null); setMetadata(null); setLoadError(error.message); setIsLoading(false); });
+  }, [date]);
+  const handleFilter = notifyOperationsChanged;
 
   const setDatePreset = (preset: 'today' | 'yesterday' | 'last7' | 'last30' | 'last3Months' | 'thisMonth' | 'lastMonth') => {
       const today = new Date();
@@ -240,6 +227,9 @@ export default function SalesDashboard() {
 
   return (
     <div className="space-y-6">
+      {loadError && <p role="alert" className="text-destructive">{loadError}</p>}
+      {metadata && <p className="text-xs text-muted-foreground">Fonte: {metadata.source} · Consulta: {new Date(metadata.asOf).toLocaleString('pt-BR')} {metadata.warnings.join(' ')}</p>}
+
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
         <div>
           <h2 className="text-3xl font-bold tracking-tight">Painel de Vendas</h2>
@@ -321,7 +311,7 @@ export default function SalesDashboard() {
         <StatCard 
           title="Receita Total"
           value={data?.stats.totalRevenue.value ?? 0}
-          change={data?.stats.totalRevenue.change ?? 0}
+          change={data?.stats.totalRevenue.change ?? null}
           icon={DollarSign}
           isLoading={isLoading}
           valueFormatter={formatCurrency}
@@ -329,22 +319,22 @@ export default function SalesDashboard() {
          <StatCard 
           title="Vendas"
           value={data?.stats.totalSales.value ?? 0}
-          change={data?.stats.totalSales.change ?? 0}
+          change={data?.stats.totalSales.change ?? null}
           icon={ShoppingCart}
           isLoading={isLoading}
         />
         <StatCard 
           title="Ticket Médio"
           value={data?.stats.averageTicket.value ?? 0}
-          change={data?.stats.averageTicket.change ?? 0}
+          change={data?.stats.averageTicket.change ?? null}
           icon={DollarSign}
           isLoading={isLoading}
           valueFormatter={formatCurrency}
         />
         <StatCard 
-          title="Novos Clientes"
+          title="Clientes únicos"
           value={data?.stats.uniqueCustomers.value ?? 0}
-          change={data?.stats.uniqueCustomers.change ?? 0}
+          change={data?.stats.uniqueCustomers.change ?? null}
           icon={Users}
           isLoading={isLoading}
         />

@@ -1,15 +1,9 @@
 'use server';
 
 import { format, subMonths } from 'date-fns';
-import {
-  collection,
-  getDocs,
-  query,
-  where,
-  type QueryConstraint,
-} from 'firebase/firestore';
-
-import { db } from '@/lib/firebase';
+import { requireWebContext } from '@/server/operations/context';
+import { requireOperation, dateRangeSchema } from '@/server/operations/common';
+import { readOrdersForPeriod } from '@/server/operations/sales';
 import {
   computeCustomerProductRecurrence,
   type RecurrenceResult,
@@ -29,28 +23,17 @@ export type CustomerProductRecurrenceRequest = {
 export async function getCustomerProductRecurrenceData(
   input: CustomerProductRecurrenceRequest = {}
 ): Promise<RecurrenceResult> {
+  requireOperation(await requireWebContext(), 'vendas:read');
   const today = new Date();
   const from = input.from || subMonths(today, 12);
   const to = input.to || today;
   const fromDateStr = format(from, 'yyyy-MM-dd');
   const toDateStr = format(to, 'yyyy-MM-dd');
-  const constraints: QueryConstraint[] = [
-    where('data', '>=', fromDateStr),
-    where('data', '<=', toDateStr),
-  ];
-
-  const [ordersSnapshot, groupIndex] = await Promise.all([
-    getDocs(query(collection(db, 'salesOrders'), ...constraints)),
-    loadProductGroupIndex().catch(() => ({
-      groups: [],
-      skuToGroup: new Map(),
-    })),
+  const range = dateRangeSchema.parse({ from: fromDateStr, to: toDateStr });
+  const [orders, groupIndex] = await Promise.all([
+    readOrdersForPeriod(range),
+    loadProductGroupIndex().catch(() => ({ groups: [], skuToGroup: new Map() })),
   ]);
-
-  const orders: SaleOrder[] = [];
-  ordersSnapshot.forEach((doc) => {
-    orders.push(doc.data() as SaleOrder);
-  });
 
   return computeCustomerProductRecurrence(orders, {
     currentDate: format(today, 'yyyy-MM-dd'),

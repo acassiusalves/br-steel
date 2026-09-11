@@ -1,8 +1,8 @@
 'use client';
 
 import * as React from 'react';
-import { collection, onSnapshot, query, orderBy } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+import { subscribeOperation } from '@/lib/operation-client';
+import { useAuth } from '@/contexts/AuthContext';
 import { Loader2, Wifi, WifiOff } from 'lucide-react';
 
 import DashboardLayout from '@/components/dashboard-layout';
@@ -10,7 +10,7 @@ import { KanbanBoard } from '@/components/kanban/KanbanBoard';
 import { KanbanHeader } from '@/components/kanban/KanbanHeader';
 import { KanbanFilters } from '@/components/kanban/KanbanFilters';
 import { useToast } from '@/hooks/use-toast';
-import { seedDefaultColumns } from '@/services/kanban-service';
+import { getColumns, getLots, seedDefaultColumns } from '@/services/kanban-service';
 import type { ProductionColumn, ProductionLot, LotPriority } from '@/types/kanban';
 import { Badge } from '@/components/ui/badge';
 
@@ -20,6 +20,7 @@ export default function KanbanClient() {
   const [isLoading, setIsLoading] = React.useState(true);
   const [isConnected, setIsConnected] = React.useState(false);
   const { toast } = useToast();
+  const { user } = useAuth();
 
   // Filtros
   const [searchTerm, setSearchTerm] = React.useState('');
@@ -27,75 +28,23 @@ export default function KanbanClient() {
   const [filterPriority, setFilterPriority] = React.useState<string>('all');
   const [filterAssigned, setFilterAssigned] = React.useState<string>('all');
 
-  // Inicializa colunas padrão se necessário
   React.useEffect(() => {
-    const initColumns = async () => {
-      try {
-        await seedDefaultColumns();
-      } catch (error) {
-        console.error('Erro ao inicializar colunas:', error);
-      }
-    };
-    initColumns();
-  }, []);
+    if (user && ['Administrador', 'Operador'].includes(user.role)) {
+      void getColumns().then(columns => columns.length === 0 ? seedDefaultColumns() : undefined).catch(error => {
+        toast({ variant: 'destructive', title: 'Erro ao inicializar Kanban', description: error.message });
+      });
+    }
+  }, [user?.id, user?.role, toast]);
 
-  // Listener real-time para colunas
-  React.useEffect(() => {
-    const columnsRef = collection(db, 'productionColumns');
-    const q = query(columnsRef, orderBy('order', 'asc'));
-
-    const unsubscribe = onSnapshot(
-      q,
-      (snapshot) => {
-        const columnsData = snapshot.docs.map(doc => ({
-          id: doc.id,
-          ...doc.data(),
-        })) as ProductionColumn[];
-        setColumns(columnsData);
-        setIsConnected(true);
-      },
-      (error) => {
-        console.error('Erro ao escutar colunas:', error);
-        setIsConnected(false);
-        toast({
-          variant: 'destructive',
-          title: 'Erro de conexão',
-          description: 'Não foi possível conectar ao banco de dados.',
-        });
-      }
-    );
-
-    return () => unsubscribe();
-  }, [toast]);
-
-  // Listener real-time para lotes
-  React.useEffect(() => {
-    const lotsRef = collection(db, 'productionLots');
-    const q = query(lotsRef, orderBy('columnOrder', 'asc'));
-
-    const unsubscribe = onSnapshot(
-      q,
-      (snapshot) => {
-        const lotsData = snapshot.docs.map(doc => ({
-          id: doc.id,
-          ...doc.data(),
-        })) as ProductionLot[];
-        setLots(lotsData);
-        setIsLoading(false);
-      },
-      (error) => {
-        console.error('Erro ao escutar lotes:', error);
-        setIsLoading(false);
-        toast({
-          variant: 'destructive',
-          title: 'Erro ao carregar lotes',
-          description: 'Não foi possível carregar os lotes de produção.',
-        });
-      }
-    );
-
-    return () => unsubscribe();
-  }, [toast]);
+  React.useEffect(() => subscribeOperation(async () => {
+    const [columns, lots] = await Promise.all([getColumns(), getLots()]);
+    return { columns, lots };
+  }, ({ columns, lots }) => {
+    setColumns(columns); setLots(lots); setIsLoading(false); setIsConnected(true);
+  }, error => {
+    setColumns([]); setLots([]); setIsLoading(false); setIsConnected(false);
+    toast({ variant: 'destructive', title: 'Erro ao carregar Kanban', description: error.message });
+  }), [toast]);
 
   // Filtragem dos lotes
   const filteredLots = React.useMemo(() => {

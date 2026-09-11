@@ -1,8 +1,8 @@
 'use client';
 
 import * as React from 'react';
-import { collection, getDocs, query, orderBy, limit } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+import { subscribeOperation } from '@/lib/operation-client';
+import { getProductionOrders } from '@/services/kanban-service';
 import { Loader2, Search, Package } from 'lucide-react';
 
 import {
@@ -27,7 +27,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { useToast } from '@/hooks/use-toast';
-import type { SaleOrder } from '@/types/sale-order';
+
 import type { CreateLotItemInput } from '@/types/kanban';
 
 interface SelectOrdersModalProps {
@@ -37,7 +37,7 @@ interface SelectOrdersModalProps {
 }
 
 interface OrderItem {
-  orderId: number;
+  orderId: string;
   orderNumber: number;
   customerName: string;
   itemId: number;
@@ -52,61 +52,32 @@ export function SelectOrdersModal({
   onClose,
   onItemsSelected,
 }: SelectOrdersModalProps) {
-  const [orders, setOrders] = React.useState<SaleOrder[]>([]);
   const [items, setItems] = React.useState<OrderItem[]>([]);
   const [selectedItems, setSelectedItems] = React.useState<Set<string>>(new Set());
   const [isLoading, setIsLoading] = React.useState(false);
   const [searchTerm, setSearchTerm] = React.useState('');
   const { toast } = useToast();
 
-  // Carrega pedidos quando o modal abre
   React.useEffect(() => {
-    if (isOpen) {
-      loadOrders();
-    }
-  }, [isOpen]);
-
-  const loadOrders = async () => {
+    if (!isOpen) return;
     setIsLoading(true);
-    try {
-      const ordersRef = collection(db, 'salesOrders');
-      const q = query(ordersRef, orderBy('data', 'desc'), limit(100));
-      const snapshot = await getDocs(q);
-
-      const ordersData = snapshot.docs.map(doc => doc.data() as SaleOrder);
-      setOrders(ordersData);
-
-      // Extrai todos os itens dos pedidos
-      const allItems: OrderItem[] = [];
-      ordersData.forEach(order => {
-        if (order.itens && Array.isArray(order.itens)) {
-          order.itens.forEach(item => {
-            allItems.push({
-              orderId: order.id,
-              orderNumber: order.numero,
-              customerName: order.contato?.nome || 'Cliente não identificado',
-              itemId: item.id,
-              sku: item.codigo || 'SEM-SKU',
-              productName: item.descricao || 'Produto sem descrição',
-              quantity: item.quantidade,
-              unit: item.unidade || 'UN',
-            });
-          });
-        }
-      });
-
-      setItems(allItems);
-    } catch (error) {
-      console.error('Erro ao carregar pedidos:', error);
-      toast({
-        variant: 'destructive',
-        title: 'Erro ao carregar pedidos',
-        description: 'Não foi possível carregar os pedidos. Tente novamente.',
-      });
-    } finally {
+    return subscribeOperation(getProductionOrders, orders => {
+      setItems(orders.flatMap(order => order.itens.map(item => ({
+        orderId: order.id,
+        orderNumber: order.numero,
+        customerName: '',
+        itemId: item.id,
+        sku: item.codigo || 'SEM-SKU',
+        productName: item.descricao || 'Produto sem descrição',
+        quantity: item.quantidade,
+        unit: item.unidade || 'UN',
+      }))));
       setIsLoading(false);
-    }
-  };
+    }, error => {
+      setItems([]); setIsLoading(false);
+      toast({ variant: 'destructive', title: 'Erro ao carregar pedidos', description: error.message });
+    });
+  }, [isOpen, toast]);
 
   // Filtra itens pela busca
   const filteredItems = React.useMemo(() => {
@@ -117,7 +88,6 @@ export function SelectOrdersModal({
       item =>
         item.sku.toLowerCase().includes(search) ||
         item.productName.toLowerCase().includes(search) ||
-        item.customerName.toLowerCase().includes(search) ||
         item.orderNumber.toString().includes(search)
     );
   }, [items, searchTerm]);
@@ -211,7 +181,7 @@ export function SelectOrdersModal({
         <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
-            placeholder="Buscar por SKU, produto, cliente ou pedido..."
+            placeholder="Buscar por SKU, produto ou pedido..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             className="pl-9"
@@ -246,7 +216,6 @@ export function SelectOrdersModal({
                   <TableHead>SKU</TableHead>
                   <TableHead>Produto</TableHead>
                   <TableHead>Pedido</TableHead>
-                  <TableHead>Cliente</TableHead>
                   <TableHead className="text-right">Qtd</TableHead>
                 </TableRow>
               </TableHeader>
@@ -263,7 +232,7 @@ export function SelectOrdersModal({
                           onCheckedChange={() => toggleAllBySku(sku, skuItems)}
                         />
                       </TableCell>
-                      <TableCell colSpan={4}>
+                      <TableCell colSpan={3}>
                         <div className="flex items-center gap-2">
                           <Badge variant="outline">{sku}</Badge>
                           <span className="text-sm text-muted-foreground">
@@ -291,9 +260,6 @@ export function SelectOrdersModal({
                           {item.productName}
                         </TableCell>
                         <TableCell>#{item.orderNumber}</TableCell>
-                        <TableCell className="max-w-[150px] truncate">
-                          {item.customerName}
-                        </TableCell>
                         <TableCell className="text-right">
                           {item.quantity} {item.unit}
                         </TableCell>

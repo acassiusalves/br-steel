@@ -12,8 +12,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { collection, query, orderBy, onSnapshot } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+import { fetchAllOperationPages, subscribeOperation } from '@/lib/operation-client';
 import { Badge } from '@/components/ui/badge';
 import SaleOrderDetailModal from '@/components/sale-order-detail-modal';
 import type { SaleOrder } from '@/types/sale-order';
@@ -94,6 +93,7 @@ const StatCard = ({ title, value, icon: Icon, isLoading, valueFormatter = (v) =>
 
 
 const SalesListPage = () => {
+  const [loadError, setLoadError] = React.useState<string | null>(null);
   const [allSales, setAllSales] = React.useState<SaleOrder[]>([]);
   const [filteredSales, setFilteredSales] = React.useState<SaleOrder[]>([]);
   const [isLoading, setIsLoading] = React.useState(true);
@@ -124,33 +124,9 @@ const SalesListPage = () => {
 
   React.useEffect(() => {
     setIsLoading(true);
-    const ordersCollection = collection(db, 'salesOrders');
-    const q = query(ordersCollection, orderBy('data', 'desc'));
-
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-        if (snapshot.empty) {
-            console.log("Nenhum pedido encontrado no Firestore.");
-            setAllSales([]);
-            setFilteredSales([]);
-            setIsLoading(false);
-            return;
-        }
-
-        const sales: SaleOrder[] = [];
-        snapshot.forEach(doc => {
-            const orderData = doc.data() as SaleOrder;
-            sales.push(orderData);
-        });
-
-        setAllSales(sales);
-        setIsLoading(false);
-    }, (error) => {
-        console.error("Erro ao buscar pedidos do Firestore em tempo real:", error);
-        setIsLoading(false);
-    });
-    
-    // Limpa o listener quando o componente é desmontado
-    return () => unsubscribe();
+    return subscribeOperation(() => fetchAllOperationPages<SaleOrder>('/api/operations/sales'), sales => {
+      setAllSales(sales); setLoadError(null); setIsLoading(false);
+    }, error => { setAllSales([]); setFilteredSales([]); setSelectedOrder(null); setLoadError(error.message); setIsLoading(false); });
   }, []); 
   
   // Recalculate stats and apply filters
@@ -168,8 +144,7 @@ const SalesListPage = () => {
     if (date?.from && date?.to) {
         newFilteredSales = newFilteredSales.filter(sale => {
             try {
-                const saleDate = parseISO(sale.data);
-                return saleDate >= date.from! && saleDate <= date.to!;
+                return sale.data >= format(date.from!, 'yyyy-MM-dd') && sale.data <= format(date.to!, 'yyyy-MM-dd');
             } catch (e) {
                 return false;
             }
@@ -197,7 +172,7 @@ const SalesListPage = () => {
     }
 
     setFilteredSales(newFilteredSales);
-    setCurrentPage(1); // Reset to first page on filter change
+
     
     const totalRevenue = newFilteredSales.reduce((sum, order) => sum + (order.total || 0), 0);
     const totalSales = newFilteredSales.length;
@@ -262,8 +237,10 @@ const SalesListPage = () => {
   };
 
 
+  React.useEffect(() => { setCurrentPage(1); }, [date, searchTerm, rowsPerPage]);
+
   // Pagination Logic
-  const totalPages = Math.ceil(filteredSales.length / rowsPerPage);
+  const totalPages = Math.max(1, Math.ceil(filteredSales.length / rowsPerPage));
   const paginatedSales = filteredSales.slice(
     (currentPage - 1) * rowsPerPage,
     currentPage * rowsPerPage
@@ -325,6 +302,7 @@ const SalesListPage = () => {
 
   return (
     <>
+      {loadError && <p role="alert" className="text-destructive">{loadError}</p>}
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
           <div>
               <h2 className="text-3xl font-bold tracking-tight">Listagem de Vendas</h2>

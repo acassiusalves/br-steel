@@ -45,8 +45,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
 import { useSearchParams } from 'next/navigation';
-import { collection, query, orderBy, getDocs } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+import { fetchAllOperationPages, subscribeOperation, notifyOperationsChanged } from '@/lib/operation-client';
 import type { Supply } from '@/types/supply';
 import type { InventoryItem } from '@/types/inventory';
 import { addSupply, updateSupply, deleteSupply } from '@/services/supply-service';
@@ -653,53 +652,28 @@ export default function InsumosClient() {
   const [isLoading, setIsLoading] = React.useState(true);
   const { toast } = useToast();
 
-  const fetchSupplies = React.useCallback(async () => {
-    setIsLoading(true);
-    try {
-        const q = query(collection(db, "supplies"), orderBy('nome', 'asc'));
-        const querySnapshot = await getDocs(q);
-
-        const suppliesData: Supply[] = [];
-        const inventoryItems: InventoryItem[] = [];
-
-        querySnapshot.forEach(doc => {
-            const supply = { id: doc.id, ...doc.data() } as Supply;
-            suppliesData.push(supply);
-
-            const estoqueAtual = supply.estoqueAtual || 0;
-            const valorEmEstoque = estoqueAtual > 0 ? estoqueAtual * supply.precoCusto : 0;
-            inventoryItems.push({
-                supply: supply,
-                estoqueAtual: estoqueAtual,
-                estoqueMinimo: supply.estoqueMinimo,
-                valorEmEstoque: valorEmEstoque,
-                status: estoqueAtual <= 0 ? 'esgotado' : (estoqueAtual < supply.estoqueMinimo ? 'baixo' : 'em_estoque'),
-            });
-        });
-        
-        setSupplies(suppliesData);
-        setInventory(inventoryItems);
-
-    } catch (error) {
-        console.error("Error fetching supplies:", error);
-        toast({
-            variant: 'destructive',
-            title: 'Erro ao Buscar Dados',
-            description: 'Não foi possível carregar os insumos e o estoque.'
-        });
-    } finally {
-        setIsLoading(false);
-    }
-  }, [toast]);
-  
-  React.useEffect(() => {
-    fetchSupplies();
-  }, [fetchSupplies]);
+  const [loadError, setLoadError] = React.useState<string | null>(null);
+  const fetchSupplies = notifyOperationsChanged;
+  React.useEffect(() => subscribeOperation(
+    () => fetchAllOperationPages<Supply>('/api/operations/supplies'),
+    rows => {
+      const sorted = [...rows].sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'));
+      setSupplies(sorted);
+      setInventory(sorted.map(supply => {
+        const estoqueAtual = supply.estoqueAtual ?? 0;
+        return { supply, estoqueAtual, estoqueMinimo: supply.estoqueMinimo,
+          valorEmEstoque: estoqueAtual > 0 ? estoqueAtual * supply.precoCusto : 0,
+          status: estoqueAtual <= 0 ? 'esgotado' : estoqueAtual < supply.estoqueMinimo ? 'baixo' : 'em_estoque' };
+      }));
+      setLoadError(null); setIsLoading(false);
+    }, error => { setSupplies([]); setInventory([]); setLoadError(error.message); setIsLoading(false); }
+  ), []);
 
 
   return (
     <DashboardLayout>
       <div className="flex-1 p-4 pt-6 md:p-8">
+        {loadError && <p role="alert" className="text-destructive">{loadError}</p>}
         <Suspense fallback={<div className="p-4">Carregando…</div>}>
           <InsumosTabView
             supplies={supplies}

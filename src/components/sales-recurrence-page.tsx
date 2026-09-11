@@ -1,6 +1,7 @@
 'use client';
 
 import * as React from 'react';
+import { subscribeOperation, notifyOperationsChanged } from '@/lib/operation-client';
 import {
   Building2,
   Calendar as CalendarIcon,
@@ -218,36 +219,22 @@ export default function SalesRecurrencePage() {
   const [data, setData] = React.useState<RecurrenceData | null>(null);
   const [isLoading, setIsLoading] = React.useState(true);
 
-  const fetchData = React.useCallback(async () => {
-    if (!date?.from || !date?.to) return;
-    setIsLoading(true);
-    try {
-      const request: CustomerProductRecurrenceRequest = {
-        from: date.from,
-        to: date.to,
-        minDistinctPurchaseDates: Number(minDates),
-        lookaheadDays: Number(lookaheadDays),
-        onlyWithInvoice: invoiceFilter === 'with_invoice',
-      };
-      const result = await getCustomerProductRecurrenceData(request);
-      setData(result);
-      setCurrentPage(1);
-    } catch (error: any) {
-      console.error('Erro ao buscar análise de recorrência:', error);
-      toast({
-        variant: 'destructive',
-        title: 'Erro ao buscar recorrência',
-        description: error?.message || 'Não foi possível calcular os dados.',
-      });
-      setData(null);
-    } finally {
-      setIsLoading(false);
-    }
-  }, [date, minDates, lookaheadDays, invoiceFilter, toast]);
-
+  const fetchData = () => { setIsLoading(true); notifyOperationsChanged(); };
   React.useEffect(() => {
-    fetchData();
-  }, [fetchData]);
+    setData(null); setCurrentPage(1);
+    if (!date?.from || !date?.to) { setIsLoading(false); return; }
+    setIsLoading(true);
+    const request: CustomerProductRecurrenceRequest = {
+      from: date.from, to: date.to, minDistinctPurchaseDates: Number(minDates),
+      lookaheadDays: Number(lookaheadDays), onlyWithInvoice: invoiceFilter === 'with_invoice',
+    };
+    return subscribeOperation(() => getCustomerProductRecurrenceData(request), result => {
+      setData(result); setIsLoading(false);
+    }, error => {
+      setData(null); setIsLoading(false);
+      toast({ variant: 'destructive', title: 'Erro ao buscar recorrência', description: error.message });
+    });
+  }, [date, minDates, lookaheadDays, invoiceFilter, toast]);
 
   React.useEffect(() => {
     setCurrentPage(1);

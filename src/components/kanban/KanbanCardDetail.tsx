@@ -1,8 +1,7 @@
 'use client';
 
 import * as React from 'react';
-import { collection, getDocs, query, where, onSnapshot, orderBy } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+import { subscribeOperation } from '@/lib/operation-client';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import {
@@ -103,12 +102,16 @@ export function KanbanCardDetail({ lot, isOpen, onClose }: KanbanCardDetailProps
   const { toast } = useToast();
   const { user } = useAuth();
 
-  // Carrega itens do lote
   React.useEffect(() => {
-    if (isOpen) {
-      loadItems();
-    }
-  }, [isOpen, lot.id]);
+    if (!isOpen) return;
+    setIsLoadingItems(true);
+    return subscribeOperation(() => getLotItems(lot.id), data => {
+      setItems(data); setIsLoadingItems(false);
+    }, error => {
+      setItems([]); setIsLoadingItems(false);
+      toast({ variant: 'destructive', title: 'Erro ao carregar itens', description: error.message });
+    });
+  }, [isOpen, lot.id, toast]);
 
   // Sincroniza estados quando lot muda
   React.useEffect(() => {
@@ -118,23 +121,6 @@ export function KanbanCardDetail({ lot, isOpen, onClose }: KanbanCardDetailProps
     setDueDate(lot.dueDate ? new Date(lot.dueDate) : undefined);
     setAssignedTo(lot.assignedTo || null);
   }, [lot]);
-
-  const loadItems = async () => {
-    setIsLoadingItems(true);
-    try {
-      const itemsData = await getLotItems(lot.id);
-      setItems(itemsData);
-    } catch (error) {
-      console.error('Erro ao carregar itens:', error);
-      toast({
-        variant: 'destructive',
-        title: 'Erro ao carregar itens',
-        description: 'Não foi possível carregar os itens do lote.',
-      });
-    } finally {
-      setIsLoadingItems(false);
-    }
-  };
 
   const handleSave = async () => {
     if (!title.trim()) {

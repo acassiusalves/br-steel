@@ -13,7 +13,8 @@
     "test:access": "vitest run tests/access",
     "test:oauth": "vitest run tests/oauth",
     "test:oauth-provider": "node scripts/oauth-provider-verify.mjs",
-    "test:oauth-app": "node --env-file=.env.local --import tsx scripts/oauth-app-verify.mjs"
+    "test:oauth-app": "node --env-file=.env.local --import tsx scripts/oauth-app-verify.mjs",
+    "test:operations": "vitest run tests/operations"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",

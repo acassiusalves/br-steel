@@ -31,7 +31,7 @@ export interface ProductionLot {
   columnOrder: number;
   assignedTo?: AssignedUser;
   priority: LotPriority;
-  linkedOrderIds: number[];
+  linkedOrderIds: (string | number)[];
   totalItems: number;
   totalSkus: number;
   dueDate?: string;
@@ -47,7 +47,7 @@ export interface ProductionLotItem {
   productName: string;
   quantity: number;
   unit: string;
-  sourceOrderId: number;
+  sourceOrderId: string | number;
   sourceOrderNumber: string;
   customerName: string;
   createdAt: string;
@@ -97,7 +97,7 @@ export interface CreateLotItemInput {
   productName: string;
   quantity: number;
   unit: string;
-  sourceOrderId: number;
+  sourceOrderId: string | number;
   sourceOrderNumber: string;
   customerName: string;
 }
@@ -149,3 +149,10 @@ export const PRIORITY_LABELS: Record<LotPriority, string> = {
   alta: 'Alta',
   urgente: 'Urgente',
 };
+
+/** Production-only order projection. No sales values or contact information. */
+export interface ProductionOrder {
+  id: string;
+  numero: number;
+  itens: { id: number; codigo: string; descricao: string; quantidade: number; unidade: string }[];
+}

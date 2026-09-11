@@ -146,7 +146,9 @@ export function KanbanBoard({ columns, lots }: KanbanBoardProps) {
       const overLot = optimisticLots.find(lot => lot.id === overId);
       if (!overLot) return;
 
-      if (activeLot.columnId === overLot.columnId) {
+      // Drag-over changes the optimistic column; compare the persisted source.
+      const sourceLot = lots.find(lot => lot.id === activeId);
+      if (sourceLot?.columnId === overLot.columnId) {
         // Reordenando na mesma coluna
         const columnLots = getLotsByColumn(activeLot.columnId);
         const oldIndex = columnLots.findIndex(lot => lot.id === activeId);
@@ -163,8 +165,9 @@ export function KanbanBoard({ columns, lots }: KanbanBoardProps) {
         }
       } else {
         // Movendo entre colunas
-        const targetColumnLots = getLotsByColumn(overLot.columnId);
-        const overIndex = targetColumnLots.findIndex(lot => lot.id === overId);
+        const targetColumnLots = getLotsByColumn(overLot.columnId).filter(lot => lot.id !== activeId);
+        const targetIndex = targetColumnLots.findIndex(lot => lot.id === overId);
+        const overIndex = targetIndex < 0 ? targetColumnLots.length : targetIndex;
 
         await moveLot(activeId, overLot.columnId, overIndex);
 

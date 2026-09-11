@@ -20,8 +20,9 @@ import {
 import { format, subDays, startOfMonth, endOfMonth, startOfYesterday, endOfYesterday, startOfWeek, endOfWeek, startOfYear, endOfYear, subMonths, formatDistanceToNow } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import type { DateRange } from "react-day-picker";
-import { doc, onSnapshot } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+import { fetchOperation, subscribeOperation, notifyOperationsChanged } from '@/lib/operation-client';
+import type { OperationResult } from '@/types/operations';
+
 
 import DashboardLayout from '@/components/dashboard-layout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card';
@@ -33,8 +34,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { getProductionDemand, updateSingleSkuStock } from '@/app/actions';
-import type { ProductionDemand } from '@/app/actions';
+
+import type { ProductionDemand } from '@/server/operations/production-demand';
 import { Button } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Calendar } from '@/components/ui/calendar';
@@ -64,7 +65,7 @@ export default function ProducaoClient() {
   const [demand, setDemand] = React.useState<ProductionDemand[]>([]);
   const [isLoading, setIsLoading] = React.useState(true);
   const [updatingSku, setUpdatingSku] = React.useState<string | null>(null);
-  const [date, setDate] = React.useState<DateRange | undefined>(undefined);
+  const [date, setDate] = React.useState<DateRange | undefined>(() => ({ from: startOfMonth(new Date()), to: new Date() }));
   const { toast } = useToast();
 
   // Progress states
@@ -91,159 +92,17 @@ export default function ProducaoClient() {
   const [currentPage, setCurrentPage] = React.useState(1);
   const [rowsPerPage, setRowsPerPage] = React.useState(10);
 
-  // Real-time webhook state (pedidos)
-  const [lastWebhookUpdate, setLastWebhookUpdate] = React.useState<string | null>(null);
-  const [isWebhookConnected, setIsWebhookConnected] = React.useState(false);
-  const [webhookTotalReceived, setWebhookTotalReceived] = React.useState(0);
-
-  // Real-time webhook state (estoque)
-  const [lastStockWebhookUpdate, setLastStockWebhookUpdate] = React.useState<string | null>(null);
-  const [stockWebhookTotalReceived, setStockWebhookTotalReceived] = React.useState(0);
-
-  const fetchData = React.useCallback(async (currentDate: DateRange | undefined) => {
-    setIsLoading(true);
-    setLoadingProgress(0);
-    setLoadingStatus('Iniciando...');
-
-    try {
-      if (!currentDate?.from || !currentDate?.to) {
-        toast({
-          variant: "destructive",
-          title: "Período Inválido",
-          description: "Por favor, selecione uma data de início e fim.",
-        });
-        setDemand([]);
-        setIsLoading(false);
-        return;
-      }
-
-      // Etapas de progresso simulado durante o carregamento
-      const progressSteps = [
-        { progress: 10, status: 'Buscando pedidos do Firebase...' },
-        { progress: 30, status: 'Consultando estoque no Bling...' },
-        { progress: 50, status: 'Carregando dados de suprimentos...' },
-        { progress: 70, status: 'Processando demanda por SKU...' },
-        { progress: 85, status: 'Calculando métricas...' },
-      ];
-
-      let stepIndex = 0;
-      const progressInterval = setInterval(() => {
-        if (stepIndex < progressSteps.length) {
-          setLoadingProgress(progressSteps[stepIndex].progress);
-          setLoadingStatus(progressSteps[stepIndex].status);
-          stepIndex++;
-        }
-      }, 400);
-
-      // Buscar pedidos do Firebase + estoque do Bling
-      const data = await getProductionDemand({ from: currentDate.from, to: currentDate.to });
-
-      clearInterval(progressInterval);
-      setLoadingProgress(95);
-      setLoadingStatus('Finalizando...');
-
-      // Pequeno delay para mostrar a finalização
-      await new Promise(resolve => setTimeout(resolve, 200));
-
-      setLoadingProgress(100);
-      setLoadingStatus('Concluído!');
-      setDemand(data);
-
-    } catch (error) {
-      console.error('❌ [PRODUÇÃO] Erro ao buscar dados:', error);
-      setLoadingStatus('Erro ao carregar dados');
-      toast({
-        variant: "destructive",
-        title: "Erro ao Buscar Dados",
-        description: "Não foi possível carregar a demanda de produção.",
-      });
-    } finally {
-      setIsLoading(false);
-    }
-  }, [toast]);
-
+  const [metadata, setMetadata] = React.useState<OperationResult<ProductionDemand[]> | null>(null);
+  const [loadError, setLoadError] = React.useState<string | null>(null);
   React.useEffect(() => {
-    const today = new Date();
-    const initialDate = {
-        from: new Date(today.getFullYear(), today.getMonth(), 1),
-        to: today,
-    };
-    setDate(initialDate);
-    fetchData(initialDate);
-  }, [fetchData]);
-
-  // Real-time listener for webhook updates
-  React.useEffect(() => {
-    const webhookStatusRef = doc(db, 'appConfig', 'webhookStatus');
-    let lastKnownTotal = 0;
-
-    const unsubscribe = onSnapshot(
-      webhookStatusRef,
-      (snapshot) => {
-        setIsWebhookConnected(true);
-
-        if (snapshot.exists()) {
-          const data = snapshot.data();
-          const newTotal = data.totalReceived || 0;
-
-          setLastWebhookUpdate(data.lastUpdate || null);
-          setWebhookTotalReceived(newTotal);
-
-          // If we received a new webhook and we have a date range, refresh data
-          if (newTotal > lastKnownTotal && lastKnownTotal > 0 && date?.from && date?.to) {
-            toast({
-              title: "Novo Pedido Recebido!",
-              description: `Pedido ${data.lastOrderId} foi sincronizado via webhook.`,
-            });
-            fetchData(date);
-          }
-
-          lastKnownTotal = newTotal;
-        }
-      },
-      (error) => {
-        console.error('Erro no listener de pedidos:', error);
-        setIsWebhookConnected(false);
-      }
-    );
-
-    return () => unsubscribe();
-  }, [date, fetchData, toast]);
-
-  // Real-time listener for STOCK webhook updates
-  React.useEffect(() => {
-    const stockWebhookStatusRef = doc(db, 'appConfig', 'stockWebhookStatus');
-    let lastKnownStockTotal = 0;
-
-    const unsubscribe = onSnapshot(
-      stockWebhookStatusRef,
-      (snapshot) => {
-        if (snapshot.exists()) {
-          const data = snapshot.data();
-          const newTotal = data.totalReceived || 0;
-
-          setLastStockWebhookUpdate(data.lastUpdate || null);
-          setStockWebhookTotalReceived(newTotal);
-
-          // If we received a new stock webhook and we have a date range, refresh data
-          if (newTotal > lastKnownStockTotal && lastKnownStockTotal > 0 && date?.from && date?.to) {
-            toast({
-              title: "Estoque Atualizado!",
-              description: `${data.lastProcessed || 1} item(s) de estoque atualizado(s) via webhook.`,
-            });
-            fetchData(date);
-          }
-
-          lastKnownStockTotal = newTotal;
-        }
-      },
-      (error) => {
-        console.error('Erro no listener de estoque:', error);
-      }
-    );
-
-    return () => unsubscribe();
-  }, [date, fetchData, toast]);
+    setDemand([]); setMetadata(null);
+    if (!date?.from || !date?.to) { setIsLoading(false); return; }
+    setIsLoading(true); setLoadingProgress(0); setLoadingStatus('Consultando demanda autorizada...');
+    const params = new URLSearchParams({ from: format(date.from, 'yyyy-MM-dd'), to: format(date.to, 'yyyy-MM-dd') });
+    return subscribeOperation(() => fetchOperation<ProductionDemand[]>(`/api/operations/production-demand?${params}`), result => {
+      setDemand(result.data); setMetadata(result); setLoadError(null); setIsLoading(false); setLoadingProgress(100);
+    }, error => { setDemand([]); setMetadata(null); setLoadError(error.message); setIsLoading(false); });
+  }, [date]);
 
   // Memoized display demand - evita recálculos desnecessários
   const displayDemand = React.useMemo(() => {
@@ -256,7 +115,7 @@ export default function ProducaoClient() {
           const min = item.stockMin;
           const max = item.stockMax;
 
-          if (stock === undefined || min === undefined || max === undefined) return false;
+          if (stock == null || min === undefined || max === undefined) return false;
 
           // Regras de inclusão:
           // 1. Estoque atual < Estoque Mínimo
@@ -296,7 +155,7 @@ export default function ProducaoClient() {
         });
     }
 
-    return filtered;
+    return filtered.sort((a, b) => Number(a.stockLevel == null) - Number(b.stockLevel == null));
   }, [demand, productionQueueFilter]);
 
   // Reset página quando filtro muda
@@ -314,7 +173,7 @@ export default function ProducaoClient() {
         });
         return;
     }
-    fetchData(date);
+    notifyOperationsChanged();
   };
   
     const setDatePreset = (preset: 'today' | 'yesterday' | 'last7' | 'last30' | 'last3Months' | 'thisMonth' | 'lastMonth') => {
@@ -350,21 +209,24 @@ export default function ProducaoClient() {
   const handleUpdateStock = async (sku: string) => {
     setUpdatingSku(sku);
     try {
-        const stockData = await updateSingleSkuStock(sku);
+        const result = await fetchOperation<{ stockLevel: number | null; stockMin?: number; stockMax?: number }>('/api/operations/production-demand', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sku }) });
+        const stockData = result.data;
+        notifyOperationsChanged();
         if (stockData) {
             setDemand(prevDemand => 
                 prevDemand.map(item => 
                     item.sku === sku 
-                        ? { ...item, ...stockData } 
+                        ? { ...item, ...stockData, stockSource: result.source, stockAsOf: result.asOf }
                         : item
                 )
             );
             toast({
                 title: "Estoque Atualizado!",
-                description: `Dados de estoque para ${sku} foram atualizados.`,
+                description: `Consulta para ${sku}: ${result.source}. ${result.warnings.join(' ')}`,
             });
         }
     } catch (error: any) {
+        setDemand([]); setMetadata(null); setLoadError(error.message);
         toast({
             variant: "destructive",
             title: "Erro ao Atualizar",
@@ -383,7 +245,7 @@ export default function ProducaoClient() {
   }
 
   // Pagination Logic
-  const totalPages = Math.ceil(displayDemand.length / rowsPerPage);
+  const totalPages = Math.max(1, Math.ceil(displayDemand.length / rowsPerPage));
   const paginatedDemand = displayDemand.slice(
     (currentPage - 1) * rowsPerPage,
     currentPage * rowsPerPage
@@ -399,35 +261,9 @@ export default function ProducaoClient() {
                 <p className="text-muted-foreground">
                     Demanda de produtos baseada em vendas com Nota Fiscal emitida no período.
                 </p>
-                {/* Webhook status indicator */}
-                <div className="flex items-center gap-2 mt-2">
-                  {isWebhookConnected ? (
-                    <Badge variant="outline" className="flex items-center gap-1 text-green-600 border-green-300">
-                      <Wifi className="h-3 w-3" />
-                      <span>Real-time ativo</span>
-                    </Badge>
-                  ) : (
-                    <Badge variant="outline" className="flex items-center gap-1 text-muted-foreground">
-                      <WifiOff className="h-3 w-3" />
-                      <span>Conectando...</span>
-                    </Badge>
-                  )}
-                  {lastWebhookUpdate && (
-                    <span className="text-xs text-muted-foreground">
-                      Última atualização: {formatDistanceToNow(new Date(lastWebhookUpdate), { addSuffix: true, locale: ptBR })}
-                    </span>
-                  )}
-                  {webhookTotalReceived > 0 && (
-                    <Badge variant="secondary" className="text-xs">
-                      {webhookTotalReceived} pedidos
-                    </Badge>
-                  )}
-                  {stockWebhookTotalReceived > 0 && (
-                    <Badge variant="secondary" className="text-xs bg-blue-100 text-blue-700">
-                      {stockWebhookTotalReceived} estoques
-                    </Badge>
-                  )}
-                </div>
+                {loadError && <p role="alert" className="text-destructive">{loadError}</p>}
+                {metadata && <p className="text-xs text-muted-foreground">Fonte: {metadata.source} · Consulta: {new Date(metadata.asOf).toLocaleString('pt-BR')} {metadata.warnings.join(' ')}</p>}
+                <p className="text-xs text-muted-foreground">Atualização a cada 10 segundos enquanto a página está visível.</p>
             </div>
              <div className="flex flex-wrap items-center gap-2">
                 <Popover>
@@ -557,10 +393,10 @@ export default function ProducaoClient() {
                   {columnVisibility.description && <TableHead>Descrição do Produto</TableHead>}
                   {columnVisibility.stockMin && <TableHead className="text-right">Estoque Mínimo</TableHead>}
                   {columnVisibility.stockMax && <TableHead className="text-right">Estoque Máximo</TableHead>}
-                  {columnVisibility.stockLevel && <TableHead className="text-right">Estoque Atual (Bling)</TableHead>}
+                  {columnVisibility.stockLevel && <TableHead className="text-right">Estoque Atual</TableHead>}
                   {columnVisibility.orderCount && <TableHead className="text-right">Qtd. de Pedidos (com NF)</TableHead>}
                   {columnVisibility.totalQuantitySold && <TableHead className="text-right">Qtd. Total Vendida</TableHead>}
-                  {columnVisibility.weeklyAverage && <TableHead className="text-right">Média Semanal (Pedidos)</TableHead>}
+                  {columnVisibility.weeklyAverage && <TableHead className="text-right">Média Semanal (Unidades)</TableHead>}
                   {columnVisibility.corte && <TableHead className="text-right">Corte</TableHead>}
                   {columnVisibility.dobra && <TableHead className="text-right">Dobra</TableHead>}
                   {columnVisibility.actions && <TableHead className="text-center">Ações</TableHead>}
@@ -586,9 +422,9 @@ export default function ProducaoClient() {
                     <TableRow key={item.sku}>
                       {columnVisibility.sku && <TableCell className="font-medium">{item.sku}</TableCell>}
                       {columnVisibility.description && <TableCell>{item.description}</TableCell>}
-                      {columnVisibility.stockMin && <TableCell className="text-right font-bold">{item.stockMin ?? ''}</TableCell>}
-                      {columnVisibility.stockMax && <TableCell className="text-right font-bold">{item.stockMax ?? ''}</TableCell>}
-                      {columnVisibility.stockLevel && <TableCell className="text-right font-bold">{item.stockLevel ?? ''}</TableCell>}
+                      {columnVisibility.stockMin && <TableCell className="text-right font-bold">{item.stockMin ?? 'Não informado'}</TableCell>}
+                      {columnVisibility.stockMax && <TableCell className="text-right font-bold">{item.stockMax ?? 'Não informado'}</TableCell>}
+                      {columnVisibility.stockLevel && <TableCell className="text-right font-bold">{item.stockLevel ?? 'Não informado'}<span className="block text-xs font-normal text-muted-foreground">{item.stockSource}{item.stockAsOf ? ` · ${new Date(item.stockAsOf).toLocaleString('pt-BR')}` : ''}</span></TableCell>}
                       {columnVisibility.orderCount && <TableCell className="text-right font-bold">{item.orderCount}</TableCell>}
                       {columnVisibility.totalQuantitySold && <TableCell className="text-right font-bold">{item.totalQuantitySold}</TableCell>}
                       {columnVisibility.weeklyAverage && (
@@ -596,10 +432,10 @@ export default function ProducaoClient() {
                           <div className="flex items-center justify-end gap-1">
                             {item.weeklyAverage.toFixed(1)}
                             {/* Prioridade: Crítico (vermelho) > Alta demanda (verde) */}
-                            {(item.stockLevel ?? 0) < ((item.stockMin ?? 0) * 0.5) ? (
+                            {item.stockLevel == null ? null : item.stockMin != null && item.stockLevel < (item.stockMin * 0.5) ? (
                               // Crítico: estoque atual < 50% do mínimo
                               <TrendingDown className="h-4 w-4 text-red-500" />
-                            ) : item.weeklyAverage > (item.stockLevel ?? 0) ? (
+                            ) : item.weeklyAverage > item.stockLevel ? (
                               // Alta demanda: média semanal > estoque atual
                               <TrendingUp className="h-4 w-4 text-green-500" />
                             ) : null}
