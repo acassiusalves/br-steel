@@ -2,7 +2,8 @@
 'use client';
 
 import * as React from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { safeOAuthReturnPath } from '@/lib/oauth-return-path';
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -28,7 +29,8 @@ const Logo = () => (
 );
 
 
-export default function LoginPage() {
+function LoginForm() {
+  const next = safeOAuthReturnPath(useSearchParams().get('next'));
   const router = useRouter();
   const { toast } = useToast();
   const { login } = useAuth();
@@ -57,9 +59,9 @@ export default function LoginPage() {
 
         // Check for password change requirement
         if (result.mustChangePassword) {
-            router.push('/perfil');
+            router.push(next ? `/perfil?next=${encodeURIComponent(next)}` : '/perfil');
         } else {
-            router.push('/vendas?tab=dashboard');
+            router.push(next || '/vendas?tab=dashboard');
         }
 
     } catch (error: any) {
@@ -117,4 +119,8 @@ export default function LoginPage() {
       </Card>
     </div>
   );
+}
+
+export default function LoginPage() {
+  return <React.Suspense fallback={<div className="p-4">Carregando login…</div>}><LoginForm /></React.Suspense>;
 }

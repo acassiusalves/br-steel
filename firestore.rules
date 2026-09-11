@@ -29,6 +29,23 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // OAuth identities, intents and grants are accessible only through authenticated backend services.
+    match /mcpIdentities/{document=**} {
+      allow read, write: if false;
+    }
+
+    match /mcpIdentityBindings/{document=**} {
+      allow read, write: if false;
+    }
+
+    match /mcpConnections/{document=**} {
+      allow read, write: if false;
+    }
+
+    match /mcpAuthorizationIntents/{document=**} {
+      allow read, write: if false;
+    }
+
     match /appConfig/{document=**} {
       allow read, write: if legacyClientAccess();
     }

@@ -21,6 +21,7 @@ it.each(['Administrador', 'Vendedor', 'Operador'])('logs in and loads the curren
   const response = await login(request('login', 'POST', { email: 'SELLER@example.test', password }));
   expect(response.status).toBe(200);
   expect(response.headers.get('set-cookie')).toContain('HttpOnly');
+  expect(response.headers.get('set-cookie')).toContain('brsteel_oauth_session=;');
   const token = response.headers.get('set-cookie')!.split(';')[0].slice('brsteel_session='.length);
   const result = await me(request('me', 'GET', undefined, token));
   expect(result.status).toBe(200);
@@ -49,6 +50,7 @@ it('changes password, invalidates previous sessions and preserves identity/role'
   const saved = (await adminDb.collection('users').doc(actor.id).get()).data()!;
   expect(saved.role).toBe('Vendedor');
   expect(saved.name).toBe('New name');
+  expect(response.headers.get('set-cookie')).toContain('brsteel_oauth_session=;');
   const newCookie = response.headers.get('set-cookie')!.split(';')[0];
   const current = await me(new Request('http://localhost/api/auth/me', { headers: { cookie: newCookie } }));
   expect(current.status).toBe(200);
@@ -82,5 +84,7 @@ it('does not change profiles without a session and bounds password input', async
 });
 it('protects logout against cross-origin requests and clears the cookie for the application', async () => {
   expect((await logout(request('logout', 'POST', undefined, undefined, 'https://attacker.test'))).status).toBe(403);
-  expect((await logout(request('logout', 'POST'))).headers.get('set-cookie')).toContain('Max-Age=0');
+  const cookies = (await logout(request('logout', 'POST'))).headers.get('set-cookie');
+  expect(cookies).toContain('Max-Age=0');
+  expect(cookies).toContain('brsteel_oauth_session=;');
 });

@@ -1,3 +1,4 @@
+import { clearBridgeCookieHeader } from '@/server/oauth/cookies';
 import { NextResponse } from 'next/server';
 import {
   createSessionToken,
@@ -44,5 +45,6 @@ export async function POST(request: Request) {
   });
   response.headers.set('Set-Cookie', sessionCookieHeader(token));
   response.headers.set('Cache-Control', 'no-store');
+  response.headers.append('Set-Cookie', clearBridgeCookieHeader());
   return response;
 }

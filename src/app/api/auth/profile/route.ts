@@ -1,3 +1,4 @@
+import { clearBridgeCookieHeader } from '@/server/oauth/cookies';
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { adminDb } from '@/lib/firebase-admin';
@@ -55,5 +56,6 @@ export async function PATCH(request: Request) {
   const response = NextResponse.json({ ok: true, user: publicUser(result.user) });
   response.headers.set('Set-Cookie', sessionCookieHeader(createSessionToken(result.user, result.user.authVersion)));
   response.headers.set('Cache-Control', 'no-store');
+  if (newPassword) response.headers.append('Set-Cookie', clearBridgeCookieHeader());
   return response;
 }

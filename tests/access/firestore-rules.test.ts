@@ -14,6 +14,10 @@ beforeAll(async () => {
 afterAll(async () => { await env?.cleanup(); });
 it.each(['anonymous', 'firebase-admin-claim'])('protects users and permissions from the %s client', async mode => {
   const db = mode === 'anonymous' ? env.unauthenticatedContext().firestore() : env.authenticatedContext('user-a', { role: 'Administrador' }).firestore();
+  for (const collection of ['mcpIdentities', 'mcpIdentityBindings', 'mcpConnections', 'mcpAuthorizationIntents']) {
+    await assertFails(getDoc(doc(db, `${collection}/any`)));
+    await assertFails(setDoc(doc(db, `${collection}/injected`), { status: 'active', userId: 'user-a' }));
+  }
   await assertFails(getDoc(doc(db, 'users/user-a')));
   await assertFails(setDoc(doc(db, 'users/injected'), { role: 'Administrador' }));
   await assertFails(getDoc(doc(db, 'appSettings/general')));

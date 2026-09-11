@@ -11,10 +11,14 @@ import { Loader2, AlertCircle } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
 import { useAuth } from '@/contexts/AuthContext';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { safeOAuthReturnPath } from '@/lib/oauth-return-path';
 
 export default function PerfilPageClient() {
     // Usa dados do AuthContext - sem fetch adicional
-    const { user, updateUser } = useAuth();
+    const { user, updateUser, refreshPermissions } = useAuth();
+    const router = useRouter();
+    const next = safeOAuthReturnPath(useSearchParams().get('next'));
     const [isSaving, setIsSaving] = React.useState(false);
     const [mustChangePassword, setMustChangePassword] = React.useState(user?.mustChangePassword || false);
     const { toast } = useToast();
@@ -58,6 +62,10 @@ export default function PerfilPageClient() {
             // Atualiza o contexto global
             updateUser(data.user || { name: newName, mustChangePassword: false });
             setMustChangePassword(!!data.user?.mustChangePassword);
+            if (newPassword) {
+                await refreshPermissions();
+                if (next) router.replace(next);
+            }
 
 
             toast({
