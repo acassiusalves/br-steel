@@ -102,7 +102,7 @@ export default function PerfilPageClient() {
                             <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
                                 <div className="space-y-2">
                                     <Label htmlFor="name">Nome</Label>
-                                    <Input id="name" name="name" defaultValue={user?.name} required />
+                                    <Input id="name" name="name" maxLength={120} defaultValue={user?.name} required />
                                 </div>
                                 <div className="space-y-2">
                                     <Label htmlFor="email">E-mail</Label>
@@ -120,24 +120,24 @@ export default function PerfilPageClient() {
                         <CardHeader>
                             <CardTitle>Alterar Senha</CardTitle>
                             <CardDescription>
-                               Para sua segurança, recomendamos o uso de uma senha forte.
+                               Use uma senha individual com pelo menos 12 caracteres.
                             </CardDescription>
                         </CardHeader>
                         <CardContent className="space-y-4">
                              {!mustChangePassword && (
                                 <div className="space-y-2">
                                     <Label htmlFor="current-password">Senha Atual</Label>
-                                    <Input id="current-password" name="current-password" type="password" />
+                                    <Input id="current-password" name="current-password" type="password" autoComplete="current-password" maxLength={1024} />
                                 </div>
                              )}
                              <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
                                 <div className="space-y-2">
                                     <Label htmlFor="new-password">Nova Senha</Label>
-                                    <Input id="new-password" name="new-password" type="password" required={mustChangePassword} />
+                                    <Input id="new-password" name="new-password" type="password" autoComplete="new-password" minLength={12} maxLength={1024} required={mustChangePassword} />
                                 </div>
                                 <div className="space-y-2">
                                     <Label htmlFor="confirm-password">Confirmar Nova Senha</Label>
-                                    <Input id="confirm-password" name="confirm-password" type="password" required={mustChangePassword} />
+                                    <Input id="confirm-password" name="confirm-password" type="password" autoComplete="new-password" minLength={12} maxLength={1024} required={mustChangePassword} />
                                 </div>
                             </div>
                         </CardContent>

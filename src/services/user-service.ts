@@ -1,118 +1,83 @@
+'use server';
 
-"use server";
-
-import { db } from '@/lib/firebase';
-import { collection, getDocs, doc, query, addDoc, deleteDoc, orderBy, Timestamp, updateDoc, writeBatch } from 'firebase/firestore';
+import crypto from 'node:crypto';
+import { z } from 'zod';
+import { adminDb } from '@/lib/firebase-admin';
+import { requireActionPage, requireAdministrator } from '@/server/access/current-user';
+import { hashPassword } from '@/server/access/passwords';
+import { normalizeUserEmail, publicUser, storedUserFromDoc, validDocumentId } from '@/server/access/users';
 import type { User } from '@/types/user';
-import {
-  DEFAULT_INITIAL_PASSWORD,
-  findUserByEmail,
-  hashPassword,
-  normalizeUserEmail,
-} from '@/lib/server-auth';
 
+const roleSchema = z.enum(['Administrador', 'Vendedor', 'Operador']);
+const newUserSchema = z.object({
+  name: z.string().trim().min(1).max(120),
+  email: z.string().trim().toLowerCase().email().max(254),
+  role: roleSchema,
+}).strict();
 
-// User Management Actions
 export async function getUsers(): Promise<User[]> {
-    const usersCollection = collection(db, 'users');
-    const q = query(usersCollection, orderBy('createdAt', 'desc'));
-    const snapshot = await getDocs(q);
-    return snapshot.docs.map(doc => {
-        const data = doc.data();
-        // Handle both Firestore Timestamp and ISO string
-        const createdAt = data.createdAt;
-        let isoString: string | undefined;
-        if (createdAt instanceof Timestamp) {
-            isoString = createdAt.toDate().toISOString();
-        } else if (typeof createdAt === 'string') {
-            isoString = createdAt;
-        }
-
-        return {
-            id: doc.id,
-            ...data,
-            createdAt: isoString,
-        } as User;
+  await requireAdministrator();
+  const snapshot = await adminDb.collection('users').get();
+  return snapshot.docs.map(d => publicUser(storedUserFromDoc(d.id, d.data())))
+    .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+}
+/** Minimal directory for the Kanban, separate from user administration. */
+export async function getAssignableUsers(): Promise<Array<Pick<User, 'id' | 'name' | 'role'>>> {
+  await requireActionPage('/producao/kanban');
+  const snapshot = await adminDb.collection('users').get();
+  return snapshot.docs.map(d => storedUserFromDoc(d.id, d.data()))
+    .filter(u => u.active !== false && ['Administrador', 'Operador'].includes(u.role))
+    .map(({ id, name, role }) => ({ id, name, role }))
+    .sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'));
+}
+export async function addUser(input: Pick<User, 'name' | 'email' | 'role'>): Promise<{ id: string; temporaryPassword: string }> {
+  await requireAdministrator();
+  const user = newUserSchema.parse(input);
+  const temporaryPassword = crypto.randomBytes(18).toString('base64url');
+  const { hash, salt } = hashPassword(temporaryPassword);
+  const users = adminDb.collection('users');
+  const ref = users.doc();
+  await adminDb.runTransaction(async tx => {
+    // Include legacy mixed-case records in the uniqueness check.
+    const existing = await tx.get(users);
+    if (existing.docs.some(d => normalizeUserEmail(String(d.data().email || d.data().normalizedEmail || d.id)) === user.email)) {
+      throw new Error('Já existe um usuário com este e-mail.');
+    }
+    tx.create(ref, {
+      ...user, normalizedEmail: user.email, passwordHash: hash, passwordSalt: salt,
+      createdAt: new Date().toISOString(), mustChangePassword: true, active: true, authVersion: 0,
     });
-}
-
-
-export async function addUser(userData: Omit<User, 'id' | 'createdAt'>): Promise<{ id: string }> {
-  const usersCollection = collection(db, 'users');
-  const normalizedEmail = normalizeUserEmail(userData.email);
-  if (!normalizedEmail) {
-    throw new Error('E-mail é obrigatório.');
-  }
-
-  const existing = await findUserByEmail(normalizedEmail);
-  if (existing) {
-    throw new Error(`O e-mail "${normalizedEmail}" já está em uso.`);
-  }
-
-  const { hash, salt } = hashPassword(DEFAULT_INITIAL_PASSWORD);
-  const docRef = await addDoc(usersCollection, {
-    ...userData,
-    email: normalizedEmail,
-    normalizedEmail,
-    passwordHash: hash,
-    passwordSalt: salt,
-    createdAt: new Date().toISOString(), // Use ISO string directly
-    mustChangePassword: true, // Force password change on first login
   });
-  return { id: docRef.id };
+  return { id: ref.id, temporaryPassword };
 }
-
-export async function deleteUser(userId: string): Promise<void> {
-  const userDoc = doc(db, 'users', userId);
-  await deleteDoc(userDoc);
+async function changeUser(id: string, change: { role?: string; active?: boolean; remove?: boolean }) {
+  await requireAdministrator();
+  if (!validDocumentId(id)) throw new Error('Usuário inválido.');
+  const users = adminDb.collection('users');
+  await adminDb.runTransaction(async tx => {
+    const snapshot = await tx.get(users);
+    const target = snapshot.docs.find(d => d.id === id);
+    if (!target) throw new Error('Usuário não encontrado.');
+    const current = storedUserFromDoc(target.id, target.data());
+    const removesAdmin = change.remove || change.active === false || (change.role !== undefined && change.role !== 'Administrador');
+    if (current.role === 'Administrador' && current.active !== false && removesAdmin) {
+      const hasOtherAdmin = snapshot.docs.some(d => d.id !== id && d.data().role === 'Administrador' && d.data().active !== false);
+      if (!hasOtherAdmin) throw new Error('Mantenha ao menos um administrador ativo.');
+    }
+    if (change.remove) { tx.delete(target.ref); return; }
+    const update: { updatedAt: string; role?: string; active?: boolean; authVersion?: number } = { updatedAt: new Date().toISOString() };
+    if (change.role !== undefined) update.role = change.role;
+    if (change.active !== undefined) {
+      update.active = change.active;
+      if (change.active !== (current.active !== false)) update.authVersion = current.authVersion + 1;
+    }
+    tx.update(target.ref, update);
+  });
 }
-
+export async function deleteUser(userId: string): Promise<void> { await changeUser(userId, { remove: true }); }
 export async function updateUserRole(userId: string, role: string): Promise<void> {
-    const userDocRef = doc(db, 'users', userId);
-    try {
-        await updateDoc(userDocRef, {
-            role: role
-        });
-    } catch(error) {
-        console.error(`Erro ao atualizar a função do usuário ${userId}:`, error);
-        throw new Error("Não foi possível atualizar a função do usuário.");
-    }
+  await changeUser(userId, { role: roleSchema.parse(role) });
 }
-
-
-// One-time function to seed initial users
-export async function seedUsers() {
-    const usersToSeed = [
-        { name: 'Admin', email: 'admin@brsteel.com', role: 'Administrador' },
-        { name: 'Usuário Vendas', email: 'vendas@brsteel.com', role: 'Vendedor' },
-        { name: 'Usuário Operador', email: 'operador@brsteel.com', role: 'Operador' },
-    ];
-
-    const usersCollection = collection(db, 'users');
-    const snapshot = await getDocs(query(usersCollection));
-    
-    if (snapshot.empty) {
-        console.log("Populando coleção de usuários...");
-        const batch = writeBatch(db);
-        usersToSeed.forEach(user => {
-            const normalizedEmail = normalizeUserEmail(user.email);
-            const { hash, salt } = hashPassword(DEFAULT_INITIAL_PASSWORD);
-            const docRef = doc(db, 'users', normalizedEmail);
-            batch.set(docRef, { 
-                ...user, 
-                email: normalizedEmail,
-                normalizedEmail,
-                passwordHash: hash,
-                passwordSalt: salt,
-                createdAt: new Date().toISOString(),
-                mustChangePassword: user.role !== 'Administrador'
-            });
-        });
-        await batch.commit();
-        console.log("Usuários iniciais cadastrados com sucesso.");
-        return { seeded: usersToSeed.length };
-    } else {
-        console.log("Coleção de usuários já possui dados. Não há necessidade de popular.");
-        return { seeded: 0 };
-    }
+export async function setUserActive(userId: string, active: boolean): Promise<void> {
+  await changeUser(userId, { active: z.boolean().parse(active) });
 }

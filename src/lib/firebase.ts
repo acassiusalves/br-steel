@@ -1,6 +1,6 @@
 // Import the functions you need from the SDKs you need
 import { initializeApp, getApps, getApp } from "firebase/app";
-import { getFirestore } from "firebase/firestore";
+import { getFirestore, initializeFirestore } from "firebase/firestore";
 // TODO: Add SDKs for Firebase products that you want to use
 // https://firebase.google.com/docs/web/setup#available-libraries
 
@@ -16,7 +16,13 @@ const firebaseConfig = {
 };
 
 // Initialize Firebase
-const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
-const db = getFirestore(app);
+const emulatorHost = process.env.NEXT_PUBLIC_FIRESTORE_EMULATOR_HOST;
+const emulatorProject = process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID;
+if (emulatorHost && (!/^(127\.0\.0\.1|localhost):\d+$/.test(emulatorHost) || !emulatorProject?.startsWith('demo-'))) {
+  throw new Error('Local Firestore tests require a loopback emulator and a demo- project.');
+}
+const config = emulatorHost ? { projectId: emulatorProject, apiKey: 'demo-key', appId: 'demo-brsteel' } : firebaseConfig;
+const app = !getApps().length ? initializeApp(config) : getApp();
+const db = emulatorHost ? initializeFirestore(app, { host: emulatorHost, ssl: false }) : getFirestore(app);
 
 export { app, db };

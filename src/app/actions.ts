@@ -3,7 +3,6 @@
 
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import { cookies } from 'next/headers';
 import { format, parseISO, startOfMonth, endOfMonth, eachMonthOfInterval, getMonth, getYear, differenceInDays } from 'date-fns';
 import { collection, getDocs, doc, writeBatch, query, where, setDoc, getDoc, deleteField, addDoc, deleteDoc, orderBy, serverTimestamp, Timestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
@@ -17,7 +16,7 @@ import {
 } from '@/services/bling-invoice-service';
 import type { SaleOrder } from '@/types/sale-order';
 import type { Supply } from '@/types/supply';
-import { seedUsers as seedUsersService, getUsers as getUsersService, addUser as addUserService, deleteUser as deleteUserService } from '@/services/user-service';
+import { getUsers as getUsersService, addUser as addUserService, deleteUser as deleteUserService } from '@/services/user-service';
 import {
     searchMlDocumentation as _searchMlDocumentation,
     getMlDocumentationPage as _getMlDocumentationPage,
@@ -52,10 +51,9 @@ import {
     type MlAdsSyncReport,
 } from '@/services/ml-ads-analytics-cache';
 import {
-    AUTH_COOKIE_NAME,
-    verifySessionToken,
     type SessionUser,
 } from '@/lib/server-auth';
+import { requireActionPage } from '@/server/access/current-user';
 import { fetchBrSteelProductsSheet } from '@/services/brsteel-products-sheet';
 import {
     approveSafeBrSteelSkuAssociations,
@@ -83,12 +81,7 @@ const MAX_INVOICE_DETAILS_PER_SYNC = 60;
 const MAX_INVOICE_XML_PER_SYNC = 20;
 
 async function getCurrentServerActionUser(): Promise<SessionUser> {
-    const cookieStore = await cookies();
-    const session = verifySessionToken(cookieStore.get(AUTH_COOKIE_NAME)?.value);
-    if (!session?.user) {
-        throw new Error('Sessão expirada. Faça login novamente.');
-    }
-    return session.user;
+    return requireActionPage('/anuncios-mercado-livre');
 }
 
 // Gemini / IA
@@ -2201,7 +2194,6 @@ export async function createCatalogListingAction(prevState: any, formData: FormD
 export const getUsers = getUsersService;
 export const addUser = addUserService;
 export const deleteUser = deleteUserService;
-export const seedUsers = seedUsersService;
 
 
 // =========================================================================

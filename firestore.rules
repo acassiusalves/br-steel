@@ -20,16 +20,13 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
-    match /users/{userId} {
-      allow read, write: if legacyClientAccess();
-
-      match /{document=**} {
-        allow read, write: if legacyClientAccess();
-      }
+    // Identidade e permissões: somente backend autenticado com Admin SDK.
+    match /users/{document=**} {
+      allow read, write: if false;
     }
 
     match /appSettings/{document=**} {
-      allow read, write: if legacyClientAccess();
+      allow read, write: if false;
     }
 
     match /appConfig/{document=**} {

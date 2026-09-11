@@ -83,7 +83,11 @@ const storageBucket =
   "marketflow-9h4tg.firebasestorage.app";
 
 if (getApps().length === 0) {
-  const credential = getCredential();
+  const emulatorHost = process.env.FIRESTORE_EMULATOR_HOST;
+  if (emulatorHost && (!/^(127\.0\.0\.1|localhost):\d+$/.test(emulatorHost) || !projectId.startsWith('demo-'))) {
+    throw new Error('Local Firestore tests require a loopback emulator and a demo- project.');
+  }
+  const credential = emulatorHost ? undefined : getCredential();
   if (credential) {
     app = initializeApp({
       credential,

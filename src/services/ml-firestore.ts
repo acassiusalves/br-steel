@@ -1,5 +1,6 @@
 
 // @ts-nocheck
+import { loadPricingSettings } from '@/services/app-settings-service';
 import { db } from '@/lib/firebase';
 import {
   collection,
@@ -93,12 +94,7 @@ export const loadAllFeedEntries = async (): Promise<FeedEntry[]> => {
 };
 
 export const loadAppSettings = async (): Promise<AppSettings | null> => {
-  const docRef = doc(db, 'appSettings', 'general');
-  const docSnap = await getDoc(docRef);
-  if (docSnap.exists()) {
-    return docSnap.data() as AppSettings;
-  }
-  return null;
+  return loadPricingSettings();
 };
 
 export const loadAllFeedEntriesWithGordura = async (): Promise<{ feedEntries: FeedEntry[], gordura: number }> => {
