@@ -7,7 +7,8 @@ Situação: código de leitura validado localmente no commit `9eb8144`; configur
 - Vercel: projeto `br-steel`, equipe `team_AnjWj22RX6qtosCjGldryHxb`, ligado ao GitHub `acassiusalves/br-steel`. Domínio principal `br-steel.vercel.app`. Não há projeto identificado como homologação BR Steel na equipe consultada.
 - Preview do projeto atual compartilha variáveis de Bling e Firebase com produção. Não será utilizado como ambiente isolado.
 - Firebase: dois projetos chamados MarketFlow foram encontrados; nenhum identificado como homologação do MCP. Não assumir que o segundo é descartável ou reutilizável.
-- Supabase conectado: organização **Lunneta Ads**, com projetos de outro sistema. A organização para o novo projeto BR Steel precisa ser indicada pelo usuário. O conector exige consultar o custo e confirmar seu entendimento antes de criar um projeto.
+- Supabase definido pelo usuário: projeto existente `mlumbvxpaqfzpdjnvzxc`, URL `https://mlumbvxpaqfzpdjnvzxc.supabase.co`. Não é necessário criar outro projeto. A conexão administrativa atual do Codex retornou falta de permissão; a lista de projetos retornou vazia. Organização, migrations e uso existente ainda não puderam ser inspecionados. Foi solicitada a reconexão do Supabase com uma conta autorizada.
+- Inspeção pública desse Supabase: OpenID discovery responde 200 com issuer `https://mlumbvxpaqfzpdjnvzxc.supabase.co/auth/v1`; JWKS responde 200 com chave EC/ES256. O discovery OAuth responde 404 com `feature_disabled` / `OAuth server is disabled`. Isso confirma que o serviço está acessível, mas o servidor OAuth ainda precisa ser habilitado. Não houve alteração remota.
 
 ## Recursos propostos
 
@@ -15,10 +16,10 @@ Situação: código de leitura validado localmente no commit `9eb8144`; configur
 | --- | --- |
 | Vercel | Novo projeto `br-steel-mcp-staging` na equipe já usada pelo BR Steel, Node 22.x, domínio próprio gerado pela Vercel |
 | Firestore | Novo projeto `brsteel-mcp-staging` ou variante com sufixo disponível, sem dados reais; app web e conta de serviço pertencentes a esse projeto |
-| Supabase | Novo projeto `brsteel-mcp-oauth-staging`, região São Paulo, organização a indicar; somente identidades OAuth de teste |
+| Supabase | Projeto existente indicado: `mlumbvxpaqfzpdjnvzxc`; acesso administrativo e inspeção do uso atual pendentes; usar identidades OAuth de teste |
 | Usuários | Três usuários sintéticos com papéis Administrador, Vendedor e Operador e senhas individuais; lista explícita de IDs no piloto |
 
-Os nomes são propostas, não recursos criados. Confirmar disponibilidade e custos nas contas escolhidas. O projeto Vercel separado pode usar seu domínio canônico de deployment `production`; isso é o ambiente de homologação do BR Steel e não altera o projeto Vercel `br-steel`. Confirmar que os caminhos MCP/OAuth são alcançáveis pela infraestrutura Claude. Não remover a proteção de previews do projeto atual. [Deploy pela CLI Vercel](https://vercel.com/docs/cli/deploy).
+Os nomes Vercel e Firebase são propostas, não recursos criados; o Supabase já foi escolhido pelo usuário. Confirmar disponibilidade dos novos recursos nas contas escolhidas. O projeto Vercel separado pode usar seu domínio canônico de deployment `production`; isso é o ambiente de homologação do BR Steel e não altera o projeto Vercel `br-steel`. Confirmar que os caminhos MCP/OAuth são alcançáveis pela infraestrutura Claude. Não remover a proteção de previews do projeto atual. [Deploy pela CLI Vercel](https://vercel.com/docs/cli/deploy).
 
 ## Isolamento preparado no código
 
@@ -28,10 +29,10 @@ O navegador usava configuração Firebase fixa de produção fora do emulador. A
 
 O build usa exclusivamente as variáveis configuradas no projeto novo. Não copiar `.env.local`, configurações privadas do emulador, variáveis do preview atual, `service-account.json` de produção ou o vínculo `.vercel` do checkout principal.
 
-## Sequência de execução após definição da organização
+## Sequência de execução após restabelecer acesso ao Supabase
 
-1. Consultar o custo do projeto Supabase na organização indicada e obter a confirmação exigida pelo conector antes de criá-lo.
-2. Criar os projetos dedicados, registrar o app web Firebase e provisionar Firestore. Criar credencial de servidor restrita ao projeto de teste e guardar diretamente no ambiente privado. Não versionar chave privada.
+1. Confirmar acesso administrativo ao projeto Supabase `mlumbvxpaqfzpdjnvzxc`; inspecionar usuários, clientes OAuth, configuração Auth e migrations existentes antes de modificar opções globais. Se já atender outro sistema, avaliar as dependências antes de aplicar a configuração do MCP. A consulta de custo para criação de outro Supabase deixou de ser necessária.
+2. Criar os projetos dedicados Vercel e Firebase, registrar o app web Firebase e provisionar Firestore. Criar credencial de servidor restrita ao projeto de teste e guardar diretamente no ambiente privado. Não versionar chave privada.
 3. Publicar as regras e índices Firestore usando explicitamente o ID de homologação; o `.firebaserc` existente ainda aponta produção e não deve ser usado implicitamente. Verificar as políticas TTL de auditoria/contadores.
 4. Configurar Supabase Auth com cadastro público/anônimo desligado, OAuth server e DCR, consentimento em `/oauth/consent`, tokens de 15 minutos e assinatura assimétrica. Aplicar o hook de audiência usando a URL pública definitiva. A migration local atual contém `http://localhost:9003/api/mcp`: não copiar essa audiência para a nuvem. Registrar a adaptação como migration de homologação e verificar issuer/JWKS/audience com token emitido nesse projeto.
 5. Preencher as variáveis do template no projeto Vercel dedicado, incluindo os IDs esperados de cada recurso, origem canônica e IDs sintéticos permitidos. Usar segredo de sessão exclusivo. Manter `MCP_WRITES_ENABLED=false`.
