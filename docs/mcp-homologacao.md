@@ -74,7 +74,7 @@ A primeira publicação `dpl_4L77G651mapH22RsvP5WZ3wyNdDa` ficou READY e o domí
 - Auditoria de 11 chamadas sem credenciais ou payload privado; limpeza completa e sem requisições ambíguas. Conferência posterior do Firestore encontrou zero registros nas coleções de usuário, vínculos, conexões, intents, auditoria, limites, vendas e estoque, além de zero configurações/contas/eventos comerciais.
 - Data API recusou o schema private com HTTP 406/PGRST106; o dashboard mostrava zero funções expostas.
 
-Nenhum usuário de teste permanente foi criado. O aceite no Claude, o provisionamento de um usuário para esse aceite e a retenção TTL continuam pendentes. A escrita continua desabilitada.
+Na conclusão da prova automatizada, nenhum usuário foi mantido. Um acesso foi provisionado posteriormente para o aceite manual, conforme o registro abaixo. O aceite no Claude e a retenção TTL continuam pendentes; a escrita permanece desabilitada.
 
 ## Publicação final sem agendamentos
 
@@ -83,3 +83,13 @@ A republicação `dpl_9qZAbDyUqoxERyFrS7nRCGvnbpsd` ficou READY no mesmo domíni
 O teste de regressão de configuração efetiva passou junto aos cinco testes de homologação. O typecheck direcionado passou e o projeto manteve os 25 diagnósticos anteriores. A configuração temporária da publicação não foi incorporada ao `vercel.json` principal.
 
 A prova completa foi repetida na publicação final em `2026-09-11T22:18:42.095Z`, passou em 71 segundos e encerrou com limpeza completa, nenhuma ambiguidade e saída zero. Ver [evidência da versão final](evidence/mcp-staging-https-final-2026-09-11.json). O aceite no Claude permanece separado e pendente.
+
+## Acesso manual preparado em 11/09/2026
+
+O usuário relatou falha de credenciais no retorno do Claude. A consulta ao Firestore confirmou zero usuários; o único ID da lista permitida já havia sido removido ao concluir a prova automatizada. O login usa a coleção users da homologação, portanto credenciais do BR Steel principal ou do próprio Claude não poderiam autenticar nesse ambiente.
+
+Foi criado o acesso `piloto-mcp@example.invalid`, perfil Administrador apenas nesta base de teste, usando o ID reservado que já constava na lista permitida do deployment. Não houve necessidade de alterar variáveis, publicar novamente, copiar usuários/senhas da produção ou modificar o OAuth. A senha inicial foi gerada aleatoriamente, armazenada no banco somente como scrypt com salt individual e entregue em arquivo local privado de modo 600, ignorado pelo Git e pelo upload Vercel.
+
+A validação real confirmou login HTTP 401 antes do cadastro e 200 depois; senha incorreta continua produzindo 401. A conta exige troca de senha no primeiro acesso e o MCP recusou autorização com 403 enquanto essa troca está pendente. Ver [evidência de acesso](evidence/mcp-pilot-access-2026-09-11.json).
+
+Este usuário foi **mantido para o teste do usuário**. Não executar a prova automatizada com esse mesmo ID enquanto o aceite estiver em andamento: o preflight recusa a colisão e o cleanup só pode remover objetos com o marcador próprio da execução. A ausência de `stagingProofRunId` nesta conta distingue o piloto da fixture descartável. Ao encerrar o piloto, revogar as conexões, desativar a conta e fazer a limpeza explícita dos seus registros. O conector dentro do Claude ainda não foi validado pela tarefa principal.
