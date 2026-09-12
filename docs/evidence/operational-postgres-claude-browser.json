@@ -1,0 +1,121 @@
+{
+  "date": "2026-09-12",
+  "status": "passed_and_closed",
+  "browser": "Chrome",
+  "client": "Claude",
+  "connector": "BR Stell",
+  "endpoint": "https://br-steel-mcp-staging.vercel.app/api/mcp",
+  "oauth": {
+    "existingConnectionAccepted": true,
+    "freshInteractiveAuthorizationTested": false,
+    "permissionsChanged": false
+  },
+  "copy": {
+    "project": "mlumbvxpaqfzpdjnvzxc",
+    "sourceProject": "marketflow-9h4tg",
+    "snapshotHash": "8a783d1454afcb13a045545de0dbdf7d2d4af000998c05bae5d09fe4f9faeae9",
+    "capturedAt": "2026-09-12T17:41:15.802Z",
+    "completedAt": "2026-09-12T17:54:50.432Z"
+  },
+  "calls": [
+    {
+      "tool": "consultar_meu_acesso",
+      "source": "firestore",
+      "result": "success",
+      "durationMs": 925,
+      "createdAt": "2026-09-12T21:17:43.773Z",
+      "role": "Administrador",
+      "readCapabilities": 4
+    },
+    {
+      "tool": "resumir_vendas",
+      "input": {
+        "from": "2026-09-01",
+        "to": "2026-09-12"
+      },
+      "source": "postgres",
+      "result": "success",
+      "durationMs": 4367,
+      "createdAt": "2026-09-12T21:26:50.892Z",
+      "totalsComparedWithSql": true,
+      "nextCursor": null,
+      "warnings": 1
+    },
+    {
+      "tool": "consultar_estoque_produtos",
+      "input": {
+        "limit": 5
+      },
+      "source": "postgres",
+      "result": "success",
+      "durationMs": 1445,
+      "createdAt": "2026-09-12T21:27:01.259Z",
+      "rows": 5,
+      "nextCursor": "5",
+      "warnings": 3
+    },
+    {
+      "tool": "consultar_demanda_producao",
+      "input": {
+        "from": "2026-09-01",
+        "to": "2026-09-12",
+        "limit": 5
+      },
+      "source": "postgres",
+      "result": "success",
+      "durationMs": 4144,
+      "createdAt": "2026-09-12T21:27:21.946Z",
+      "rows": 5,
+      "nextCursor": "5",
+      "warnings": 4
+    }
+  ],
+  "verification": {
+    "originalToolResponsesInspected": true,
+    "perToolApproval": "allow_once",
+    "businessMetadataMatched": true,
+    "missingStockPreservedAsNull": true,
+    "productionProjectionWithoutFinancialOrCustomerFields": true,
+    "writesExecuted": 0,
+    "otherConnectorsUsed": 0,
+    "paginationContinuationExecuted": false
+  },
+  "deployment": {
+    "redeployedFrom": "dpl_GpYYyAWxWYW7NKun2roNMZt2AxTz",
+    "tested": "dpl_5J8Es9WDfVh56ZjW38KgZJsvH5t8",
+    "stagingRestored": "dpl_3K3Xt92mbCFYSdNUsiPBRswE5kqk",
+    "productionUnchanged": "dpl_5j2BBDFg73UAnkiYywsEEL3UxTuj",
+    "environmentVariablesRestored": 6,
+    "pilotEnvironmentVariablesRemaining": 0,
+    "newSourceUpload": false
+  },
+  "closedDatabaseRoles": [
+    {
+      "rolname": "brsteel_backup_probe",
+      "rolcanlogin": false,
+      "password_cleared": true,
+      "memberships": 0,
+      "sessions": 0
+    },
+    {
+      "rolname": "brsteel_pilot_reader",
+      "rolcanlogin": false,
+      "password_cleared": true,
+      "memberships": 0,
+      "sessions": 0
+    },
+    {
+      "rolname": "brsteel_pilot_importer",
+      "rolcanlogin": false,
+      "password_cleared": true,
+      "memberships": 0,
+      "sessions": 0
+    }
+  ],
+  "limitations": [
+    "Existing authenticated connection only; fresh OAuth consent navigation remains unverified in this browser run.",
+    "One account and one page per paginated tool; no concurrency or billed egress measurement.",
+    "Snapshot is not continuously synchronized; stock observation times may be older than its capture.",
+    "Production remains on Firestore; writes are disabled."
+  ]
+}
