@@ -15,6 +15,7 @@
     "test:oauth-provider": "node scripts/oauth-provider-verify.mjs",
     "test:oauth-app": "node --env-file=.env.local --import tsx scripts/oauth-app-verify.mjs",
     "test:operations": "vitest run tests/operations",
+    "test:postgres": "node scripts/operational-postgres-local.mjs",
     "test:mcp": "vitest run tests/mcp",
     "test:mcp-app": "VERIFY_MCP=true node --env-file=.env.local --import tsx scripts/oauth-app-verify.mjs",
     "verify:mcp-staging": "node --import tsx scripts/mcp-staging-check.ts"
@@ -62,6 +63,7 @@
     "lucide-react": "^0.475.0",
     "next": "^15.5.9",
     "patch-package": "^8.0.0",
+    "pg": "8.23.0",
     "react": "^18.3.1",
     "react-day-picker": "^8.10.1",
     "react-dom": "^18.3.1",
@@ -76,15 +78,16 @@
   "devDependencies": {
     "@firebase/rules-unit-testing": "3.0.4",
     "@types/node": "22.20.2",
+    "@types/pg": "8.23.1",
     "@types/react": "^18",
     "@types/react-dom": "^18",
     "@types/xlsx": "^0.0.36",
     "genkit-cli": "^1.14.1",
     "postcss": "^8",
     "tailwindcss": "^3.4.1",
+    "tsx": "4.20.4",
     "typescript": "^5",
-    "vitest": "5.0.0",
-    "tsx": "4.20.4"
+    "vitest": "5.0.0"
   },
   "engines": {
     "node": "22.x"
