@@ -1,0 +1,67 @@
+{
+  "checkedAt": "2026-09-12T15:41:02.343790+00:00",
+  "baseRevision": "cb6399cf1fe9d7906299604b3d03fc26ad6729c1",
+  "branch": "codex/operational-postgres-phase1",
+  "worktree": "/private/tmp/br-steel-postgres-phase1",
+  "productionChanged": false,
+  "postgresEnabled": false,
+  "remotePush": false,
+  "dependencies": "npm ci, lockfile unchanged",
+  "characterization": {
+    "files": 2,
+    "tests": 8,
+    "passed": true
+  },
+  "repositoryRed": {
+    "reason": "Repository module did not exist yet",
+    "exitCode": 1
+  },
+  "focusedGreen": {
+    "files": 3,
+    "tests": 11,
+    "passed": true
+  },
+  "fullTests": {
+    "files": 29,
+    "tests": 169,
+    "exitCode": 0
+  },
+  "typecheck": {
+    "baselineErrors": 25,
+    "currentErrors": 25,
+    "identicalDiagnostics": true,
+    "exitCode": 2
+  },
+  "build": {
+    "exitCode": 0,
+    "demoProject": "demo-brsteel-auth",
+    "realCredentialsLoaded": false,
+    "warnings": [
+      "OpenTelemetry dynamic dependency",
+      "Handlebars require.extensions"
+    ],
+    "skipsTypeAndLintValidationPerExistingConfig": true
+  },
+  "codeSha256": {
+    "src/server/operations/sales.ts": "842d8c958c46e29ebd5282a38efc034cde68a4b474f7c0e4d447677f2fbdb5e4",
+    "src/server/persistence/sales-contract.ts": "fb1212a68c1ad5895619478ec9b8b7e5ce417b716eab138a7169a2e07c6ca0b7",
+    "src/server/persistence/firestore-sales.ts": "bdc79b9deb9be9c27b52e6871803af3125b46c4d3811f9ec68e5cfbc1ecd7965",
+    "src/server/persistence/sales.ts": "dd978b6040e54de8482788d9cb54a0a96a01274be67480a06138b75401855571",
+    "tests/operations/sales-boundary.test.ts": "1614704b0b4a970fbeb6598b7a24910fc4bbf837d06dc9c7c6aedcac8adddfb7",
+    "tests/operations/sales-repository.test.ts": "5d57041b7212a12d388470e2289cf3b280779273e171fe17b6d3e113259b54d4"
+  },
+  "logSha256": {
+    "characterization": "4a0585511e45a2b698b0c24c966e867171af5bac0a1daffed31aa26c25a8ccff",
+    "repositoryRed": "65dbfce234425c7c14d98d02a3f895378b1da2801d364b25a738695d51e55082",
+    "focusedGreen": "74b77181d0cad6849cd87c6a8189953f60bce21d3a218611a4469a28b3eca9e1",
+    "fullTests": "b7fd6b91d1a8ab97aa334351ee2f367b1202cdf8aebdbaba776e231b2e0acb47",
+    "baselineTypecheck": "36dd43b235944205e5b2dea5cbf00d3da75ee95739f6d7ace9e0c48f5783f8d2",
+    "finalTypecheck": "36dd43b235944205e5b2dea5cbf00d3da75ee95739f6d7ace9e0c48f5783f8d2",
+    "build": "02721224f52399fc41dde53dc63daee6cd3ee5938be3d77e99c349f70d0437fa"
+  },
+  "review": {
+    "method": "Local diff review against plan and original implementation",
+    "independentAgent": false,
+    "blockingFindings": []
+  }
+}

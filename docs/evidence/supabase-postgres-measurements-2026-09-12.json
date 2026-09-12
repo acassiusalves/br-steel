@@ -1,0 +1,670 @@
+{
+  "assessmentDate": "2026-09-12",
+  "sourceProject": "marketflow-9h4tg",
+  "targetSupabaseProject": "mlumbvxpaqfzpdjnvzxc",
+  "productionChanged": false,
+  "hostedDataImported": false,
+  "prototypeOnly": true,
+  "import": {
+    "startedAt": "2026-09-12T13:13:26.803Z",
+    "rows": 152654,
+    "originalJsonBytes": 145449876,
+    "maskedJsonBytes": 145426892,
+    "collections": [
+      {
+        "collection": "inventoryMovements",
+        "count": 1,
+        "syntheticSensitive": false
+      },
+      {
+        "collection": "productionColumns",
+        "count": 3,
+        "syntheticSensitive": false
+      },
+      {
+        "collection": "productionLots",
+        "count": 3,
+        "syntheticSensitive": false
+      },
+      {
+        "collection": "productionLotItems",
+        "count": 7,
+        "syntheticSensitive": false
+      },
+      {
+        "collection": "supplies",
+        "count": 54,
+        "syntheticSensitive": false
+      },
+      {
+        "collection": "stockUpdates",
+        "count": 361,
+        "syntheticSensitive": false
+      },
+      {
+        "collection": "salesOrders",
+        "count": 12528,
+        "syntheticSensitive": false
+      },
+      {
+        "collection": "appSettings",
+        "count": 1,
+        "syntheticSensitive": false
+      },
+      {
+        "collection": "conciliationTemplates",
+        "count": 1,
+        "syntheticSensitive": false
+      },
+      {
+        "collection": "mercadoLivreDeepSearchAnalyses",
+        "count": 1,
+        "syntheticSensitive": false
+      },
+      {
+        "collection": "brSteelProductSkuAssociations",
+        "count": 2,
+        "syntheticSensitive": false
+      },
+      {
+        "collection": "mercadoLivreSavedOffers",
+        "count": 1,
+        "syntheticSensitive": false
+      },
+      {
+        "collection": "mercadoLivreAccounts",
+        "count": 2,
+        "syntheticSensitive": true
+      },
+      {
+        "collection": "mercadoLivreAdsSyncState",
+        "count": 2,
+        "syntheticSensitive": false
+      },
+      {
+        "collection": "mercadoLivreListingsSyncState",
+        "count": 2,
+        "syntheticSensitive": false
+      },
+      {
+        "collection": "productGroups",
+        "count": 2,
+        "syntheticSensitive": false
+      },
+      {
+        "collection": "conciliationSales",
+        "count": 5,
+        "syntheticSensitive": false
+      },
+      {
+        "collection": "conciliationSettings",
+        "count": 5,
+        "syntheticSensitive": false
+      },
+      {
+        "collection": "users",
+        "count": 5,
+        "syntheticSensitive": true
+      },
+      {
+        "collection": "conciliationCategories",
+        "count": 6,
+        "syntheticSensitive": false
+      },
+      {
+        "collection": "appConfig",
+        "count": 7,
+        "syntheticSensitive": true
+      },
+      {
+        "collection": "mercadoLivreAdsCampaigns",
+        "count": 10,
+        "syntheticSensitive": false
+      },
+      {
+        "collection": "brSteelProductKitAssociations",
+        "count": 19,
+        "syntheticSensitive": false
+      },
+      {
+        "collection": "mercadoLivreConversations",
+        "count": 106,
+        "syntheticSensitive": false
+      },
+      {
+        "collection": "mercadoLivreQuestions",
+        "count": 203,
+        "syntheticSensitive": false
+      },
+      {
+        "collection": "mercadoLivreAdsListings",
+        "count": 263,
+        "syntheticSensitive": false
+      },
+      {
+        "collection": "mercadoLivreAdsCampaignDaily",
+        "count": 809,
+        "syntheticSensitive": false
+      },
+      {
+        "collection": "anuncios",
+        "count": 483,
+        "syntheticSensitive": false
+      },
+      {
+        "collection": "mercadoLivreAdsListingDaily",
+        "count": 15071,
+        "syntheticSensitive": false
+      },
+      {
+        "collection": "mercadoLivreWebhookEvents",
+        "count": 39798,
+        "syntheticSensitive": false
+      },
+      {
+        "collection": "webhookDebugLogs",
+        "count": 82141,
+        "syntheticSensitive": false
+      },
+      {
+        "collection": "messages",
+        "count": 359,
+        "syntheticSensitive": false
+      },
+      {
+        "collection": "queryResults",
+        "count": 37,
+        "syntheticSensitive": false
+      },
+      {
+        "collection": "queryResultItems",
+        "count": 352,
+        "syntheticSensitive": false
+      },
+      {
+        "collection": "rankedResultItems",
+        "count": 2,
+        "syntheticSensitive": false
+      },
+      {
+        "collection": "pending",
+        "count": 2,
+        "syntheticSensitive": false
+      }
+    ],
+    "method": "Texts longer than three characters pseudonymized in memory at equal UTF-8 byte length, except ISO dates; numeric values preserved. Secret/account/user collections replaced by synthetic size placeholders. No raw payload files.",
+    "container": "brsteel-pg-measure-20260912",
+    "finishedAt": "2026-09-12T13:17:08.026Z"
+  },
+  "measurements": {
+    "checkedAt": "2026-09-12T13:21:04.155566+00:00",
+    "environment": {
+      "postgres": "17.6",
+      "network": "none; Unix socket only",
+      "cpuLimit": 1,
+      "memoryLimitBytes": 536870912,
+      "sharedBuffersMB": 32,
+      "workMemMB": 2,
+      "hostedFreePerformanceClaim": false
+    },
+    "tables": [
+      {
+        "rows": 1,
+        "table": "inventory_movements",
+        "heapBytes": 8192,
+        "indexBytes": 32768,
+        "totalBytes": 81920,
+        "tableIncludingToastBytes": 49152
+      },
+      {
+        "rows": 139697,
+        "table": "other_documents",
+        "heapBytes": 127320064,
+        "indexBytes": 18989056,
+        "totalBytes": 153296896,
+        "tableIncludingToastBytes": 134307840
+      },
+      {
+        "rows": 3,
+        "table": "production_columns",
+        "heapBytes": 8192,
+        "indexBytes": 16384,
+        "totalBytes": 65536,
+        "tableIncludingToastBytes": 49152
+      },
+      {
+        "rows": 7,
+        "table": "production_lot_items",
+        "heapBytes": 8192,
+        "indexBytes": 32768,
+        "totalBytes": 81920,
+        "tableIncludingToastBytes": 49152
+      },
+      {
+        "rows": 3,
+        "table": "production_lots",
+        "heapBytes": 8192,
+        "indexBytes": 32768,
+        "totalBytes": 81920,
+        "tableIncludingToastBytes": 49152
+      },
+      {
+        "rows": 12989,
+        "table": "sales_order_items",
+        "heapBytes": 7446528,
+        "indexBytes": 1220608,
+        "totalBytes": 8708096,
+        "tableIncludingToastBytes": 7487488
+      },
+      {
+        "rows": 12528,
+        "table": "sales_orders",
+        "heapBytes": 22454272,
+        "indexBytes": 2547712,
+        "totalBytes": 27680768,
+        "tableIncludingToastBytes": 25133056
+      },
+      {
+        "rows": 361,
+        "table": "stock_observations",
+        "heapBytes": 163840,
+        "indexBytes": 81920,
+        "totalBytes": 286720,
+        "tableIncludingToastBytes": 204800
+      },
+      {
+        "rows": 54,
+        "table": "supplies",
+        "heapBytes": 16384,
+        "indexBytes": 32768,
+        "totalBytes": 90112,
+        "tableIncludingToastBytes": 57344
+      }
+    ],
+    "queries": [
+      {
+        "name": "summary_month",
+        "samples": 20,
+        "warmupExecutions": 5,
+        "cache": "warm",
+        "medianExecutionMs": 5.7985,
+        "p95ExecutionMs": 6.653,
+        "maxExecutionMs": 8.178,
+        "planNodeTypes": [
+          "Aggregate",
+          "CTE Scan",
+          "Index Scan",
+          "Limit",
+          "Nested Loop",
+          "Result",
+          "Sort",
+          "Subquery Scan"
+        ],
+        "indexesUsed": [
+          "sales_date",
+          "sales_order_items_pkey"
+        ],
+        "sharedHitBlocks": 3010,
+        "sharedReadBlocks": 0
+      },
+      {
+        "name": "summary_year",
+        "samples": 20,
+        "warmupExecutions": 5,
+        "cache": "warm",
+        "medianExecutionMs": 46.4685,
+        "p95ExecutionMs": 55.91,
+        "maxExecutionMs": 58.782,
+        "planNodeTypes": [
+          "Aggregate",
+          "CTE Scan",
+          "Index Scan",
+          "Limit",
+          "Nested Loop",
+          "Result",
+          "Seq Scan",
+          "Sort",
+          "Subquery Scan"
+        ],
+        "indexesUsed": [
+          "sales_order_items_pkey"
+        ],
+        "sharedHitBlocks": 28351,
+        "sharedReadBlocks": 0
+      },
+      {
+        "name": "demand_month",
+        "samples": 20,
+        "warmupExecutions": 5,
+        "cache": "warm",
+        "medianExecutionMs": 4.414,
+        "p95ExecutionMs": 5.239,
+        "maxExecutionMs": 14.604,
+        "planNodeTypes": [
+          "Aggregate",
+          "Hash",
+          "Hash Join",
+          "Index Scan",
+          "Merge Join",
+          "Seq Scan",
+          "Sort",
+          "Unique"
+        ],
+        "indexesUsed": [
+          "production_orders_date"
+        ],
+        "sharedHitBlocks": 1270,
+        "sharedReadBlocks": 0
+      },
+      {
+        "name": "demand_year",
+        "samples": 20,
+        "warmupExecutions": 5,
+        "cache": "warm",
+        "medianExecutionMs": 12.811499999999999,
+        "p95ExecutionMs": 13.215,
+        "maxExecutionMs": 13.444,
+        "planNodeTypes": [
+          "Aggregate",
+          "Hash",
+          "Hash Join",
+          "Merge Join",
+          "Seq Scan",
+          "Sort",
+          "Unique"
+        ],
+        "indexesUsed": [],
+        "sharedHitBlocks": 3681,
+        "sharedReadBlocks": 0
+      },
+      {
+        "name": "stock_page",
+        "samples": 20,
+        "warmupExecutions": 5,
+        "cache": "warm",
+        "medianExecutionMs": 0.3505,
+        "p95ExecutionMs": 0.446,
+        "maxExecutionMs": 0.527,
+        "planNodeTypes": [
+          "Aggregate",
+          "Limit",
+          "Seq Scan",
+          "Sort",
+          "Subquery Scan",
+          "Unique"
+        ],
+        "indexesUsed": [],
+        "sharedHitBlocks": 29,
+        "sharedReadBlocks": 0
+      },
+      {
+        "name": "sales_page",
+        "samples": 20,
+        "warmupExecutions": 5,
+        "cache": "warm",
+        "medianExecutionMs": 0.0915,
+        "p95ExecutionMs": 0.105,
+        "maxExecutionMs": 0.106,
+        "planNodeTypes": [
+          "Index Scan",
+          "Limit"
+        ],
+        "indexesUsed": [
+          "sales_date"
+        ],
+        "sharedHitBlocks": 95,
+        "sharedReadBlocks": 0
+      }
+    ],
+    "coreRelationBytes": 37076992,
+    "allRelationBytes": 190373888,
+    "existingHostedClusterBytes": 26139445,
+    "projectedCorePlusHostedBytes": 63216437,
+    "projectedAllPlusHostedBytes": 216513333,
+    "loadTests": [
+      {
+        "clients": 1,
+        "durationSeconds": 8,
+        "mode": "closed-loop mixed read workload without artificial delays; local stress test",
+        "transactions": 3931,
+        "failedTransactions": 0,
+        "medianLatencyMs": 1.073,
+        "p95LatencyMs": 5.133,
+        "maxLatencyMs": 32.565,
+        "transactionsPerSecond": 491.375
+      },
+      {
+        "clients": 5,
+        "durationSeconds": 8,
+        "mode": "closed-loop mixed read workload without artificial delays; local stress test",
+        "transactions": 2377,
+        "failedTransactions": 0,
+        "medianLatencyMs": 2.043,
+        "p95LatencyMs": 87.164,
+        "maxLatencyMs": 306.698,
+        "transactionsPerSecond": 297.125
+      }
+    ]
+  },
+  "validation": {
+    "checkedAt": "2026-09-12T13:19:38.322585+00:00",
+    "cases": [
+      {
+        "query": "sales_summary",
+        "start": "2026-09-01",
+        "end": "2026-09-30",
+        "passed": true,
+        "responseBytes": 1943,
+        "orders": 473
+      },
+      {
+        "query": "sales_summary",
+        "start": "2026-08-01",
+        "end": "2026-08-31",
+        "passed": true,
+        "responseBytes": 1997,
+        "orders": 1240
+      },
+      {
+        "query": "sales_summary",
+        "start": "2026-01-01",
+        "end": "2026-09-12",
+        "passed": true,
+        "responseBytes": 2084,
+        "orders": 8525
+      },
+      {
+        "query": "sales_summary",
+        "start": "2020-01-01",
+        "end": "2020-01-31",
+        "passed": true,
+        "responseBytes": 163,
+        "orders": 0
+      },
+      {
+        "query": "production_demand",
+        "start": "2026-09-01",
+        "end": "2026-09-12",
+        "passed": true,
+        "rows": 59,
+        "responseBytes": 7901
+      },
+      {
+        "query": "production_demand",
+        "start": "2026-08-01",
+        "end": "2026-08-31",
+        "passed": true,
+        "rows": 75,
+        "responseBytes": 10351
+      },
+      {
+        "query": "production_demand",
+        "start": "2026-01-01",
+        "end": "2026-09-12",
+        "passed": true,
+        "rows": 174,
+        "responseBytes": 24583
+      },
+      {
+        "query": "production_demand",
+        "start": "2020-01-01",
+        "end": "2020-01-31",
+        "passed": true,
+        "rows": 0,
+        "responseBytes": 2
+      },
+      {
+        "query": "stock_full",
+        "passed": true,
+        "rows": 361
+      },
+      {
+        "query": "stock_cursor",
+        "passed": true,
+        "firstPageRows": 100,
+        "secondPageRows": 100
+      }
+    ],
+    "allPassed": true
+  },
+  "backupAndRestore": {
+    "checkedAt": "2026-09-12T13:23:40.144393+00:00",
+    "tables": [
+      {
+        "table": "inventory_movements",
+        "rows": 1,
+        "restoredRows": 1,
+        "contentDigestMatches": true
+      },
+      {
+        "table": "other_documents",
+        "rows": 139697,
+        "restoredRows": 139697,
+        "contentDigestMatches": true
+      },
+      {
+        "table": "production_columns",
+        "rows": 3,
+        "restoredRows": 3,
+        "contentDigestMatches": true
+      },
+      {
+        "table": "production_lot_items",
+        "rows": 7,
+        "restoredRows": 7,
+        "contentDigestMatches": true
+      },
+      {
+        "table": "production_lots",
+        "rows": 3,
+        "restoredRows": 3,
+        "contentDigestMatches": true
+      },
+      {
+        "table": "sales_order_items",
+        "rows": 12989,
+        "restoredRows": 12989,
+        "contentDigestMatches": true
+      },
+      {
+        "table": "sales_orders",
+        "rows": 12528,
+        "restoredRows": 12528,
+        "contentDigestMatches": true
+      },
+      {
+        "table": "stock_observations",
+        "rows": 361,
+        "restoredRows": 361,
+        "contentDigestMatches": true
+      },
+      {
+        "table": "supplies",
+        "rows": 54,
+        "restoredRows": 54,
+        "contentDigestMatches": true
+      }
+    ],
+    "scope": "Pseudonymized local probe; not a production backup",
+    "coreBackupBytes": 5259203,
+    "fullBackupBytes": 22508268,
+    "queriesMatch": true,
+    "allPassed": true,
+    "fullPlainDumpBytes": 167843795,
+    "corePlainDumpBytes": 28846926,
+    "note": "Compressed archive bytes are not network egress. Plain dump bytes are a planning proxy, not measured Supabase network billing."
+  },
+  "organizationUsage": {
+    "observedAt": "2026-09-12T13:18:11.952653+00:00",
+    "source": "Supabase dashboard, read-only UI",
+    "url": "https://supabase.com/dashboard/org/xhdvfwtxqlllntebykda/usage",
+    "organization": "xhdvfwtxqlllntebykda",
+    "plan": "free",
+    "currentCycle": {
+      "from": "2026-09-07",
+      "to": "2026-10-07",
+      "uncachedEgressGB": 1.961,
+      "includedGB": 5,
+      "remainingGB": 3.039,
+      "cachedEgressGB": 0.546
+    },
+    "previousCycle": {
+      "label": "Previous billing cycle",
+      "uncachedEgressGB": 3.749,
+      "cachedEgressGB": 0.182
+    },
+    "brSteelCurrentEgress": {
+      "displayedRoundedGB": 0,
+      "chartScaleMaxKB": 255,
+      "note": "Rounded display, not proof of zero bytes; project currently only OAuth."
+    },
+    "displayedDatabaseSizePerProject": {
+      "brSteelMB": 24.93,
+      "lunnetaMB": 272.89,
+      "note": "Dashboard label MB; BR value corresponds to approximately 26.14 decimal MB from SQL."
+    },
+    "refreshLag": "Up to one hour for usage; some metrics up to 24 hours."
+  },
+  "trafficModels": {
+    "summaryJsonBytes": 1943,
+    "previousFullOrderReadJsonBytes": 3487477,
+    "summaryReadReductionPercent": 99.94428637092086,
+    "productionMonthJsonBytes": 7901,
+    "fiveUsersSummaryAndDemand60s8Hours22DaysGB": 0.5197632,
+    "dailyFullPlainDump30DaysGB": 5.03531385,
+    "dailyCorePlainDump30DaysGB": 0.86540778,
+    "note": "Hypothetical traffic of aggregate results/dumps; excludes headers, OAuth, backups unless stated, other APIs and actual user concurrency."
+  },
+  "limitations": [
+    "Local PostgreSQL 17.6.1.167 image with one CPU and 512 MiB memory, not hosted Free infrastructure",
+    "Warm-cache timings and eight-second load trials; not a sustained capacity guarantee",
+    "Queries benchmarked through a local Unix socket as postgres; no RLS/OAuth/API/Vercel/network overhead modeled",
+    "Strings pseudonymized with equal byte lengths except small codes and ISO dates; compressibility can change",
+    "Sensitive account/user/config collections represented by size placeholders",
+    "Other modules measured in a generic JSONB table with primary and date indexes, not final schemas for every module",
+    "Known inventory only; unknown nested collections not exhaustively discovered",
+    "Read counts/data can change during non-transactional scan; current sweep contains three more diagnostic logs",
+    "Hosted storage projection adds measured relation sizes to previously observed 26.14 MB; excludes future growth/bloat and future schema changes",
+    "Prototype aggregate responses omit API envelope and some presentation metadata; no application behavior was changed"
+  ],
+  "querySourceDigests": {
+    "schema.sql": "11605b195b34e1804f740318d241cc4e117dca390c3dc77256166a89ddd6012d",
+    "project.sql": "479b2568020222d9358ddcdeba2c6f1ce089f0c376b4501f46781f7caf757c34",
+    "queries.sql": "1fe8d59fc1e1ea36d42fdcc9168c2b293b5602f2fc634d2c80cf7361dec93808"
+  },
+  "sources": [
+    "https://supabase.com/pricing",
+    "https://supabase.com/docs/guides/platform/database-size",
+    "https://supabase.com/docs/guides/platform/manage-your-usage/egress",
+    "https://supabase.com/dashboard/org/xhdvfwtxqlllntebykda/usage",
+    "https://www.postgresql.org/docs/17/app-pgdump.html"
+  ],
+  "cleanup": {
+    "pending": false,
+    "verifiedAt": "2026-09-12T13:32:03.058325+00:00",
+    "containerRemoved": "brsteel-pg-measure-20260912",
+    "volumeRemoved": "d0017be5ee70240c625e67fc5e77e91af19ca2580d1e0b64977b1d4f88d68b42",
+    "privateReferenceRemoved": "/private/tmp/brsteel-pg-probe/expected-private.json",
+    "productionResourcesChanged": false
+  }
+}
