@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { FieldPath } from 'firebase-admin/firestore';
 import { adminDb } from '@/lib/firebase-admin';
-import type { Supply } from '@/types/supply';
+import type { SupplyRead } from '@/types/supply';
 import type { AccessContext } from '@/server/access/types';
 import { dateSchema, documentIdSchema, pageInputSchema, paginateQuery, requireOperation, result, OperationError } from './common';
 const finite = z.number().finite().min(0).max(1e12);
@@ -17,7 +17,16 @@ function validateLimits(data: { estoqueMinimo?: number; estoqueMaximo?: number }
 export async function listSupplies(context: AccessContext, raw: unknown) {
   requireOperation(context, 'insumos:read'); const input = pageInputSchema.strict().parse(raw);
   const page = await paginateQuery(adminDb.collection('supplies'), input);
-  return result(page.docs.map(doc => ({ ...doc.data(), id: doc.id }) as Supply), 'firestore', [], page.nextCursor);
+  // The former UI orderBy('nome') excluded SKU thresholds and legacy nested records.
+  // Keep document-ID cursors based on scanned rows so filtered pages still advance.
+  const supplies = page.docs.flatMap(doc => {
+    const data = doc.data();
+    return typeof data.nome === 'string' && data.nome.trim()
+      ? [{ ...data, id: doc.id } as SupplyRead] : [];
+  });
+  const warnings = supplies.length < page.docs.length
+    ? ['Registros sem nome de insumo foram omitidos.' + (page.nextCursor ? ' Continue pela próxima página para consultar os demais registros.' : '')] : [];
+  return result(supplies, 'firestore', warnings, page.nextCursor);
 }
 export async function createSupply(context: AccessContext, raw: unknown) {
   requireOperation(context, 'insumos:write'); const input = fields.parse(raw); validateLimits(input);

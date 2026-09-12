@@ -1,12 +1,12 @@
 
-import type { Supply } from './supply';
+import type { SupplyRead } from './supply';
 
 export interface InventoryItem {
-    supply: Supply;
-    estoqueAtual: number;
-    estoqueMinimo: number;
-    valorEmEstoque: number;
-    status: 'em_estoque' | 'baixo' | 'esgotado';
+    supply: SupplyRead;
+    estoqueAtual: number | null;
+    estoqueMinimo: number | null;
+    valorEmEstoque: number | null;
+    status: 'em_estoque' | 'baixo' | 'esgotado' | 'desconhecido';
 }
 
 
