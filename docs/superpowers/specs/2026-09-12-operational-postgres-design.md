@@ -2,6 +2,8 @@
 
 Status: etapas 1 e 2 concluídas localmente. Em 12/09/2026, a etapa 3 conferiu a cópia real, mediu consultas diretas e validou os endpoints MCP em homologação com OAuth e perfis restritos. [Cópia e consultas](../../evidence/operational-postgres-hosted-pilot.md); [endpoints e encerramento](../../evidence/operational-postgres-endpoint-pilot.md). O [ensaio de backup/restauração do schema final](../../evidence/operational-postgres-backup.md) passou, assim como as [leituras diretas pelo Claude no Chrome](../../evidence/operational-postgres-claude-browser.md), usando a conexão OAuth existente. Os acessos temporários foram encerrados e a homologação restaurada. A aplicação e o MCP de produção continuam no Firestore. Ainda faltam reconexão OAuth interativa no navegador, observação de consumo em uso controlado e operacionalização da atualização dos dados/backup externo antes de ampliar o piloto ou trocar a fonte oficial.
 
+Atualização de 12/09: a [reconexão pelo navegador](../../evidence/mcp-claude-oauth-reconnection-2026-09-12.md) reproduziu um desvio de ambiente: o conector de homologação inicia o consentimento em produção pelo provedor compartilhado. Login, consentimento, callback e chamada autenticada passaram após navegação manual à homologação, e o conector foi deixado conectado. Corrigir o redirecionamento e repetir o fluxo sem intervenção manual continua pendente.
+
 ## Objetivo e escopo
 
 Migrar o armazenamento de vendas, estoque, insumos e produção do Firestore para o PostgreSQL do projeto Supabase `mlumbvxpaqfzpdjnvzxc`, reduzindo a transferência de registros completos nas consultas do sistema e do MCP. Manter o login do sistema, o OAuth do MCP e a aplicação na Vercel.
