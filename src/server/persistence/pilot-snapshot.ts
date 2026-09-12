@@ -11,6 +11,9 @@ function assertTime(policy: PilotSnapshotPolicy, now = Date.now()) {
   if (!Number.isFinite(policy.expiresAt) || policy.expiresAt <= now || policy.expiresAt > now + MAX_COPY_AGE_MS) throw unavailable();
 }
 
+/** A pilot copy is read-only; the write path refuses to run while one is in scope. */
+export function isPilotScopeActive() { return scope.getStore() !== undefined; }
+
 /** Called inside the same repeatable-read transaction as the business SELECTs. */
 export function validatePilotSnapshot(state: Record<string, unknown>) {
   const current = scope.getStore();

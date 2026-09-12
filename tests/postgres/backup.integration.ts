@@ -19,6 +19,8 @@ const tables = [
   'brsteel_ops.production_lot_items',
   'brsteel_ops.production_comments',
   'brsteel_ops.sales_order_items',
+  'brsteel_write.audit',
+  'brsteel_write.idempotency',
 ] as const;
 
 const expectPermissionDenied = async (query: Promise<unknown>) => {
@@ -68,7 +70,7 @@ test('backup role reads every current operational table without mutation or esca
     where grantee.rolname = 'brsteel_ops_backup'
       and privilege.privilege_type = 'USAGE'
     order by namespace.nspname`)).rows.map(row => row.nspname);
-  assert.deepEqual(schemas, ['brsteel_import', 'brsteel_ops']);
+  assert.deepEqual(schemas, ['brsteel_import', 'brsteel_ops', 'brsteel_write']);
 
   const policies = (await pool.query(`select schemaname || '.' || tablename as table_name, policyname, cmd, roles, qual
     from pg_policies
@@ -98,6 +100,8 @@ test('backup role reads every current operational table without mutation or esca
       await expectPermissionDenied(client.query('delete from brsteel_ops.sales_orders where false'));
       await expectPermissionDenied(client.query('truncate brsteel_ops.sales_orders'));
       await expectPermissionDenied(client.query('set role brsteel_ops_importer'));
+      await expectPermissionDenied(client.query('set role brsteel_ops_writer'));
+      await expectPermissionDenied(client.query("insert into brsteel_write.audit (id, operation, user_id, source, target_collection, target_id) values ('probe', 'probe', 'probe', 'web', 'probe', 'probe')"));
       await expectPermissionDenied(client.query('create table brsteel_ops.backup_forbidden (id integer)'));
       await expectPermissionDenied(client.query('select * from brsteel_backup_probe.secret'));
     });
