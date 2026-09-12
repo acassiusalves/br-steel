@@ -86,4 +86,4 @@ nem migração do banco operacional. Antes de um novo deploy da branch de migra�
 ela deve incorporar esta correção de main.
 
 Roteiro de aplicação e rollback:
-[consent-routing](../../../supabase/hosted/consent-routing/README.md).
+[consent-routing](../../supabase/hosted/consent-routing/README.md).
