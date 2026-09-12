@@ -112,8 +112,8 @@ export async function importSnapshot(pool: Pool, raw: unknown, options: {
       }
       await client.query(`insert into brsteel_import.runs(id,source_project,captured_at,status,total_records)
         values($1,$2,$3,'loading',$4) on conflict(id) do nothing`, [snapshot.hash,snapshot.sourceProject,snapshot.capturedAt,snapshot.records.length]);
-      await client.query(`insert into brsteel_import.state(singleton,source_project,active_run,ready) values(true,$1,$2,false)
-        on conflict(singleton) do update set active_run=excluded.active_run,ready=false`, [snapshot.sourceProject,snapshot.hash]);
+      await client.query(`insert into brsteel_import.state(singleton,source_project,active_run,ready,captured_at,completed_at) values(true,$1,$2,false,$3,null)
+        on conflict(singleton) do update set active_run=excluded.active_run,ready=false,captured_at=excluded.captured_at,completed_at=null`, [snapshot.sourceProject,snapshot.hash,snapshot.capturedAt]);
       return { next: existing?.next_index ?? 0, complete: false };
     });
     if (initial.complete) return { records: snapshot.records.length, hash: snapshot.hash, alreadyComplete: true };
@@ -151,7 +151,7 @@ export async function importSnapshot(pool: Pool, raw: unknown, options: {
       await client.query('delete from brsteel_ops.sales_order_items i using brsteel_ops.sales_orders o where i.order_id=o.source_id and o.source_deleted');
       const compared = await compare(client, snapshot);
       await client.query("update brsteel_import.runs set status='complete',completed_at=now() where id=$1", [snapshot.hash]);
-      await client.query('update brsteel_import.state set ready=true where singleton and active_run=$1', [snapshot.hash]);
+      await client.query('update brsteel_import.state s set ready=true,completed_at=r.completed_at from brsteel_import.runs r where s.singleton and s.active_run=$1 and r.id=s.active_run', [snapshot.hash]);
       return compared;
     });
     return { ...result, alreadyComplete: false };

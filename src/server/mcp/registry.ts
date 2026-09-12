@@ -2,11 +2,12 @@ import 'server-only';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { AccessContext } from '@/server/access/types';
 import { requireOperation, OperationError } from '@/server/operations/common';
-import { readTools, type ReadToolDefinition } from './read-tools';
+import { type ReadToolDefinition } from './read-tools';
+import { readToolsForContext } from './postgres-pilot';
 import { MAX_OUTPUT_BYTES } from './config';
 import { toolError } from './errors';
 export function allowedReadTools(context: AccessContext): ReadToolDefinition[] {
-  return readTools.filter(tool => {
+  return readToolsForContext(context).filter(tool => {
     try {
       if (!context.active || context.mustChangePassword || context.actor.source !== 'mcp') return false;
       if (tool.capability) requireOperation(context, tool.capability, tool.page);

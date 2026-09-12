@@ -1,8 +1,8 @@
 # Banco operacional: preparação e piloto de leitura
 
-Esta pasta contém a base SQL e as ferramentas de importação do núcleo operacional. A aplicação e o MCP continuam usando Firestore. O OAuth permanece na configuração Supabase existente; as migrations operacionais ficam fora da cadeia `supabase/migrations` para impedir aplicação incidental ao provedor de identidade.
+Esta pasta contém a base SQL e as ferramentas de importação do núcleo operacional. Por padrão, a aplicação e o MCP usam Firestore. O MCP também possui um seletor restrito para o piloto PostgreSQL descrito abaixo. O OAuth permanece na configuração Supabase existente; as migrations operacionais ficam fora da cadeia `supabase/migrations` para impedir aplicação incidental ao provedor de identidade.
 
-O [piloto hospedado de 12/09/2026](../../docs/evidence/operational-postgres-hosted-pilot.md) copiou e conferiu 12.967 registros reais e mediu os leitores candidatos. Os acessos temporários foram revogados ao encerrar o ensaio. Não houve ativação dos leitores nos endpoints de produção.
+O [piloto hospedado de 12/09/2026](../../docs/evidence/operational-postgres-hosted-pilot.md) copiou e conferiu 12.967 registros reais e mediu os leitores candidatos. Os acessos temporários foram revogados ao encerrar o ensaio. Não houve ativação dos leitores nos endpoints de produção. O [ensaio dos endpoints](../../docs/evidence/operational-postgres-endpoint-pilot.md) validou depois OAuth, perfis e leitura PostgreSQL pela Vercel de homologação; ao final, acessos e variáveis foram retirados e o deployment anterior foi restaurado.
 
 ## Verificação reproduzível
 
@@ -69,8 +69,32 @@ Repetir um snapshot já concluído é um no-op; não reativa um snapshot histór
 
 Os schemas privados `brsteel_ops` e `brsteel_import` têm 13 tabelas com RLS. Papéis sem login separam importação e leitura; `anon`, `authenticated` e `PUBLIC` não recebem acesso operacional. O papel de leitura não grava dados nem consulta o histórico interno de importações. Essas políticas protegem o acesso pelo backend: a autorização de cada usuário continua obrigatória nas operações do sistema. Elas não representam políticas individuais por usuário.
 
-Os adaptadores candidatos implementam vendas, estoque, insumos, movimentações, produção e demanda. Estoque usa a última observação válida por SKU; produção retorna listas permitidas de campos, inclusive para identidades aninhadas; demanda agrega pedidos faturados e combina saldos e limites na mesma transação. Listagens SQL mantêm os cursores existentes, inclusive o avanço por documentos examinados quando a página de insumos omite registros sem nome. Ainda não estão selecionados no runtime: os repositórios ativos continuam exportando Firestore.
+Os adaptadores candidatos implementam vendas, estoque, insumos, movimentações, produção e demanda. Estoque usa a última observação válida por SKU; produção retorna listas permitidas de campos, inclusive para identidades aninhadas; demanda agrega pedidos faturados e combina saldos e limites na mesma transação. Listagens SQL mantêm os cursores existentes, inclusive o avanço por documentos examinados quando a página de insumos omite registros sem nome. Os repositórios ativos da aplicação continuam exportando Firestore; somente usuários explicitamente selecionados no piloto MCP recebem os adaptadores PostgreSQL.
 
 As operações mantêm as verificações de usuário, capacidade e página antes de chamar qualquer repositório. A aplicação web mantém o comportamento live/cache de estoque e demanda existente; o MCP continua consultando apenas dados salvos. As transações de negócio, unicidade de SKU, movimentação com saldo e contadores concorrentes deverão ser validados na etapa de gravações.
 
 O export paginado não congela o Firestore. Uma carga real precisa validar registros legados e reconciliar alterações concorrentes antes de qualquer troca. O payload integral de pedidos e a projeção de itens ocupam espaço adicional: as medições do protótipo anterior não comprovam o tamanho deste schema. Medições reais de armazenamento, tráfego, latência e recuperação continuam sendo critérios para o piloto hospedado.
+
+
+## Piloto nos endpoints MCP
+
+O seletor `src/server/mcp/postgres-pilot.ts` é usado apenas pelo registro MCP. As ferramentas reaproveitam as mesmas operações e projeções autorizadas. O acesso atual do usuário, o consentimento, a revogação, o limite de chamadas e a auditoria continuam no Firebase; `consultar_meu_acesso` permanece uma consulta ao cadastro atual.
+
+Variáveis exclusivas do servidor:
+
+| Variável | Finalidade |
+|---|---|
+| `MCP_PG_PILOT_ENABLED` | `true` ativa a seleção; ausente ou `false` preserva Firestore. |
+| `MCP_PG_PILOT_USER_IDS` | IDs locais separados por vírgula, além da política normal de acesso MCP. |
+| `MCP_PG_PILOT_SNAPSHOT_HASH` | SHA-256 da cópia autorizada para o ensaio. |
+| `MCP_PG_PILOT_EXPIRES_AT` | Prazo futuro de até 24 horas. |
+| `MCP_PG_PILOT_DATABASE_URL` | Login temporário `brsteel_pilot_reader` no projeto fixado; nunca usar `postgres`. |
+| `MCP_PG_PILOT_CA` | Certificado raiz para TLS com verificação de hostname. |
+
+A cópia deve ter menos de 24 horas. `operational_copy_metadata` registra captura e conclusão no singleton privado; importações futuras atualizam esses campos junto com o estado de prontidão. Cada operação verifica prontidão, origem, hash e datas na mesma transação de leitura dos dados. Uma falha de PostgreSQL ou uma cópia divergente não aciona fallback para Firestore/Bling. O pool permite uma conexão por instância e consultas de até 30 segundos; o limite do login e do pooler também precisa ser considerado no piloto.
+
+Respostas do piloto têm `source: postgres`, `asOf` igual à captura e `readCopy: { mode, sourceProject, snapshotHash, capturedAt, completedAt }`, além do aviso de cópia. Datas individuais do estoque são preservadas. Isso não transforma a exportação paginada do Firestore em uma fotografia transacional nem comprova atualização contínua.
+
+`scripts/mcp-staging-proof.ts --preflight-only` verifica a configuração sem rede. Com `MCP_PG_PILOT_VERIFY=true` e o ambiente dedicado completo, a prova usa uma única conta sintética, lê a cópia real, verifica os perfis e remove seus dados de autenticação. Não lê arquivos de ambiente automaticamente. O operador deve fornecer o ambiente privado e `MCP_STAGING_VERIFY_USER_ID` igual ao único ID permitido no ensaio. O modo sem essa flag preserva a prova com dados sintéticos no Firestore.
+
+A prova usa o SDK oficial MCP em HTTPS e mede bytes da resposta decodificada ao cliente; inclui os envelopes textual e estruturado e não equivale ao egress faturado pelo Supabase. O provedor OAuth compartilhado pode indicar a tela de consentimento de produção; nesse caso, o ensaio reconhece apenas essa URL exata e submete a autorização à sessão de homologação. Essa adaptação é registrada e não comprova o fluxo visual completo de conexão dentro do Claude.

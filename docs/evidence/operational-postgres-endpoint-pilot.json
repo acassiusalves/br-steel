@@ -1,0 +1,315 @@
+{
+  "date": "2026-09-12",
+  "status": "passed-and-closed",
+  "scope": "MCP PostgreSQL em homologação com uma conta sintética e cópia operacional real; nenhuma troca da fonte oficial.",
+  "baseCommit": "a32c658",
+  "migration": {
+    "file": "20260912184709_operational_copy_metadata.sql",
+    "hostedVersion": "20260912190102"
+  },
+  "proof": {
+    "checkedAt": "2026-09-12T19:19:09.469Z",
+    "targets": {
+      "vercel": "prj_YD3ATzBPFQo4bD1ZlojrDTigUZp8",
+      "origin": "https://br-steel-mcp-staging.vercel.app",
+      "firebase": "brsteel-mcp-staging",
+      "supabase": "mlumbvxpaqfzpdjnvzxc",
+      "supabaseUrl": "https://mlumbvxpaqfzpdjnvzxc.supabase.co",
+      "issuer": "https://mlumbvxpaqfzpdjnvzxc.supabase.co/auth/v1",
+      "jwks": "https://mlumbvxpaqfzpdjnvzxc.supabase.co/auth/v1/.well-known/jwks.json",
+      "resource": "https://br-steel-mcp-staging.vercel.app/api/mcp"
+    },
+    "hostedClaude": false,
+    "writesEnabled": false,
+    "postgresPilot": {
+      "enabled": true,
+      "sourceProject": "marketflow-9h4tg",
+      "dataPeriod": {
+        "from": "2026-09-01",
+        "to": "2026-09-12"
+      }
+    },
+    "oauth": {
+      "realHttps": true,
+      "discoveryDcrLoginConsentCode": true,
+      "pkceS256": true,
+      "firstAccessAndSafeReturn": true,
+      "normalProviderSessionRejected": true,
+      "sharedProviderRouting": {
+        "productionConsentRedirectRecognized": true,
+        "authorizationSubmittedToDedicatedStagingSession": true,
+        "fullBrowserRedirectUxVerified": false
+      },
+      "independentJwt": {
+        "jwksPinnedToDedicatedProject": true,
+        "normalSession": {
+          "signatureVerified": true,
+          "algorithm": "ES256",
+          "issuerMatches": true,
+          "audienceMatches": true,
+          "subjectMatches": true,
+          "oauthClientClaimAbsent": true,
+          "lifetimeSeconds": 900
+        },
+        "authorizationCode": {
+          "signatureVerified": true,
+          "algorithm": "ES256",
+          "issuerMatches": true,
+          "audienceMatches": true,
+          "subjectMatches": true,
+          "clientIdMatches": true,
+          "lifetimeSeconds": 900
+        }
+      }
+    },
+    "mcp": {
+      "officialSdk": true,
+      "realHttps": true,
+      "source": "postgres",
+      "copy": {
+        "mode": "pilot",
+        "sourceProject": "marketflow-9h4tg",
+        "snapshotHash": "8a783d1454afcb13a045545de0dbdf7d2d4af000998c05bae5d09fe4f9faeae9",
+        "capturedAt": "2026-09-12T17:41:15.802Z",
+        "completedAt": "2026-09-12T17:54:50.432Z"
+      },
+      "realBusinessPayloadRecorded": false,
+      "allApplicableReadToolsAndPagination": true,
+      "inactiveUserRejected": true,
+      "httpMeasurements": {
+        "callCount": 36,
+        "maxCallsInOneMinute": 36,
+        "clientHttpLatencyMs": {
+          "min": 1140,
+          "max": 2452,
+          "average": 1648
+        },
+        "decodedHttpResponseBytes": {
+          "total": 69720,
+          "min": 136,
+          "max": 5683,
+          "average": 1937
+        },
+        "envelopeNote": "Os bytes incluem o envelope MCP com conteúdo textual e estruturado duplicado; não representam egress faturado pelo Supabase."
+      },
+      "restrictedProductionProjection": true,
+      "directForbiddenToolCallsRejected": true,
+      "currentRoleEnforced": true,
+      "auditRedaction": true,
+      "auditCount": 36,
+      "roles": {
+        "Administrador": [
+          "consultar_demanda_producao",
+          "consultar_estoque_produtos",
+          "consultar_lote_producao",
+          "consultar_meu_acesso",
+          "consultar_pedido",
+          "listar_colunas_producao",
+          "listar_insumos",
+          "listar_lotes_producao",
+          "listar_movimentacoes_insumo",
+          "listar_pedidos",
+          "listar_pedidos_para_producao",
+          "resumir_vendas"
+        ],
+        "Vendedor": [
+          "consultar_estoque_produtos",
+          "consultar_meu_acesso",
+          "consultar_pedido",
+          "listar_pedidos",
+          "resumir_vendas"
+        ],
+        "Operador": [
+          "consultar_demanda_producao",
+          "consultar_estoque_produtos",
+          "consultar_lote_producao",
+          "consultar_meu_acesso",
+          "listar_colunas_producao",
+          "listar_insumos",
+          "listar_lotes_producao",
+          "listar_movimentacoes_insumo",
+          "listar_pedidos_para_producao"
+        ]
+      },
+      "hostedClaude": false
+    },
+    "lifecycle": {
+      "refreshAcceptedByHttpsMcp": true,
+      "revokedAccessHttpStatus": 401,
+      "providerRefreshRejected": true,
+      "reconnectAccepted": true,
+      "oldTokensRemainRejectedAfterReconnect": true,
+      "explicitDenial": true,
+      "independentJwt": {
+        "refresh": {
+          "signatureVerified": true,
+          "algorithm": "ES256",
+          "issuerMatches": true,
+          "audienceMatches": true,
+          "subjectMatches": true,
+          "clientIdMatches": true,
+          "lifetimeSeconds": 900
+        },
+        "reconnect": {
+          "signatureVerified": true,
+          "algorithm": "ES256",
+          "issuerMatches": true,
+          "audienceMatches": true,
+          "subjectMatches": true,
+          "clientIdMatches": true,
+          "lifetimeSeconds": 900
+        }
+      }
+    },
+    "cleanup": {
+      "complete": true,
+      "ambiguousHttpRequest": false,
+      "issues": [],
+      "remainingOwnedCount": 0
+    },
+    "elapsedSeconds": 126,
+    "proof": "passed"
+  },
+  "earlierAttempts": [
+    {
+      "checkedAt": "2026-09-12T19:08:45.768Z",
+      "stage": "official-mcp-sdk-three-role-read-proof",
+      "lastToolName": null,
+      "reason": "Medição incluía GET auxiliar do SDK, corrigida para POST tools/call vinculado no início da requisição.",
+      "cleanup": {
+        "complete": true,
+        "ambiguousHttpRequest": false,
+        "issues": [],
+        "remainingOwnedCount": 0
+      }
+    },
+    {
+      "checkedAt": "2026-09-12T19:14:03.522Z",
+      "stage": "postgres-real-copy-all-read-tools-and-pagination",
+      "lastToolName": "listar_insumos",
+      "reason": "Página de um registro não alcançava o cadastro nomeado após 53 registros omitidos; piloto ajustado para dez registros por página.",
+      "cleanup": {
+        "complete": true,
+        "ambiguousHttpRequest": false,
+        "issues": [],
+        "remainingOwnedCount": 0
+      }
+    }
+  ],
+  "databaseClosure": {
+    "roles": [
+      {
+        "name": "brsteel_pilot_importer",
+        "canLogin": false,
+        "bypassRls": false,
+        "superuser": false,
+        "readerMember": false,
+        "importerMember": false,
+        "passwordRemoved": true
+      },
+      {
+        "name": "brsteel_pilot_reader",
+        "canLogin": false,
+        "bypassRls": false,
+        "superuser": false,
+        "readerMember": false,
+        "importerMember": false,
+        "passwordRemoved": true
+      }
+    ],
+    "state": {
+      "ready": true,
+      "capturedAt": "2026-09-12T17:41:15.802+00:00",
+      "completedAt": "2026-09-12T17:54:50.432273+00:00",
+      "snapshotHash": "8a783d1454afcb13a045545de0dbdf7d2d4af000998c05bae5d09fe4f9faeae9",
+      "sourceProject": "marketflow-9h4tg"
+    },
+    "activeSessions": 0,
+    "anonSchemaAccess": false,
+    "readerSchemaAccess": false,
+    "authenticatedSchemaAccess": false
+  },
+  "deployments": {
+    "production": {
+      "before": "dpl_5j2BBDFg73UAnkiYywsEEL3UxTuj",
+      "after": "dpl_5j2BBDFg73UAnkiYywsEEL3UxTuj",
+      "unchanged": true,
+      "state": "READY"
+    },
+    "staging": {
+      "candidateId": "dpl_GpYYyAWxWYW7NKun2roNMZt2AxTz",
+      "candidateUrl": "br-steel-mcp-staging-ibi225cxn-acassius-alves-projects.vercel.app",
+      "restoredId": "dpl_3K3Xt92mbCFYSdNUsiPBRswE5kqk",
+      "restored": true,
+      "state": "READY"
+    }
+  },
+  "environmentRestoration": {
+    "restoredKeys": 8,
+    "allMatch": true,
+    "postgresPilotVariablesPresent": 0
+  },
+  "readerPreflight": {
+    "readerIdentityVerified": true,
+    "tlsVerified": true,
+    "ready": true,
+    "snapshotMatched": true,
+    "denied": {
+      "write": "25006",
+      "auth": "42501",
+      "importRole": "42501"
+    }
+  },
+  "localVerification": {
+    "baselineDiagnostics": 25,
+    "currentDiagnostics": 25,
+    "sameDiagnostics": true,
+    "vitest": {
+      "files": 38,
+      "tests": 226
+    },
+    "postgresIntegrationTests": 18,
+    "buildPassed": true
+  },
+  "upload": {
+    "regularFiles": 489,
+    "privatePaths": 0,
+    "secretMatches": 0,
+    "stagingGuard": true
+  },
+  "runtimeUploadVerification": {
+    "sourceFilesComparedToDeploymentUpload": 334,
+    "sourceDifferences": []
+  },
+  "advisors": {
+    "security": [
+      {
+        "name": "auth_leaked_password_protection",
+        "level": "WARN"
+      }
+    ],
+    "performance": [
+      {
+        "name": "unindexed_foreign_keys",
+        "level": "INFO"
+      },
+      {
+        "name": "unused_index",
+        "level": "INFO"
+      }
+    ]
+  },
+  "limits": [
+    "Prova pelo SDK oficial em HTTPS; interface do Claude e navegação visual completa do OAuth não verificadas nesta etapa.",
+    "OAuth compartilhado redirecionou para a tela de produção; a autorização foi submetida explicitamente à sessão de homologação, sem alterar configuração global.",
+    "Tráfego HTTP medido inclui envelope MCP textual/estruturado e três consultas de acesso ao Firebase e duas negações; não representa egress faturado pelo Supabase.",
+    "Amostra sequencial de uma conta; não mede carga concorrente, tráfego mensal ou redução da fatura.",
+    "Cópia exportada por páginas, sem captura transacional da origem ou sincronização contínua.",
+    "Backup e restauração do schema final e validação direta no Claude continuam pendentes antes de ampliar o piloto."
+  ],
+  "localCredentialCleanup": {
+    "privateConfigFilesRemoved": 5,
+    "finalChangeFilesScanned": 20,
+    "secretMatches": 0
+  }
+}

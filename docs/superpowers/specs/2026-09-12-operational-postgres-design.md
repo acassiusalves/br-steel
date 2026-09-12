@@ -1,6 +1,6 @@
 # Migração do banco operacional para PostgreSQL
 
-Status: etapas 1 e 2 concluídas localmente. Em 12/09/2026, o primeiro ensaio da etapa 3 criou e conferiu uma cópia real no Supabase e mediu os leitores com credencial restrita. [Evidência do piloto](../../evidence/operational-postgres-hosted-pilot.md). A aplicação e o MCP continuam no Firestore; ainda faltam o piloto dos endpoints com usuários restritos, a medição Vercel e o backup do schema final antes de concluir a etapa 3.
+Status: etapas 1 e 2 concluídas localmente. Em 12/09/2026, a etapa 3 conferiu a cópia real, mediu consultas diretas e validou os endpoints MCP em homologação com OAuth e perfis restritos. [Cópia e consultas](../../evidence/operational-postgres-hosted-pilot.md); [endpoints e encerramento](../../evidence/operational-postgres-endpoint-pilot.md). O piloto temporário foi encerrado e a homologação restaurada. A aplicação e o MCP de produção continuam no Firestore. Ainda faltam backup/restauração do schema final, teste direto no Claude e observação de consumo em uso controlado antes de ampliar o piloto ou trocar a fonte oficial.
 
 ## Objetivo e escopo
 

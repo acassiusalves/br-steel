@@ -18,6 +18,9 @@ import { createStoredStockOperations } from '../../src/server/operations/stock';
 import { createProductionDemandOperation } from '../../src/server/operations/production-demand';
 import { createProductionReadOperations } from '../../src/server/operations/production';
 import { createSuppliesReadOperations } from '../../src/server/operations/supplies';
+import { withPilotSnapshot } from '../../src/server/persistence/pilot-snapshot';
+import { createPostgresReadTools } from '../../src/server/mcp/postgres-pilot';
+import { prepareSnapshot } from '../../src/server/migration/operational-snapshot';
 import { pagePermissions } from '../../src/lib/permissions';
 import type { AccessContext } from '../../src/server/access/types';
 
@@ -74,6 +77,8 @@ before(async () => {
   assert.ok(reset.ok);
   for (const row of fixture) await db.collection(row.collection).doc(row.id).set(row.data);
   snapshot = await exportOperationalSnapshot(db,'demo-brsteel-auth');
+  // Leave room for the later synthetic captures without placing them in the future.
+  snapshot.capturedAt = new Date(Date.now()-600000).toISOString();
 });
 after(async () => { await deleteApp(app); await readerPool.end(); await pool.end(); });
 
@@ -182,6 +187,30 @@ test('SQL-backed operation factories preserve per-user authorization and minimal
   await assert.rejects(demandOp(inactive,range),/permissão/);
   await assert.rejects(prodOps.listProduction({...operator,inactivePages:['/producao/kanban']},{view:'lots'}),/permissão/);
 });
+test('exposes an authorized MCP copy and rejects stale metadata without an alternate source', async () => {
+  const hash = prepareSnapshot(snapshot).hash;
+  const policy = { sourceProject:'demo-brsteel-auth',snapshotHash:hash,expiresAt:Date.now()+3600000 };
+  const tools = createPostgresReadTools(readerPool,policy);
+  const call = (name: string, input: unknown, ctx = operator) => tools.find(t=>t.name===name)!.run(ctx,input);
+  const admin: AccessContext = {...operator,actor:{...operator.actor,role:'Administrador'},capabilities:['vendas:read','estoque:read','insumos:read','producao:read']};
+  const sales = await call('resumir_vendas',range,admin);
+  assert.equal(sales.source,'postgres'); assert.equal(sales.readCopy?.snapshotHash,hash);
+  assert.equal(sales.asOf,snapshot.capturedAt); assert.match(sales.warnings.join(' '),/cópia de piloto/);
+  const demandPage = await call('consultar_demanda_producao',{...range,limit:1});
+  assert.equal(demandPage.source,'postgres'); assert.equal((demandPage.data as any[]).length,1);
+  const orderPage = await call('listar_pedidos_para_producao',{limit:1});
+  assert.equal(JSON.stringify(orderPage).includes('PRIVATE-READER-MARKER'),false);
+  await assert.rejects(call('listar_pedidos',{}),{code:'FORBIDDEN'});
+  await assert.rejects(call('listar_lotes_producao',{}, {...operator,inactivePages:['/producao/kanban']}),{code:'FORBIDDEN'});
+  const state = (await pool.query('select captured_at,completed_at from brsteel_import.state')).rows[0];
+  assert.equal(state.captured_at.toISOString(),snapshot.capturedAt); assert.ok(state.completed_at instanceof Date);
+  await assert.rejects(withPilotSnapshot({...policy,snapshotHash:'0'.repeat(64)},()=>stock.list({limit:1})),/unavailable/);
+  await pool.query('update brsteel_import.state set ready=false');
+  try { await assert.rejects(call('consultar_demanda_producao',range),/not ready/); }
+  finally { await pool.query('update brsteel_import.state set ready=true'); }
+  await assert.rejects(pool.query('update brsteel_import.state set completed_at=null'),{code:'23514'});
+});
+
 test('read model corruption is detected and new snapshots reconcile stock updates and deletions', async () => {
   await pool.query("update brsteel_ops.stock_observations set stock_read=jsonb_set(stock_read,'{saldoVirtualTotal}','99') where source_id='02'");
   await assert.rejects(verifySnapshot(pool,snapshot),/Stock read model mismatch/);

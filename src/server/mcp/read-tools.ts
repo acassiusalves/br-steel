@@ -33,6 +33,10 @@ async function myAccess(context: AccessContext) {
  }
  return result({ name: user.name, role: user.role, capabilities, pages: [...pages] });
 }
+const defaultReadOperations = { listSales,getSale,summarizeSales,listProductStock,listSupplies,listMovements,productionDemand,listProduction,getProductionLot,getProductionOrder };
+export type ReadOperations = typeof defaultReadOperations;
+export function createReadTools(operations: ReadOperations = defaultReadOperations): ReadToolDefinition[] {
+const { listSales,getSale,summarizeSales,listProductStock,listSupplies,listMovements,productionDemand,listProduction,getProductionLot,getProductionOrder } = operations;
 const definitions: ReadToolDefinition[] = [
  { name: 'consultar_meu_acesso', title: 'Meu acesso', description: 'Consulta nome e permissões efetivas de leitura do usuário autenticado.', schema: z.object({}).strict(), run: myAccess },
  { name: 'listar_pedidos', title: 'Pedidos', description: 'Lista pedidos com dados comerciais mínimos e paginação.', capability: 'vendas:read', schema: paged.extend({ from: dateSchema.optional(), to: dateSchema.optional(), storeId: z.number().int().optional(), statusId: z.number().int().optional() }).strict(), run: async (ctx, input) => { const r = await listSales(ctx,input); return { ...r, data: r.data.map(sale) }; } },
@@ -72,7 +76,10 @@ const definitions: ReadToolDefinition[] = [
  { name: 'consultar_lote_producao', title: 'Detalhes do lote', description: 'Consulta lote e uma página dos itens operacionais, sem dados financeiros ou clientes.', capability: 'producao:read', page: '/producao/kanban', schema: paged.extend({ lotId: documentIdSchema }).strict(), run: getProductionLot },
 ];
 // Keep direct invocation as strict as transport invocation.
-export const readTools = definitions.map(definition => ({ ...definition, run: async (context: AccessContext, input: unknown) => {
+return definitions.map(definition => ({ ...definition, run: async (context: AccessContext, input: unknown) => {
  if (definition.capability) requireOperation(context, definition.capability, definition.page);
  return serialize(await definition.run(context, definition.schema.parse(input)));
 } }));
+
+}
+export const readTools = createReadTools();

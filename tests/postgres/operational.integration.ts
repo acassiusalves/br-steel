@@ -9,7 +9,7 @@ import { getFirestore, Timestamp } from 'firebase-admin/firestore';
 import { exportOperationalSnapshot } from '../../src/server/migration/operational-export';
 import { firestoreSalesReadRepository } from '../../src/server/persistence/firestore-sales';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, statSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, statSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -63,6 +63,8 @@ test('exports the allowlisted Firestore data and SQL matches the same source', a
       preciseFirst: new Timestamp(seconds, 1000), preciseSecond: new Timestamp(seconds, 2000),
       beforeMidnight: new Timestamp(Date.parse('2026-09-12T23:59:59Z') / 1000, 999500000) });
     const exported=await exportOperationalSnapshot(db,'demo-brsteel-auth');
+    // Leave room for later synthetic capture versions before the real import completion.
+    exported.capturedAt=new Date(Date.now()-600000).toISOString();
     exportedSnapshot=exported;
     assert.equal(exported.records.length,12);
     assert.ok(!JSON.stringify(exported).includes('DO-NOT-EXPORT'));
@@ -141,6 +143,10 @@ test('CLI exports a private snapshot, imports it and verifies without printing s
       const child=spawnSync(process.execPath,['--import','tsx','scripts/operational-import.ts',command,file],{ env:process.env,encoding:'utf8' });
       assert.equal(child.status,0,child.stderr);
       assert.ok(!child.stdout.includes('DO-NOT-EXPORT'));
+      if (command === 'export-local') {
+        const copy = JSON.parse(readFileSync(file,'utf8')); copy.capturedAt=later(0.5);
+        writeFileSync(file,JSON.stringify(copy));
+      }
     }
     assert.equal(statSync(file).mode & 0o777,0o600);
     const invalid=join(directory,'invalid.json'); writeFileSync(invalid,'DO-NOT-LOG-PAYLOAD');
