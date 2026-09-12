@@ -1,0 +1,111 @@
+# Troca da fonte oficial para PostgreSQL — Implementation Plan
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans. Steps use checkbox (`- [ ]`) syntax for tracking. Esta entrega **altera produção**: cada tarefa exige autorização explícita do usuário no momento da execução. Não encadear tarefas automaticamente.
+
+**Goal:** Trocar a fonte oficial de leitura e gravação do núcleo do Firestore para o PostgreSQL, com janela de manutenção, divergência zero conferida no corte e recuperação demonstrada.
+
+**Architecture:** O corte é um procedimento, não uma variável de ambiente. As mutações do núcleo são bloqueadas por um interruptor de manutenção verificado na fronteira de operações; as chamadas já iniciadas drenam; a fila de webhooks acumula sem perder entregas; a reconciliação final roda com os escritores parados; os dados são comparados; só então o seletor muda e a fila é retomada. O ensaio completo acontece primeiro em homologação, com dados reais copiados, antes de qualquer alteração em produção.
+
+**Tech Stack:** Next.js 15, Node.js 22, TypeScript, `pg` 8.23.0, PostgreSQL 17 no Supabase `mlumbvxpaqfzpdjnvzxc`, Firebase Admin, Vercel CLI.
+
+**Spec:** `docs/superpowers/specs/2026-09-12-operational-postgres-design.md`, etapa 5.
+
+## Global Constraints
+
+- Pré-requisito absoluto: etapa 4 concluída e verificada, com as 19 entradas de escrita portadas e equivalentes. **Não iniciar esta etapa com qualquer escritor pendente.**
+- Manter o login do sistema, o OAuth do MCP e a aplicação na Vercel.
+- A mudança de banco não concede permissões nem habilita escrita pelo Claude. `MCP_WRITES_ENABLED=false` permanece.
+- Destino exclusivo `mlumbvxpaqfzpdjnvzxc`; origem exclusiva `marketflow-9h4tg`.
+- Uma cópia ainda desatualizada não deve servir como fonte oficial de saldo ou produção.
+- Uma varredura paginada não é um snapshot transacional: a reconciliação final só vale com os escritores efetivamente parados.
+- Em erro de banco, retornar indisponibilidade; não representar falha como resultado vazio.
+- A remoção de dados Firestore **não** faz parte deste corte. O Firestore permanece intacto e legível como base de retorno.
+- Teto de planejamento: 400 MB por banco e 4 GB de tráfego não cacheado compartilhado por ciclo. Se a projeção medida exceder, ajustar consultas, cache e frequência, ou apresentar o custo de um plano pago. **Não trocar plano automaticamente.**
+- Nenhum passo desta etapa apaga histórico, auditoria ou dados de negócio.
+
+## Escritores a bloquear
+
+Inventário fechado na etapa 4. O interruptor de manutenção precisa cobrir todos:
+
+| Superfície | Caminho | Como é bloqueada |
+| --- | --- | --- |
+| Insumos | `src/server/operations/supplies.ts` (5 ops) | `requireCoreWritesEnabled()` na fronteira |
+| Produção | `src/server/operations/production.ts` (12 ops) | `requireCoreWritesEnabled()` na fronteira |
+| Webhook Bling | `src/app/api/webhook/bling/route.ts` | continua **recebendo e enfileirando**; o dreno é suspenso |
+| Sincronização manual | `src/app/actions.ts` → `order-service.ts` | `requireCoreWritesEnabled()` antes de iniciar |
+| MCP | `src/server/mcp/read-tools.ts` | já somente leitura; `MCP_WRITES_ENABLED=false` |
+| Versões antigas do aplicativo | deployments Vercel anteriores ainda acessíveis | interruptor lido do banco, não de variável de build |
+
+**O interruptor precisa ser lido em tempo de execução a partir de um registro compartilhado, não de uma variável de ambiente do build.** Um deployment antigo com a variável antiga continuaria gravando. Este é o ponto que a spec chama de "versões antigas do aplicativo".
+
+---
+
+## Task 1: Interruptor de manutenção
+
+**Files:**
+- Create: `src/server/operations/maintenance.ts`, `tests/operations/maintenance.test.ts`
+- Modify: `src/server/operations/supplies.ts`, `src/server/operations/production.ts`, `src/app/actions.ts`, `src/server/ingest/webhook-queue.ts`
+
+**Interfaces:**
+
+```ts
+export type CoreWriteMode = 'open' | 'draining' | 'blocked';
+export function readCoreWriteMode(): Promise<CoreWriteMode>;   // sem cache acima de 5 segundos
+export function requireCoreWritesEnabled(): Promise<void>;      // lança MAINTENANCE 503
+```
+
+- [ ] **Passo 1 — Teste vermelho.** Em `tests/operations/maintenance.test.ts`: com modo `blocked`, cada uma das 17 operações de escrita de insumos e produção recusa com `MAINTENANCE` 503 **antes** de tocar a persistência; a sincronização manual recusa ao iniciar; o webhook continua respondendo 200 e enfileirando; as leituras continuam funcionando normalmente. Rodar e confirmar falha.
+- [ ] **Passo 2 — Implementar.** O modo vive num registro compartilhado lido em runtime, com cache de no máximo 5 segundos. `draining` recusa novas mutações mas não interrompe as já iniciadas. A mensagem ao usuário explica manutenção em andamento, não erro.
+- [ ] **Passo 3 — Ligar nas fronteiras.** Inserir `await requireCoreWritesEnabled()` no início de cada operação de escrita, depois da autorização e antes da validação. Em `webhook-queue.ts`, o dreno verifica o modo e não processa enquanto `blocked`.
+- [ ] **Passo 4 — Verificar e commitar.** Suíte completa, typecheck, build. Commit `feat(ops): add core write maintenance switch`.
+
+---
+
+## Task 2: Reconciliação final e comparador de corte
+
+**Files:**
+- Create: `scripts/operational-cutover.ts`, `src/server/migration/operational-reconcile.ts`
+- Test: `tests/postgres/operational-cutover.integration.ts`
+
+**Interfaces:**
+
+```ts
+// CLI: reconcile | compare | report — todos exigem modo 'blocked' confirmado no início e no fim
+export function reconcileFromFirestore(opts: { since: string }): Promise<{ applied: number; deleted: number }>;
+export function compareSources(): Promise<{ divergences: Divergence[]; counts: Record<string, [number, number]> }>;
+```
+
+- [ ] **Passo 1 — Teste vermelho do comparador.** Em ambiente descartável, semear divergências deliberadas: documento presente só no Firestore; só no PostgreSQL; conteúdo diferente; exclusão lógica em um lado; contador de lotes defasado; ordem de itens alterada. O comparador precisa apontar cada uma com coleção e ID. **Um comparador que devolve zero divergências num cenário semeado é uma falha da tarefa, não um sucesso.**
+- [ ] **Passo 2 — Implementar a reconciliação.** Reaproveitar `exportOperationalSnapshot` e `importSnapshot` das etapas 2–3. A reconciliação aplica criações, atualizações e exclusões posteriores à carga anterior, de forma idempotente e versionada. Rejeitar execução se o modo não estiver `blocked`.
+- [ ] **Passo 3 — Implementar o comparador.** Comparar conteúdo normalizado, referências, contagens e agregados por período, mantendo a distinção entre campo ausente, nulo e zero. Cobrir as 13 tabelas e as dez coleções.
+- [ ] **Passo 4 — Verificar e commitar.** `npm run test:postgres`, typecheck. Commit `feat(postgres): add cutover reconciliation and comparator`.
+
+---
+
+## Task 3: Ensaio completo em homologação
+
+**Requer autorização explícita do usuário.** Nenhum passo toca produção.
+
+- [ ] **Passo 1 — Preparar.** Publicar o candidato em `br-steel-mcp-staging.vercel.app` (projeto `prj_YD3ATzBPFQo4bD1ZlojrDTigUZp8`), com cópia recente dos dados reais e credencial de runtime restrita a `brsteel_ops_writer`. Registrar o deployment de rollback.
+- [ ] **Passo 2 — Ensaiar o corte inteiro.** Executar, cronometrando cada fase: `draining` → esperar as chamadas em trânsito → `blocked` → confirmar dreno da fila suspenso → reconciliação final → comparação → exigir **divergência zero** → trocar o seletor → retomar a fila → `open`.
+- [ ] **Passo 3 — Medir.** Registrar duração total da janela, bytes reais das chamadas completas e do backup, e a projeção de ciclo incluindo os demais projetos da organização. Comparar com os tetos de 400 MB por banco e 4 GB de tráfego. Se exceder, parar e apresentar as opções ao usuário antes de qualquer passo em produção.
+- [ ] **Passo 4 — Ensaiar o retorno antes da primeira gravação oficial.** Voltar o seletor para Firestore depois de drenar as chamadas em trânsito. Confirmar que nada foi perdido.
+- [ ] **Passo 5 — Ensaiar o retorno depois de gravações oficiais.** Gravar deliberadamente em PostgreSQL, depois executar o retorno completo: bloquear mutações, reconciliar as alterações de volta ao Firestore incluindo exclusões, conferir os efeitos já enviados a integrações e só então reativar. **Este passo é o que prova que o corte é reversível; sem ele a etapa não avança.**
+- [ ] **Passo 6 — Evidência.** `docs/evidence/operational-postgres-cutover-rehearsal.{md,json}` com tempos, divergências encontradas e corrigidas, medições e limitações. Encerrar acessos temporários e restaurar homologação.
+
+---
+
+## Task 4: Corte em produção
+
+**Requer autorização explícita do usuário, com janela combinada.** Executar somente após a Task 3 aprovada e as medições dentro dos tetos.
+
+- [ ] **Passo 1 — Pré-voo.** Confirmar: backup recente restaurável (etapa 3), deployment de rollback anotado, fila de webhooks vazia ou drenada, nenhuma sincronização manual em curso, comparador em verde na última execução de homologação. Anotar o deployment atual de produção antes de qualquer mudança.
+- [ ] **Passo 2 — Abrir a janela.** `draining` → aguardar o tempo medido na Task 3 → `blocked`. Confirmar pelo registro de auditoria que nenhuma mutação nova entrou.
+- [ ] **Passo 3 — Reconciliar e comparar.** Executar a reconciliação final e o comparador. **Divergência zero é condição de avanço.** Qualquer divergência encerra a janela: reabrir em `open` com Firestore e investigar fora do corte.
+- [ ] **Passo 4 — Ativar.** Trocar o seletor para PostgreSQL para leitores e escritores. Retomar o dreno da fila, que reaplica os eventos acumulados de forma idempotente. Voltar para `open`.
+- [ ] **Passo 5 — Conferir a quente.** Verificar no navegador, com sessão legítima, as telas de vendas, estoque, Kanban, demanda e insumos. Executar uma gravação real de cada domínio e conferir o efeito na tela e no histórico. Verificar o MCP com `Meu acesso` e uma leitura de negócio, esperando `source: postgres`.
+- [ ] **Passo 6 — Evidência.** `docs/evidence/operational-postgres-cutover.{md,json}`: horários reais da janela, resultado do comparador, deployments envolvidos, o que foi verificado e o que não foi. Não afirmar economia de custo: a medição pertence à etapa 6.
+
+**Critério de saída da etapa 5:** escritores antigos bloqueados durante a janela, divergência zero conferida no corte e recuperação demonstrada nos dois sentidos.
+
+**Próxima entrega:** `2026-09-12-operational-postgres-phase6-consolidation.md`.
