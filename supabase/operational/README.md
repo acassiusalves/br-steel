@@ -6,6 +6,8 @@ O [piloto hospedado de 12/09/2026](../../docs/evidence/operational-postgres-host
 
 ## Verificação reproduzível
 
+O [ensaio de backup/restauração](../../docs/evidence/operational-postgres-backup.md) validou o schema final e conteúdo da cópia hospedada em PostgreSQL local descartável. O [roteiro de recuperação](backup-restore.md) descreve a credencial separada, criptografia, conferência e revogação. Backups diários e armazenamento externo ainda precisam ser operacionalizados antes de produção.
+
 Requisitos: Node.js 22, dependências de `npm ci`, Docker, Firebase CLI e Java 21. O script inclui o caminho Homebrew do Java no macOS; em outros ambientes, disponibilize `java` no `PATH`.
 
 ```sh
