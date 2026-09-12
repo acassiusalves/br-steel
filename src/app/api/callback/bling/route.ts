@@ -1,6 +1,8 @@
 
 // app/api/callback/bling/route.ts
 import { NextResponse } from 'next/server';
+import { consumeBlingConnection } from '@/server/integrations/bling-oauth';
+import { getFullBlingCredentials } from '@/server/integrations/bling';
 import { saveBlingCredentials } from '@/app/actions';
 
 // This function should not need to read from Firestore.
@@ -12,10 +14,9 @@ export async function GET(request: Request) {
   const error = searchParams.get('error');
   const errorDescription = searchParams.get('error_description');
 
-  console.log('🔐 [BLING CALLBACK] URL completa:', request.url);
-  console.log('🔐 [BLING CALLBACK] code:', code);
-  console.log('🔐 [BLING CALLBACK] state:', state);
-  console.log('🔐 [BLING CALLBACK] error:', error);
+  try { await consumeBlingConnection(state); }
+  catch { return NextResponse.json({ error: 'Autorização inválida ou expirada. Inicie a conexão novamente.' }, { status: 403 }); }
+  if (process.env.FIRESTORE_EMULATOR_HOST) return NextResponse.json({ error: 'Integração externa desabilitada neste ambiente local.' }, { status: 503 });
 
   // Se o Bling retornou um erro
   if (error) {
@@ -33,8 +34,7 @@ export async function GET(request: Request) {
   }
 
   // Client ID and Secret MUST come from environment variables on the server.
-  const clientId = process.env.BLING_CLIENT_ID;
-  const clientSecret = process.env.BLING_CLIENT_SECRET;
+  const { clientId, clientSecret } = await getFullBlingCredentials();
 
   if (!clientId || !clientSecret) {
     console.error("Credenciais do Bling (Client ID/Secret) não configuradas nas variáveis de ambiente do servidor.");
@@ -56,6 +56,7 @@ export async function GET(request: Request) {
         code: code,
       }),
       cache: "no-store",
+      signal: AbortSignal.timeout(20000),
     });
 
     const tokenData = await tokenResponse.json();
@@ -103,7 +104,7 @@ export async function GET(request: Request) {
             </style>
              <script>
               setTimeout(() => {
-                window.location.href = "/api";
+                window.location.href = "/api-settings";
               }, 2000);
             </script>
           </head>
@@ -111,7 +112,7 @@ export async function GET(request: Request) {
             <div class="container">
               <h1>Sucesso!</h1>
               <p>Sua conta Bling foi conectada. Você será redirecionado em instantes.</p>
-              <a href="/api">Voltar para o painel</a>
+              <a href="/api-settings">Voltar para o painel</a>
             </div>
           </body>
         </html>
@@ -143,8 +144,8 @@ export async function GET(request: Request) {
             <div class="container">
               <h1>Erro na Conexão</h1>
               <p>Não foi possível obter os tokens de acesso do Bling.</p>
-              <p>Detalhes: <code>${error.message}</code></p>
-              <p><a href="/api">Tentar novamente</a></p>
+              <p>Detalhes: <code>A conexão falhou. Tente gerar um novo link de autorização.</code></p>
+              <p><a href="/api-settings">Tentar novamente</a></p>
             </div>
           </body>
         </html>

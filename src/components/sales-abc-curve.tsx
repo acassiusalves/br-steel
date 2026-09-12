@@ -13,7 +13,6 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
-import { collection, onSnapshot, orderBy, query } from 'firebase/firestore';
 import {
   endOfDay,
   endOfMonth,
@@ -47,7 +46,7 @@ import {
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
-import { db } from '@/lib/firebase';
+import { fetchAllOperationPages, subscribeOperation } from '@/lib/operation-client';
 import { cn } from '@/lib/utils';
 import {
   computeAbc,
@@ -207,6 +206,7 @@ const isCancelled = (order: SaleOrder) =>
 export default function SalesAbcCurve() {
   const { toast } = useToast();
 
+  const [loadError, setLoadError] = React.useState<string | null>(null);
   const [allSales, setAllSales] = React.useState<SaleOrder[]>([]);
   const [isLoading, setIsLoading] = React.useState(true);
   const [metric, setMetric] = React.useState<AbcMetric>('revenue');
@@ -261,27 +261,12 @@ export default function SalesAbcCurve() {
     refreshGroups();
   }, [refreshGroups]);
 
-  // Firestore subscription — mirrors sales-list-page.tsx:125-154
+  // Protected sales polling, paused while the page is hidden.
   React.useEffect(() => {
     setIsLoading(true);
-    const ordersCollection = collection(db, 'salesOrders');
-    const q = query(ordersCollection, orderBy('data', 'desc'));
-
-    const unsubscribe = onSnapshot(
-      q,
-      (snapshot) => {
-        const sales: SaleOrder[] = [];
-        snapshot.forEach((doc) => sales.push(doc.data() as SaleOrder));
-        setAllSales(sales);
-        setIsLoading(false);
-      },
-      (error) => {
-        console.error('Erro ao buscar pedidos do Firestore:', error);
-        setIsLoading(false);
-      }
-    );
-
-    return () => unsubscribe();
+    return subscribeOperation(() => fetchAllOperationPages<SaleOrder>('/api/operations/sales'), sales => {
+      setAllSales(sales); setLoadError(null); setIsLoading(false);
+    }, error => { setAllSales([]); setLoadError(error.message); setIsLoading(false); });
   }, []);
 
   // Filter orders by date and drop cancelled ones
@@ -692,6 +677,7 @@ export default function SalesAbcCurve() {
 
   return (
     <>
+      {loadError && <p role="alert" className="text-destructive">{loadError}</p>}
       {/* Header */}
       <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
         <div>

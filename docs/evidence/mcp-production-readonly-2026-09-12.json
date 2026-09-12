@@ -1,0 +1,140 @@
+{
+  "dateUtc": "2026-09-12",
+  "capturedAtUtc": "2026-09-12T03:02:48.123175+00:00",
+  "status": "Production read-only published; actual production Claude acceptance pending",
+  "sourceCommit": "7f8c9a5",
+  "deploymentId": "dpl_25QP3Q2cjkbABU45pB3tKJbMUhA5",
+  "origin": "https://br-steel.vercel.app",
+  "resource": "https://br-steel.vercel.app/api/mcp",
+  "firestoreProject": "marketflow-9h4tg",
+  "supabaseProject": "mlumbvxpaqfzpdjnvzxc",
+  "billing": {
+    "authorizedAccountSuffix": "7132D4",
+    "enabled": true,
+    "onlySelectedProjectChanged": true
+  },
+  "flags": {
+    "mcpEnabled": true,
+    "oauthEnabled": true,
+    "writesEnabled": false,
+    "userAccessMode": "authenticated"
+  },
+  "configuration": {
+    "onlyActivationFlagsChangedSincePhase1": true,
+    "existingSecretsPreserved": true,
+    "cronsPreserved": 3,
+    "indexesReady": 11,
+    "ttlActive": [
+      "mcpAuditLogs.expiresAt",
+      "mcpRateLimits.expiresAt"
+    ],
+    "temporaryVercelTestCredentialRevoked": true
+  },
+  "validation": {
+    "testsPassed": 160,
+    "testFiles": 27,
+    "localBuildPassed": true,
+    "cloudBuildPassed": true,
+    "typecheckExistingDiagnostics": 25,
+    "typecheckNewDiagnostics": 0,
+    "independentReview": "approved; no actionable findings",
+    "uploadRegularFilesScanned": 414,
+    "uploadPrivateValueMatches": 0
+  },
+  "supabase": {
+    "migrationApplied": true,
+    "remoteSqlAssertionsPassed": true,
+    "ownerAndAclPreserved": true,
+    "privateSchemaExposed": false,
+    "siteUrl": "https://br-steel.vercel.app",
+    "authorizationPath": "/oauth/consent",
+    "exactRedirects": [
+      "https://br-steel-mcp-staging.vercel.app/oauth/consent",
+      "https://br-steel.vercel.app/oauth/consent"
+    ],
+    "oauthEnabled": true,
+    "dynamicRegistrationEnabled": true,
+    "securityAdvisors": {
+      "databaseOrFunctionFindings": 0,
+      "warnings": [
+        "auth_leaked_password_protection"
+      ]
+    },
+    "actualProductionCodeAndRefreshVerified": false,
+    "actualLegacyPilotRefreshVerifiedAfterChange": false
+  },
+  "canonicalHttpChecks": [
+    {
+      "path": "/login",
+      "status": 200
+    },
+    {
+      "path": "/.well-known/oauth-protected-resource/api/mcp",
+      "status": 200,
+      "metadata": {
+        "resource": "https://br-steel.vercel.app/api/mcp",
+        "resource_name": "BR Steel",
+        "authorization_servers": [
+          "https://mlumbvxpaqfzpdjnvzxc.supabase.co/auth/v1"
+        ],
+        "bearer_methods_supported": [
+          "header"
+        ],
+        "scopes_supported": [
+          "openid",
+          "email",
+          "profile",
+          "offline_access"
+        ]
+      }
+    },
+    {
+      "path": "/api/mcp",
+      "status": 401,
+      "challenge": "Bearer resource_metadata=\"https://br-steel.vercel.app/.well-known/oauth-protected-resource/api/mcp\", error=\"invalid_token\""
+    },
+    {
+      "path": "/api/auth/me",
+      "status": 401
+    },
+    {
+      "path": "/api/operations/sales",
+      "status": 401
+    },
+    {
+      "path": "/api/operations/supplies",
+      "status": 401
+    },
+    {
+      "path": "/api/cron/ml-health",
+      "status": 401
+    }
+  ],
+  "actualUserBrowserChecks": {
+    "session": "Existing real user session; no forged cookies",
+    "supplyRegistration": {
+      "rendered": true,
+      "namedRows": 1,
+      "missingCostAndUnit": "Não informado"
+    },
+    "supplyInventory": {
+      "rendered": true,
+      "storedBalancePreserved": true,
+      "storedMinimumPreserved": true,
+      "unknownValuation": "Não informado"
+    },
+    "businessWritesByAgent": false
+  },
+  "runtimeLogs": {
+    "sampleRequests": 28,
+    "unexpected5xx": 0
+  },
+  "stagingPilotConnectionRevoked": false,
+  "gitPushOrMerge": false,
+  "remaining": [
+    "Connect personal Claude to production resource with real BR Steel credentials",
+    "Validate effective permissions and compare sales, stored stock and production reads",
+    "Validate production code/refresh and revocation/reconnection through legitimate user flow",
+    "Later implement MCP writes; no business write tool enabled"
+  ]
+}

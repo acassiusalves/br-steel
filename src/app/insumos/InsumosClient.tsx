@@ -45,12 +45,11 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
 import { useSearchParams } from 'next/navigation';
-import { collection, query, orderBy, getDocs } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
-import type { Supply } from '@/types/supply';
+import { fetchAllOperationPages, subscribeOperation, notifyOperationsChanged } from '@/lib/operation-client';
+import type { Supply as SupplyInput, SupplyRead as Supply } from '@/types/supply';
 import type { InventoryItem } from '@/types/inventory';
 import { addSupply, updateSupply, deleteSupply } from '@/services/supply-service';
-import { addInventoryMovement } from '@/services/inventory-service';
+import { addInventoryMovement, inventoryItem } from '@/services/inventory-service';
 import {
   Select,
   SelectContent,
@@ -90,7 +89,7 @@ const CadastroInsumo = ({ supplies, isLoading, onAction }: {
     
     const formData = new FormData(event.currentTarget);
 
-    const supplyData: Omit<Supply, 'id' | 'estoqueAtual'> = {
+    const supplyData: Omit<SupplyInput, 'id' | 'estoqueAtual'> = {
         nome: formData.get('nome') as string,
         codigo: formData.get('codigo') as string,
         gtin: formData.get('gtin') as string,
@@ -196,11 +195,11 @@ const CadastroInsumo = ({ supplies, isLoading, onAction }: {
                             <TableCell className="font-medium">{supply.nome}</TableCell>
                             <TableCell>{supply.codigo}</TableCell>
                             <TableCell>{supply.gtin}</TableCell>
-                            <TableCell>{supply.unidade}</TableCell>
-                            <TableCell className="text-right">{new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(supply.precoCusto || 0)}</TableCell>
-                            <TableCell className="text-right">{supply.estoqueMinimo}</TableCell>
-                            <TableCell className="text-right">{supply.estoqueMaximo}</TableCell>
-                            <TableCell className="text-right">{supply.tempoEntrega}</TableCell>
+                            <TableCell>{supply.unidade || 'Não informado'}</TableCell>
+                            <TableCell className="text-right">{formatCurrency(supply.precoCusto)}</TableCell>
+                            <TableCell className="text-right">{supply.estoqueMinimo ?? 'Não informado'}</TableCell>
+                            <TableCell className="text-right">{supply.estoqueMaximo ?? 'Não informado'}</TableCell>
+                            <TableCell className="text-right">{supply.tempoEntrega ?? 'Não informado'}</TableCell>
                             <TableCell className="text-right">
                                 <DropdownMenu>
                                     <DropdownMenuTrigger asChild>
@@ -317,22 +316,24 @@ const CadastroInsumo = ({ supplies, isLoading, onAction }: {
   )
 }
 
-const formatCurrency = (value: number | undefined) => {
+const formatCurrency = (value: number | null | undefined) => {
+    if (value == null || !Number.isFinite(value)) return 'Não informado';
     return new Intl.NumberFormat('pt-BR', {
         style: 'currency',
         currency: 'BRL',
-    }).format(value || 0);
+    }).format(value);
 }
 
 const StockStatusBadge = ({ item }: { item: InventoryItem }) => {
-    if (item.estoqueAtual <= 0) {
+    if (item.status === 'desconhecido') return <Badge variant="outline">Não informado</Badge>;
+    if (item.status === 'esgotado') {
       return (
         <Badge variant="destructive" className="flex items-center gap-1 whitespace-nowrap">
           <AlertTriangle className="w-3 h-3" /> Esgotado
         </Badge>
       );
     }
-    if (item.estoqueAtual < item.estoqueMinimo) {
+    if (item.status === 'baixo') {
       return (
         <Badge variant="secondary" className="bg-yellow-400 text-yellow-900 flex items-center gap-1 whitespace-nowrap hover:bg-yellow-400/80">
           <AlertTriangle className="w-3 h-3" /> Estoque Baixo
@@ -369,9 +370,9 @@ const EstoqueInsumo = ({ inventory, isLoading, onAction }: {
     }, [searchTerm, inventory]);
 
     const stats = React.useMemo(() => {
-        const totalValue = inventory.reduce((acc, item) => acc + item.valorEmEstoque, 0);
-        const lowStockCount = inventory.filter(item => item.estoqueAtual > 0 && item.estoqueAtual < item.estoqueMinimo).length;
-        const outOfStockCount = inventory.filter(item => item.estoqueAtual <= 0).length;
+        const totalValue = inventory.some(item => item.valorEmEstoque === null) ? null : inventory.reduce((acc, item) => acc + (item.valorEmEstoque ?? 0), 0);
+        const lowStockCount = inventory.filter(item => item.status === 'baixo').length;
+        const outOfStockCount = inventory.filter(item => item.status === 'esgotado').length;
         return { totalValue, lowStockCount, outOfStockCount };
     }, [inventory]);
 
@@ -583,8 +584,8 @@ const EstoqueInsumo = ({ inventory, isLoading, onAction }: {
                                 <TableRow key={item.supply.id}>
                                     <TableCell className="font-medium">{item.supply.nome}</TableCell>
                                     <TableCell>{item.supply.codigo}</TableCell>
-                                    <TableCell className="text-right font-bold">{item.estoqueAtual} {item.supply.unidade}</TableCell>
-                                    <TableCell className="text-right">{item.estoqueMinimo} {item.supply.unidade}</TableCell>
+                                    <TableCell className="text-right font-bold">{item.estoqueAtual ?? 'Não informado'} {item.supply.unidade || '(unidade não informada)'}</TableCell>
+                                    <TableCell className="text-right">{item.estoqueMinimo ?? 'Não informado'} {item.supply.unidade || '(unidade não informada)'}</TableCell>
                                     <TableCell className="text-right">{formatCurrency(item.valorEmEstoque)}</TableCell>
                                     <TableCell><StockStatusBadge item={item} /></TableCell>
                                     <TableCell className="text-right">
@@ -653,53 +654,23 @@ export default function InsumosClient() {
   const [isLoading, setIsLoading] = React.useState(true);
   const { toast } = useToast();
 
-  const fetchSupplies = React.useCallback(async () => {
-    setIsLoading(true);
-    try {
-        const q = query(collection(db, "supplies"), orderBy('nome', 'asc'));
-        const querySnapshot = await getDocs(q);
-
-        const suppliesData: Supply[] = [];
-        const inventoryItems: InventoryItem[] = [];
-
-        querySnapshot.forEach(doc => {
-            const supply = { id: doc.id, ...doc.data() } as Supply;
-            suppliesData.push(supply);
-
-            const estoqueAtual = supply.estoqueAtual || 0;
-            const valorEmEstoque = estoqueAtual > 0 ? estoqueAtual * supply.precoCusto : 0;
-            inventoryItems.push({
-                supply: supply,
-                estoqueAtual: estoqueAtual,
-                estoqueMinimo: supply.estoqueMinimo,
-                valorEmEstoque: valorEmEstoque,
-                status: estoqueAtual <= 0 ? 'esgotado' : (estoqueAtual < supply.estoqueMinimo ? 'baixo' : 'em_estoque'),
-            });
-        });
-        
-        setSupplies(suppliesData);
-        setInventory(inventoryItems);
-
-    } catch (error) {
-        console.error("Error fetching supplies:", error);
-        toast({
-            variant: 'destructive',
-            title: 'Erro ao Buscar Dados',
-            description: 'Não foi possível carregar os insumos e o estoque.'
-        });
-    } finally {
-        setIsLoading(false);
-    }
-  }, [toast]);
-  
-  React.useEffect(() => {
-    fetchSupplies();
-  }, [fetchSupplies]);
+  const [loadError, setLoadError] = React.useState<string | null>(null);
+  const fetchSupplies = notifyOperationsChanged;
+  React.useEffect(() => subscribeOperation(
+    () => fetchAllOperationPages<Supply>('/api/operations/supplies'),
+    rows => {
+      const sorted = [...rows].sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'));
+      setSupplies(sorted);
+      setInventory(sorted.map(inventoryItem));
+      setLoadError(null); setIsLoading(false);
+    }, error => { setSupplies([]); setInventory([]); setLoadError(error.message); setIsLoading(false); }
+  ), []);
 
 
   return (
     <DashboardLayout>
       <div className="flex-1 p-4 pt-6 md:p-8">
+        {loadError && <p role="alert" className="text-destructive">{loadError}</p>}
         <Suspense fallback={<div className="p-4">Carregando…</div>}>
           <InsumosTabView
             supplies={supplies}

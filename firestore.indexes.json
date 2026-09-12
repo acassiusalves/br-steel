@@ -1,4 +1,3 @@
-
 {
   "indexes": [
     {
@@ -12,46 +11,6 @@
         {
           "fieldPath": "notaFiscal.id",
           "order": "ASCENDING"
-        }
-      ]
-    },
-    {
-      "collectionGroup": "salesOrders",
-      "queryScope": "COLLECTION",
-      "fields": [
-        {
-          "fieldPath": "data",
-          "order": "DESCENDING"
-        }
-      ]
-    },
-    {
-      "collectionGroup": "salesOrders",
-      "queryScope": "COLLECTION",
-      "fields": [
-        {
-          "fieldPath": "notaFiscal.id",
-          "order": "ASCENDING"
-        }
-      ]
-    },
-    {
-      "collectionGroup": "salesOrders",
-      "queryScope": "COLLECTION",
-      "fields": [
-        {
-          "fieldPath": "id",
-          "order": "ASCENDING"
-        }
-      ]
-    },
-    {
-      "collectionGroup": "salesOrders",
-      "queryScope": "COLLECTION",
-      "fields": [
-        {
-          "fieldPath": "importedAt",
-          "order": "DESCENDING"
         }
       ]
     },
@@ -84,21 +43,15 @@
       ]
     },
     {
-      "collectionGroup": "users",
+      "collectionGroup": "mercadoLivreConversations",
       "queryScope": "COLLECTION",
       "fields": [
         {
-          "fieldPath": "email",
+          "fieldPath": "accountId",
           "order": "ASCENDING"
-        }
-      ]
-    },
-    {
-      "collectionGroup": "users",
-      "queryScope": "COLLECTION",
-      "fields": [
+        },
         {
-          "fieldPath": "createdAt",
+          "fieldPath": "lastMessageAt",
           "order": "DESCENDING"
         }
       ]
@@ -107,37 +60,145 @@
       "collectionGroup": "mercadoLivreConversations",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "accountId", "order": "ASCENDING" },
-        { "fieldPath": "lastMessageAt", "order": "DESCENDING" }
+        {
+          "fieldPath": "accountId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "queueStatus",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "lastMessageAt",
+          "order": "DESCENDING"
+        }
       ]
     },
     {
       "collectionGroup": "mercadoLivreConversations",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "accountId", "order": "ASCENDING" },
-        { "fieldPath": "queueStatus", "order": "ASCENDING" },
-        { "fieldPath": "lastMessageAt", "order": "DESCENDING" }
-      ]
-    },
-    {
-      "collectionGroup": "mercadoLivreConversations",
-      "queryScope": "COLLECTION",
-      "fields": [
-        { "fieldPath": "accountId", "order": "ASCENDING" },
-        { "fieldPath": "priority", "order": "ASCENDING" },
-        { "fieldPath": "lastMessageAt", "order": "DESCENDING" }
+        {
+          "fieldPath": "accountId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "priority",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "lastMessageAt",
+          "order": "DESCENDING"
+        }
       ]
     },
     {
       "collectionGroup": "mercadoLivreWebhookEvents",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "topic", "order": "ASCENDING" },
-        { "fieldPath": "status", "order": "ASCENDING" },
-        { "fieldPath": "receivedAt", "order": "ASCENDING" }
+        {
+          "fieldPath": "topic",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "receivedAt",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "salesOrders",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "loja.id",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "data",
+          "order": "DESCENDING"
+        },
+        {
+          "fieldPath": "__name__",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "salesOrders",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "situacao.id",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "data",
+          "order": "DESCENDING"
+        },
+        {
+          "fieldPath": "__name__",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "salesOrders",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "loja.id",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "situacao.id",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "data",
+          "order": "DESCENDING"
+        },
+        {
+          "fieldPath": "__name__",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "inventoryMovements",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "supplyId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "createdAt",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "__name__",
+          "order": "ASCENDING"
+        }
       ]
     }
   ],
-  "fieldOverrides": []
+  "fieldOverrides": [
+    {
+      "collectionGroup": "mcpAuditLogs",
+      "fieldPath": "expiresAt",
+      "ttl": true,
+      "indexes": []
+    },
+    {
+      "collectionGroup": "mcpRateLimits",
+      "fieldPath": "expiresAt",
+      "ttl": true,
+      "indexes": []
+    }
+  ]
 }

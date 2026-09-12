@@ -1,8 +1,7 @@
 'use client';
 
 import * as React from 'react';
-import { collection, onSnapshot, query, where, orderBy } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+import { subscribeOperation } from '@/lib/operation-client';
 import { format, formatDistanceToNow } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { Loader2, MessageSquare, MoreVertical, Pencil, Trash2 } from 'lucide-react';
@@ -18,6 +17,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Card, CardContent } from '@/components/ui/card';
 import {
+  getComments,
   createComment,
   updateComment,
   deleteComment,
@@ -43,31 +43,16 @@ export function CommentsList({ lotId }: CommentsListProps) {
 
   // Listener real-time para comentários
   React.useEffect(() => {
-    const commentsRef = collection(db, 'productionComments');
-    const q = query(
-      commentsRef,
-      where('lotId', '==', lotId),
-      orderBy('createdAt', 'desc')
-    );
-
-    const unsubscribe = onSnapshot(
-      q,
-      (snapshot) => {
-        const commentsData = snapshot.docs.map(doc => ({
-          id: doc.id,
-          ...doc.data(),
-        })) as ProductionComment[];
-        setComments(commentsData);
-        setIsLoading(false);
-      },
-      (error) => {
-        console.error('Erro ao carregar comentários:', error);
-        setIsLoading(false);
-      }
-    );
+    const unsubscribe = subscribeOperation(() => getComments(lotId), (data) => {
+      setComments(data);
+      setIsLoading(false);
+    }, (error) => {
+      setComments([]); setIsLoading(false);
+      toast({ variant: 'destructive', title: 'Erro ao carregar comentários', description: error.message });
+    });
 
     return () => unsubscribe();
-  }, [lotId]);
+  }, [lotId, toast]);
 
   const handleSubmit = async () => {
     if (!newComment.trim()) return;

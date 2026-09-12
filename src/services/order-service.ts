@@ -1,8 +1,9 @@
 
-"use server";
+import 'server-only';
 
-import { db } from '@/lib/firebase';
-import { collection, writeBatch, doc, query, where, getDocs, getDoc } from 'firebase/firestore';
+import { adminDb } from '@/lib/firebase-admin';
+import { documentIdSchema, serialize } from '@/server/operations/common';
+
 
 /**
  * Verifica quais pedidos já existem no banco de dados
@@ -15,7 +16,7 @@ export async function getExistingOrderIds(orderIds: (string|number)[]): Promise<
     }
 
     const existingIds = new Set<string>();
-    const ordersCollection = collection(db, 'salesOrders');
+    const ordersCollection = adminDb.collection('salesOrders');
     const numericOrderIds = orderIds.map(id => parseInt(String(id), 10)).filter(id => !isNaN(id));
 
 
@@ -24,8 +25,8 @@ export async function getExistingOrderIds(orderIds: (string|number)[]): Promise<
     for (let i = 0; i < numericOrderIds.length; i += batchSize) {
         const batch = numericOrderIds.slice(i, i + batchSize);
         if(batch.length > 0) {
-            const q = query(ordersCollection, where('id', 'in', batch));
-            const querySnapshot = await getDocs(q);
+            const q = ordersCollection.where('id', 'in', batch);
+            const querySnapshot = await q.get();
             
             querySnapshot.forEach((doc) => {
                 existingIds.add(String(doc.data().id));
@@ -45,9 +46,9 @@ export async function getImportedOrderIdsWithDetails(options: {
     requireInvoiceXml?: boolean;
 } = {}): Promise<Set<string>> {
     try {
-        const ordersCollection = collection(db, 'salesOrders');
-        const q = query(ordersCollection); // Query for all documents
-        const snapshot = await getDocs(q);
+        const ordersCollection = adminDb.collection('salesOrders');
+        const q = ordersCollection; // Query for all documents
+        const snapshot = await q.get();
         const ids = new Set<string>();
         snapshot.forEach(doc => {
             const orderData = doc.data();
@@ -88,10 +89,10 @@ export async function getImportedOrderIdsWithDetails(options: {
  */
 export async function getLastImportedOrderDate(): Promise<Date | null> {
     try {
-        const ordersCollection = collection(db, 'salesOrders');
+        const ordersCollection = adminDb.collection('salesOrders');
         // Esta consulta seria otimizada com um índice no campo 'data'
-        const q = query(ordersCollection);
-        const querySnapshot = await getDocs(q);
+        const q = ordersCollection;
+        const querySnapshot = await q.get();
         
         let lastDate: Date | null = null;
         
@@ -153,7 +154,7 @@ export async function saveSalesOrdersOptimized(orders: any[]): Promise<{ count: 
         return { count: 0, updated: 0, created: 0 };
     }
 
-    const ordersCollection = collection(db, 'salesOrders');
+    const ordersCollection = adminDb.collection('salesOrders');
 
     let totalUpdated = 0;
     let totalCreated = 0;
@@ -173,12 +174,12 @@ export async function saveSalesOrdersOptimized(orders: any[]): Promise<{ count: 
         const end = Math.min(start + BATCH_SIZE, orders.length);
         const ordersBatch = orders.slice(start, end);
 
-        const batch = writeBatch(db);
+        const batch = adminDb.batch();
         let batchUpdated = 0;
         let batchCreated = 0;
 
         ordersBatch.forEach(order => {
-            const docRef = doc(ordersCollection, String(order.id));
+            const docRef = ordersCollection.doc(documentIdSchema.parse(String(order.id)));
             const isUpdate = existingIds.has(String(order.id));
 
             const orderWithMetadata = {
@@ -188,7 +189,7 @@ export async function saveSalesOrdersOptimized(orders: any[]): Promise<{ count: 
                 isImported: true
             };
 
-            batch.set(docRef, orderWithMetadata, { merge: true });
+            batch.set(docRef, serialize(orderWithMetadata), { merge: true });
 
             if (isUpdate) {
                 batchUpdated++;
@@ -221,9 +222,9 @@ export async function saveSalesOrdersOptimized(orders: any[]): Promise<{ count: 
  */
 export async function orderExists(orderId: string): Promise<boolean> {
     try {
-        const docRef = doc(db, 'salesOrders', orderId);
-        const docSnap = await getDoc(docRef);
-        return docSnap.exists();
+        const docRef = adminDb.collection('salesOrders').doc(documentIdSchema.parse(orderId));
+        const docSnap = await docRef.get();
+        return docSnap.exists;
     } catch (error) {
         console.error(`Erro ao verificar existência do pedido ${orderId}:`, error);
         return false;

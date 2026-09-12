@@ -34,27 +34,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const [isAuthenticated, setIsAuthenticated] = useState(false);
     const [isLoading, setIsLoading] = useState(true);
 
-    // Carrega dados do localStorage ao montar e confirma a sessão HttpOnly no servidor.
+    // A sessão e as permissões são sempre confirmadas pelo servidor.
     useEffect(() => {
         const loadFromStorage = async () => {
             try {
-                const storedAuth = localStorage.getItem(STORAGE_KEYS.isAuthenticated);
-                const storedUser = localStorage.getItem(STORAGE_KEYS.userData);
-                const storedPermissions = localStorage.getItem(STORAGE_KEYS.permissions);
-                const storedInactivePages = localStorage.getItem(STORAGE_KEYS.inactivePages);
-
-                if (storedAuth === 'true' && storedUser) {
-                    setIsAuthenticated(true);
-                    setUser(JSON.parse(storedUser));
-
-                    if (storedPermissions) {
-                        setPermissions(JSON.parse(storedPermissions));
-                    }
-                    if (storedInactivePages) {
-                        setInactivePages(JSON.parse(storedInactivePages));
-                    }
-                }
-
                 const response = await fetch('/api/auth/me', { cache: 'no-store' });
                 if (response.ok) {
                     const data = await response.json();
@@ -71,8 +54,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                     clearStorage();
                 }
             } catch (error) {
-                console.error('Erro ao carregar dados do localStorage:', error);
-                // Em caso de erro, limpa tudo
+                console.error('Erro ao confirmar a sessão:', error);
+                setUser(null);
+                setIsAuthenticated(false);
                 clearStorage();
             } finally {
                 setIsLoading(false);
@@ -140,8 +124,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (!response.ok || !data?.ok) {
             setPermissions(pagePermissions);
             setInactivePages([]);
-            localStorage.setItem(STORAGE_KEYS.permissions, JSON.stringify(pagePermissions));
-            localStorage.setItem(STORAGE_KEYS.inactivePages, JSON.stringify([]));
+            setUser(null);
+            setIsAuthenticated(false);
+            clearStorage();
             return;
         }
 

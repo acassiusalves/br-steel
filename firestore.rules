@@ -20,32 +20,50 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
-    match /users/{userId} {
-      allow read, write: if legacyClientAccess();
-
-      match /{document=**} {
-        allow read, write: if legacyClientAccess();
-      }
+    // Identidade e permissões: somente backend autenticado com Admin SDK.
+    match /users/{document=**} {
+      allow read, write: if false;
     }
 
     match /appSettings/{document=**} {
-      allow read, write: if legacyClientAccess();
+      allow read, write: if false;
     }
 
-    match /appConfig/{document=**} {
-      allow read, write: if legacyClientAccess();
+    // OAuth identities, intents and grants are accessible only through authenticated backend services.
+    match /mcpIdentities/{document=**} {
+      allow read, write: if false;
     }
+
+    match /mcpIdentityBindings/{document=**} {
+      allow read, write: if false;
+    }
+
+    match /mcpConnections/{document=**} {
+      allow read, write: if false;
+    }
+
+    match /mcpAuthorizationIntents/{document=**} {
+      allow read, write: if false;
+    }
+
+    match /appConfig/{configId}/{document=**} {
+      allow read, write: if !(configId in ['blingCredentials', 'syncProgress', 'webhookStatus', 'stockWebhookStatus']) && legacyClientAccess();
+    }
+
+    // Índices internos e sequência transacional: somente Admin SDK.
+    match /supplyCodes/{document=**} { allow read, write: if false; }
+    match /operationsMetadata/{document=**} { allow read, write: if false; }
 
     match /supplies/{document=**} {
-      allow read, write: if legacyClientAccess();
+      allow read, write: if false;
     }
 
     match /inventoryMovements/{document=**} {
-      allow read, write: if legacyClientAccess();
+      allow read, write: if false;
     }
 
     match /salesOrders/{document=**} {
-      allow read, write: if legacyClientAccess();
+      allow read, write: if false;
     }
 
     // Conciliação financeira: acessada exclusivamente pela API route
@@ -80,19 +98,19 @@ service cloud.firestore {
     }
 
     match /productionColumns/{document=**} {
-      allow read, write: if legacyClientAccess();
+      allow read, write: if false;
     }
 
     match /productionLots/{document=**} {
-      allow read, write: if legacyClientAccess();
+      allow read, write: if false;
     }
 
     match /productionLotItems/{document=**} {
-      allow read, write: if legacyClientAccess();
+      allow read, write: if false;
     }
 
     match /productionComments/{document=**} {
-      allow read, write: if legacyClientAccess();
+      allow read, write: if false;
     }
 
     match /feed_entries/{document=**} {
@@ -108,11 +126,11 @@ service cloud.firestore {
     }
 
     match /stockUpdates/{document=**} {
-      allow read, write: if legacyClientAccess();
+      allow read, write: if false;
     }
 
     match /webhookDebugLogs/{document=**} {
-      allow read, write: if legacyClientAccess();
+      allow read, write: if false;
     }
 
     match /{document=**} {

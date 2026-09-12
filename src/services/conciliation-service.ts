@@ -1,12 +1,11 @@
 "use client";
 
-// Camada client da conciliação: listener Firestore (client SDK) e chamadas
+// Camada client da conciliação: consulta periódica autorizada de pedidos e chamadas
 // à API route /api/financeiro/conciliacao. A lógica pura de transformação
 // vive em @/lib/conciliation/orders e é re-exportada aqui por conveniência.
 
-import { collection, onSnapshot, orderBy, query } from "firebase/firestore";
 
-import { db } from "@/lib/firebase";
+import { fetchAllOperationPages, subscribeOperation } from "@/lib/operation-client";
 import type { ConciliationSystemStatus } from "@/lib/conciliation/status";
 import type { ConciliationFinancialDivergenceRules } from "@/lib/conciliation/divergences";
 import { normalizeConciliationCustomCalculations } from "@/lib/conciliation/calculations";
@@ -61,19 +60,10 @@ export const subscribeConciliationOrders = (
   onData: (orders: ConciliationOrder[]) => void,
   onError: (error: Error) => void
 ) => {
-  const ordersCollection = collection(db, "salesOrders");
-  const ordersQuery = query(ordersCollection, orderBy("data", "desc"));
-
-  return onSnapshot(
-    ordersQuery,
-    (snapshot) => {
-      const orders = snapshot.docs.map((documentSnapshot) =>
-        normalizeSaleOrderForConciliation(documentSnapshot.data() as SaleOrder)
-      );
-
-      onData(orders);
-    },
-    (error) => onError(error)
+  return subscribeOperation(
+    () => fetchAllOperationPages<SaleOrder>('/api/operations/finance-orders'),
+    orders => onData(orders.map(normalizeSaleOrderForConciliation)),
+    error => { onData([]); onError(error); }
   );
 };
 

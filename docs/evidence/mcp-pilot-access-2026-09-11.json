@@ -1,0 +1,18 @@
+{
+  "checkedAt": "2026-09-11T22:30:30.381Z",
+  "origin": "https://br-steel-mcp-staging.vercel.app",
+  "project": "brsteel-mcp-staging",
+  "userId": "staging-proof-947500b6-1d98-4a8e-9bbe-68217e0815b2",
+  "email": "piloto-mcp@example.invalid",
+  "role": "Administrador",
+  "loginBeforeProvisioning": 401,
+  "loginAfterProvisioning": 200,
+  "mustChangePassword": true,
+  "mcpBlockedUntilPasswordChange": 403,
+  "incorrectPasswordRejected": 401,
+  "allowedByDeployedPilotList": true,
+  "writesEnabled": false,
+  "credentialsCommitted": false,
+  "hostedClaude": false,
+  "pilotRetainedForUser": true
+}

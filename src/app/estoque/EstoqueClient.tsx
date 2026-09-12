@@ -34,8 +34,9 @@ import {
 } from "@/components/ui/dialog";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Skeleton } from '@/components/ui/skeleton';
-import { getProductsStock, getBlingCredentials } from '@/app/actions';
-import type { ProductStock } from '@/app/actions';
+import { fetchAllOperationPages, subscribeOperation, notifyOperationsChanged } from '@/lib/operation-client';
+import type { OperationResult } from '@/types/operations';
+import type { ProductStock } from '@/types/product-stock';
 import { useToast } from '@/hooks/use-toast';
 import { ScrollArea } from '@/components/ui/scroll-area';
 
@@ -46,8 +47,7 @@ export default function EstoqueClient() {
   const [searchTerm, setSearchTerm] = React.useState('');
   const [statusFilter, setStatusFilter] = React.useState('all');
   const [error, setError] = React.useState<string | null>(null);
-  const [isConnected, setIsConnected] = React.useState(false);
-  const [isSimulatedData, setIsSimulatedData] = React.useState(false);
+  const [metadata, setMetadata] = React.useState<OperationResult<ProductStock[]> | null>(null);
   const [isAlertsModalOpen, setIsAlertsModalOpen] = React.useState(false);
   
   // Pagination State
@@ -56,78 +56,15 @@ export default function EstoqueClient() {
   
   const { toast } = useToast();
 
-  const fetchStockData = React.useCallback(async () => {
-    setIsLoading(true);
-    setError(null);
-    try {
-        const credentials = await getBlingCredentials();
-        const hasToken = !!credentials.connected; // usa connected agora
-        setIsConnected(hasToken);
-
-        if (!hasToken) {
-            setError('Não conectado ao Bling. Por favor, configure a conexão na página de API para visualizar o estoque.');
-            setIsLoading(false);
-            return;
-        }
-
-      const result = await getProductsStock();
-      const data = result.data;
-      const isSimulated = result.isSimulated || false;
-      
-      setIsSimulatedData(isSimulated);
-      
-      if (data.length === 0) {
-          setError('Nenhum produto com estoque foi encontrado. Verifique se há produtos cadastrados com estoque no Bling.');
-          setStockData([]);
-          setIsLoading(false);
-          return;
-      }
-
-      const aggregatedStock = new Map<string, { 
-          productId: number;
-          productName: string;
-          saldoFisicoTotal: number;
-          saldoVirtualTotal: number;
-      }>();
-
-      data.forEach(item => {
-          const sku = item.produto.codigo;
-          if (!aggregatedStock.has(sku)) {
-              aggregatedStock.set(sku, {
-                  productId: item.produto.id,
-                  productName: item.produto.nome,
-                  saldoFisicoTotal: item.saldoFisicoTotal,
-                  saldoVirtualTotal: item.saldoVirtualTotal,
-              });
-          } else {
-              const existing = aggregatedStock.get(sku)!;
-              existing.saldoFisicoTotal += item.saldoFisico;
-              existing.saldoVirtualTotal += item.saldoVirtual;
-          }
-      });
-      
-      const processedData = Array.from(aggregatedStock.entries()).map(([sku, value]) => ({
-          produto: { id: value.productId, codigo: sku, nome: value.productName },
-          saldoFisicoTotal: value.saldoFisicoTotal,
-          saldoVirtualTotal: value.saldoVirtualTotal,
-          deposito: { id: 0, nome: ''},
-          saldoFisico: value.saldoFisicoTotal,
-          saldoVirtual: value.saldoVirtualTotal,
-      }));
-      
-      setStockData(processedData);
-
-    } catch (error: any) {
-      console.error("Failed to fetch stock data:", error);
-      setError(error.message);
-    } finally {
-      setIsLoading(false);
-    }
-  }, []);
-
-  React.useEffect(() => {
-    fetchStockData();
-  }, [fetchStockData]);
+  React.useEffect(() => subscribeOperation(async () => {
+    let metadata: OperationResult<ProductStock[]> | null = null;
+    const rows = await fetchAllOperationPages<ProductStock>('/api/operations/stock', page => {
+      metadata = metadata ? { ...page, warnings: [...new Set([...metadata.warnings, ...page.warnings])] } : page;
+    });
+    return { rows, metadata };
+  }, result => {
+    setStockData(result.rows); setMetadata(result.metadata); setError(null); setIsLoading(false);
+  }, error => { setStockData([]); setFilteredData([]); setMetadata(null); setError(error.message); setIsLoading(false); }), []);
 
   React.useEffect(() => {
     let filtered = stockData;
@@ -143,11 +80,11 @@ export default function EstoqueClient() {
       filtered = filtered.filter(item => {
         switch (statusFilter) {
           case 'out-of-stock':
-            return item.saldoVirtualTotal <= 0;
+            return item.saldoVirtualTotal !== null && item.saldoVirtualTotal <= 0;
           case 'low-stock':
-            return item.saldoVirtualTotal > 0 && item.saldoVirtualTotal < 10;
+            return item.saldoVirtualTotal !== null && item.saldoVirtualTotal > 0 && item.saldoVirtualTotal < 10;
           case 'in-stock':
-            return item.saldoVirtualTotal >= 10;
+            return item.saldoVirtualTotal !== null && item.saldoVirtualTotal >= 10;
           default:
             return true;
         }
@@ -155,18 +92,21 @@ export default function EstoqueClient() {
     }
 
     setFilteredData(filtered);
-    setCurrentPage(1); // Reset page on filter change
+
   }, [stockData, searchTerm, statusFilter]);
   
+  React.useEffect(() => { setCurrentPage(1); }, [searchTerm, statusFilter, rowsPerPage]);
+
   // Pagination Logic
-  const totalPages = Math.ceil(filteredData.length / rowsPerPage);
+  const totalPages = Math.max(1, Math.ceil(filteredData.length / rowsPerPage));
   const paginatedData = filteredData.slice(
     (currentPage - 1) * rowsPerPage,
     currentPage * rowsPerPage
   );
 
 
-  const StockStatusBadge = ({ virtual }: { virtual: number }) => {
+  const StockStatusBadge = ({ virtual }: { virtual: number | null }) => {
+    if (virtual === null) return <Badge variant="outline">Não informado</Badge>;
     if (virtual <= 0) {
       return (
         <Badge variant="destructive" className="flex items-center gap-1 whitespace-nowrap">
@@ -193,24 +133,16 @@ export default function EstoqueClient() {
 
   const getStockStats = () => {
     const total = stockData.length;
-    const outOfStock = stockData.filter(item => item.saldoVirtualTotal <= 0).length;
-    const lowStock = stockData.filter(item => item.saldoVirtualTotal > 0 && item.saldoVirtualTotal < 10).length;
-    const inStock = stockData.filter(item => item.saldoVirtualTotal >= 10).length;
+    const outOfStock = stockData.filter(item => item.saldoVirtualTotal !== null && item.saldoVirtualTotal <= 0).length;
+    const lowStock = stockData.filter(item => item.saldoVirtualTotal !== null && item.saldoVirtualTotal > 0 && item.saldoVirtualTotal < 10).length;
+    const inStock = stockData.filter(item => item.saldoVirtualTotal !== null && item.saldoVirtualTotal >= 10).length;
 
     return { total, outOfStock, lowStock, inStock };
   };
 
   const stats = getStockStats();
 
-  const handleRefresh = async () => {
-    await fetchStockData();
-    if(!error) {
-        toast({
-            title: "Dados Atualizados",
-            description: "Os níveis de estoque foram sincronizados com o Bling.",
-        });
-    }
-  };
+  const handleRefresh = notifyOperationsChanged;
 
   return (
     <DashboardLayout>
@@ -245,7 +177,7 @@ export default function EstoqueClient() {
                   <div className="space-y-4 py-4">
                     {stockData.length > 0 ? (
                       stockData.map((item) => (
-                        <div key={item.produto.id} className="grid grid-cols-3 items-center gap-4">
+                        <div key={item.produto.codigo} className="grid grid-cols-3 items-center gap-4">
                           <Label htmlFor={`alert-${item.produto.id}`} className="col-span-2 truncate" title={item.produto.nome}>
                             {item.produto.nome}
                           </Label>
@@ -278,25 +210,12 @@ export default function EstoqueClient() {
             <AlertCircle className="h-4 w-4" />
             <AlertDescription>
               {error}
-              {!isConnected && (
-                <div className="mt-2">
-                  <Button asChild variant="outline" size="sm">
-                    <a href="/configuracoes?tab=api">Configurar Conexão</a>
-                  </Button>
-                </div>
-              )}
             </AlertDescription>
           </Alert>
         )}
 
-        {isSimulatedData && !error && (
-          <Alert>
-            <Info className="h-4 w-4" />
-            <AlertDescription>
-              <strong>Dados Simulados:</strong> A API de estoque do Bling pode não estar disponível para sua conta. Usando dados simulados com base na sua lista de produtos.
-            </AlertDescription>
-          </Alert>
-        )}
+        {metadata && <p className="text-sm text-muted-foreground">Fonte: {metadata.source} · Consulta: {new Date(metadata.asOf).toLocaleString('pt-BR')} {metadata.warnings.join(' ')}</p>}
+        {stockData.some(item => item.saldoVirtualTotal === null) && <p className="text-sm">Há produtos com estoque não informado; eles não entram nos indicadores de disponibilidade.</p>}
 
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
           <Card>
@@ -307,7 +226,7 @@ export default function EstoqueClient() {
             <CardContent>
               {isLoading ? <Skeleton className="h-8 w-1/2" /> : <div className="text-2xl font-bold">{stats.total}</div>}
               <p className="text-xs text-muted-foreground">
-                SKUs únicos {isSimulatedData ? '(simulado)' : 'cadastrados'}
+                SKUs únicos cadastrados
               </p>
             </CardContent>
           </Card>
@@ -409,11 +328,11 @@ export default function EstoqueClient() {
                   ))
                 ) : paginatedData.length > 0 ? (
                     paginatedData.map((item) => (
-                        <TableRow key={item.produto.id}>
+                        <TableRow key={item.produto.codigo}>
                             <TableCell className="font-medium">{item.produto.codigo}</TableCell>
-                            <TableCell>{item.produto.nome}</TableCell>
-                            <TableCell className="text-right font-bold">{item.saldoFisicoTotal}</TableCell>
-                            <TableCell className="text-right font-bold">{item.saldoVirtualTotal}</TableCell>
+                            <TableCell>{item.produto.nome}<span className="block text-xs text-muted-foreground">{item.source} · {new Date(item.asOf).toLocaleString('pt-BR')}</span></TableCell>
+                            <TableCell className="text-right font-bold">{item.saldoFisicoTotal ?? 'Não informado'}</TableCell>
+                            <TableCell className="text-right font-bold">{item.saldoVirtualTotal ?? 'Não informado'}</TableCell>
                             <TableCell>
                                 <StockStatusBadge 
                                     virtual={item.saldoVirtualTotal} 

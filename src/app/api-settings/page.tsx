@@ -11,7 +11,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useToast } from '@/hooks/use-toast';
-import { getBlingCredentials, saveBlingCredentials, disconnectBling, countImportedOrders, smartSyncOrders, fullSyncOrders, deleteAllSalesOrders, getMercadoLivreCredentials, saveMercadoLivreCredentials, disconnectMercadoLivre, pingMlConnection, startMlOAuth, listMlAccounts, setPrimaryMlAccount, deleteMlAccount, getMlAppConfigStatus, getGeminiCredentials, saveGeminiCredentials, type SyncProgress, type MlAccountSummary, type OrderSyncOptions } from '@/app/actions';
+import { getBlingCredentials, saveBlingCredentials, startBlingOAuth, disconnectBling, countImportedOrders, smartSyncOrders, fullSyncOrders, deleteAllSalesOrders, getMercadoLivreCredentials, saveMercadoLivreCredentials, disconnectMercadoLivre, pingMlConnection, startMlOAuth, listMlAccounts, setPrimaryMlAccount, deleteMlAccount, getMlAppConfigStatus, getGeminiCredentials, saveGeminiCredentials, type SyncProgress, type MlAccountSummary, type OrderSyncOptions } from '@/app/actions';
 import { format, startOfMonth, endOfMonth, subDays } from 'date-fns';
 import { Calendar as CalendarIcon } from 'lucide-react';
 import type { DateRange } from 'react-day-picker';
@@ -191,24 +191,11 @@ function ApiSettingsContent() {
     }
   };
 
-  const handleConnect = () => {
-    if (!credentials.clientId) {
-        toast({
-            variant: "destructive",
-            title: "Client ID Faltando",
-            description: "Por favor, insira e salve seu Client ID do Bling.",
-        });
-        return;
-    }
+  const handleConnect = async () => {
     setIsGenerating(true);
-    const state = Math.random().toString(36).substring(7);
-    localStorage.setItem('bling_oauth_state', state);
-
-    // Bling usa a URL de callback cadastrada no aplicativo automaticamente
-    const authorizationUrl = `https://www.bling.com.br/Api/v3/oauth/authorize?response_type=code&client_id=${credentials.clientId}&state=${state}`;
-    
-    setAuthUrl(authorizationUrl);
-    setIsGenerating(false);
+    try { setAuthUrl(await startBlingOAuth()); }
+    catch (error) { toast({ variant: "destructive", title: "Erro ao conectar", description: error instanceof Error ? error.message : "Não foi possível iniciar a conexão." }); }
+    finally { setIsGenerating(false); }
   };
 
   const handleDisconnect = async () => {

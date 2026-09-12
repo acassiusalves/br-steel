@@ -13,3 +13,6 @@ export interface Supply {
     createdAt?: string;
     updatedAt?: string;
 }
+
+/** Named inventory records may predate fields required by today's write form. */
+export type SupplyRead = Pick<Supply, 'id' | 'nome'> & Partial<Omit<Supply, 'id' | 'nome'>>;

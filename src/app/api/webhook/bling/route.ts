@@ -1,22 +1,24 @@
 import { NextResponse } from 'next/server';
 import { createHmac } from 'crypto';
-import { doc, setDoc, getDoc, collection, addDoc } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+import { adminDb } from '@/lib/firebase-admin';
+import { FieldValue } from 'firebase-admin/firestore';
+import { z } from 'zod';
+import { documentIdSchema } from '@/server/operations/common';
+import { blingFetchWithRefresh as blingFetch } from '@/server/integrations/bling';
 import { saveSalesOrders } from '@/services/order-service';
-import { invalidateStockCache } from '@/app/actions';
+import { invalidateProductStockCache } from '@/server/operations/stock';
 import { enrichOrderWithInvoice } from '@/services/bling-invoice-service';
 
 // Bling API configuration
 const BLING_API_BASE = 'https://api.bling.com.br/Api/v3';
 
 // Firestore document references
-const credentialsDocRef = doc(db, "appConfig", "blingCredentials");
-const webhookStatusDocRef = doc(db, "appConfig", "webhookStatus");
+const webhookStatusDocRef = adminDb.collection("appConfig").doc("webhookStatus");
 
 // Debug: salva todos os webhooks recebidos para análise
 async function logWebhookDebug(data: any) {
   try {
-    await addDoc(collection(db, 'webhookDebugLogs'), {
+    await adminDb.collection('webhookDebugLogs').add( {
       ...data,
       timestamp: new Date().toISOString(),
     });
@@ -82,110 +84,6 @@ function getEventAction(event: string): string {
   return parts[parts.length - 1] || '';
 }
 
-// Get Bling credentials from Firestore
-async function getFullBlingCredentials(): Promise<BlingCredentials> {
-  const snap = await getDoc(credentialsDocRef);
-  const saved = snap.exists() ? (snap.data() as BlingCredentials) : {};
-  return {
-    clientId: saved.clientId || process.env.BLING_CLIENT_ID,
-    clientSecret: saved.clientSecret || process.env.BLING_CLIENT_SECRET,
-    accessToken: saved.accessToken,
-    refreshToken: saved.refreshToken,
-    expiresAt: saved.expiresAt,
-  };
-}
-
-// Refresh access token
-async function refreshAccessToken(): Promise<BlingCredentials> {
-  const creds = await getFullBlingCredentials();
-  if (!creds.clientId || !creds.clientSecret || !creds.refreshToken) {
-    throw new Error('Credenciais do Bling incompletas para renovar o token.');
-  }
-
-  const basic = Buffer.from(`${creds.clientId}:${creds.clientSecret}`).toString('base64');
-  const body = new URLSearchParams({
-    grant_type: 'refresh_token',
-    refresh_token: String(creds.refreshToken),
-  });
-
-  const res = await fetch('https://www.bling.com.br/Api/v3/oauth/token', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/x-www-form-urlencoded',
-      'Authorization': `Basic ${basic}`,
-      'Accept': '1.0',
-    },
-    body: body.toString(),
-    cache: 'no-store',
-  });
-
-  const json = await res.json().catch(() => ({}));
-  if (!res.ok) {
-    throw new Error(`Refresh falhou (${res.status}): ${json?.error?.description || res.statusText}`);
-  }
-
-  const update: Partial<BlingCredentials> = {};
-  if (json.access_token) update.accessToken = json.access_token;
-  if (json.refresh_token) update.refreshToken = json.refresh_token;
-  if (json.expires_in) update.expiresAt = Date.now() + Number(json.expires_in) * 1000;
-
-  await setDoc(credentialsDocRef, update, { merge: true });
-  return { ...creds, ...update };
-}
-
-// Fetch with automatic token refresh
-async function blingFetch(url: string): Promise<any> {
-  let creds = await getFullBlingCredentials();
-  const skewMs = 60 * 1000;
-
-  // Check if token needs refresh
-  const needsRefresh = !creds.expiresAt || (Date.now() + skewMs >= creds.expiresAt);
-  if (needsRefresh) {
-    console.log('🔑 [WEBHOOK] Token próximo de expirar, renovando...');
-    try {
-      creds = await refreshAccessToken();
-    } catch (e) {
-      console.error('❌ [WEBHOOK] Falha ao renovar token:', e);
-    }
-  }
-
-  const res = await fetch(url, {
-    headers: {
-      'Accept': 'application/json',
-      'Authorization': `Bearer ${creds.accessToken}`,
-    },
-    cache: 'no-store',
-  });
-
-  const text = await res.text();
-
-  // Handle token invalid
-  if (res.status === 401 || (res.status === 400 && /invalid_token|token expir/i.test(text))) {
-    console.log('🔄 [WEBHOOK] Token inválido, tentando renovar...');
-    creds = await refreshAccessToken();
-
-    const retryRes = await fetch(url, {
-      headers: {
-        'Accept': 'application/json',
-        'Authorization': `Bearer ${creds.accessToken}`,
-      },
-      cache: 'no-store',
-    });
-
-    const retryText = await retryRes.text();
-    if (!retryRes.ok) {
-      throw new Error(`Erro do Bling (${retryRes.status}): ${retryText}`);
-    }
-    return JSON.parse(retryText);
-  }
-
-  if (!res.ok) {
-    throw new Error(`Erro do Bling (${res.status}): ${text}`);
-  }
-
-  return JSON.parse(text);
-}
-
 // Fetch order details from Bling API
 async function fetchOrderDetails(orderId: number): Promise<any> {
   const url = `${BLING_API_BASE}/pedidos/vendas/${orderId}`;
@@ -197,19 +95,19 @@ async function fetchOrderDetails(orderId: number): Promise<any> {
 
 // Update webhook status in Firestore
 async function updateWebhookStatus(orderId: number, event: string): Promise<void> {
-  const snap = await getDoc(webhookStatusDocRef);
-  const current = snap.exists() ? snap.data() : { totalReceived: 0 };
+  const snap = await webhookStatusDocRef.get();
+  const current = snap.exists ? snap.data() : { totalReceived: 0 };
 
-  await setDoc(webhookStatusDocRef, {
+  await webhookStatusDocRef.set( {
     lastUpdate: new Date().toISOString(),
     lastOrderId: orderId,
     lastEvent: event,
-    totalReceived: (current.totalReceived || 0) + 1,
+    totalReceived: FieldValue.increment(1),
   });
 }
 
 // Firestore reference for stock updates
-const stockStatusDocRef = doc(db, "appConfig", "stockWebhookStatus");
+const stockStatusDocRef = adminDb.collection("appConfig").doc("stockWebhookStatus");
 
 // Cache para situações do Bling (mapeamento id -> nome)
 let situacoesCache: Map<number, string> | null = null;
@@ -311,9 +209,11 @@ async function handleStockWebhook(payload: any, event: string): Promise<{ proces
 
   // Extrair dados do payload v3
   const produtoId = data.produto?.id;
-  const saldoVirtual = data.saldoVirtualTotal ?? data.deposito?.saldoVirtual ?? 0;
+  // A deposit balance is not the product total. Ignore events without a total.
+  const saldoVirtual = data.saldoVirtualTotal;
+  if (typeof saldoVirtual !== 'number' || !Number.isFinite(saldoVirtual)) return { processed: 0 };
 
-  if (!produtoId) {
+  if (!Number.isSafeInteger(produtoId) || produtoId <= 0) {
     console.warn('⚠️ [WEBHOOK-ESTOQUE] Payload sem ID do produto');
     return { processed: 0 };
   }
@@ -327,12 +227,12 @@ async function handleStockWebhook(payload: any, event: string): Promise<{ proces
     console.warn(`⚠️ [WEBHOOK-ESTOQUE] Não foi possível obter SKU para produto ${produtoId}`);
 
     // Salvar com ID como fallback temporário
-    await setDoc(stockStatusDocRef, {
+    await stockStatusDocRef.set( {
       lastUpdate: new Date().toISOString(),
       lastEvent: event,
       lastProcessed: 0,
       lastError: `Produto ${produtoId} não encontrado na API`,
-      totalReceived: ((await getDoc(stockStatusDocRef)).data()?.totalReceived || 0) + 1,
+      totalReceived: FieldValue.increment(1),
     });
 
     return { processed: 0 };
@@ -352,26 +252,26 @@ async function handleStockWebhook(payload: any, event: string): Promise<{ proces
   };
 
   // Salvar no Firebase - collection stockUpdates
-  const stockDocRef = doc(db, 'stockUpdates', sku);
-  await setDoc(stockDocRef, stockData, { merge: true });
+  const stockDocRef = adminDb.collection('stockUpdates').doc(documentIdSchema.parse(sku));
+  await stockDocRef.set( stockData, { merge: true });
 
   console.log(`✅ [WEBHOOK-ESTOQUE] SKU ${sku}: estoque = ${saldoVirtual}`);
 
   // Atualizar status do webhook de estoque
-  const statusSnap = await getDoc(stockStatusDocRef);
-  const currentStatus = statusSnap.exists() ? statusSnap.data() : { totalReceived: 0 };
+  const statusSnap = await stockStatusDocRef.get();
+  const currentStatus = statusSnap.exists ? statusSnap.data() : { totalReceived: 0 };
 
-  await setDoc(stockStatusDocRef, {
+  await stockStatusDocRef.set( {
     lastUpdate: new Date().toISOString(),
     lastEvent: event,
     lastProcessed: 1,
     lastSku: sku,
     lastStock: saldoVirtual,
-    totalReceived: (currentStatus.totalReceived || 0) + 1,
+    totalReceived: FieldValue.increment(1),
   });
 
   // Invalidar cache de estoque
-  invalidateStockCache();
+  invalidateProductStockCache();
 
   return { processed: 1 };
 }
@@ -380,12 +280,12 @@ async function handleStockWebhook(payload: any, event: string): Promise<{ proces
 async function handleOrderDeleted(orderId: number): Promise<void> {
   console.log(`🗑️ [WEBHOOK] Marcando pedido ${orderId} como excluído...`);
 
-  const orderDocRef = doc(db, 'salesOrders', String(orderId));
-  const orderSnap = await getDoc(orderDocRef);
+  const orderDocRef = adminDb.collection('salesOrders').doc(String(orderId));
+  const orderSnap = await orderDocRef.get();
 
-  if (orderSnap.exists()) {
+  if (orderSnap.exists) {
     // Option 1: Mark as deleted (soft delete)
-    await setDoc(orderDocRef, {
+    await orderDocRef.set( {
       deleted: true,
       deletedAt: new Date().toISOString(),
     }, { merge: true });
@@ -400,41 +300,21 @@ export async function POST(request: Request) {
   const startTime = Date.now();
 
   try {
-    const rawBody = await request.text();
-    const signature = request.headers.get('X-Bling-Signature-256') ||
-                     request.headers.get('X-Bling-Signature');
-
-    console.log('═══════════════════════════════════════════════════════════');
-    console.log('📨 [WEBHOOK] Evento recebido do Bling');
-    console.log('═══════════════════════════════════════════════════════════');
-
-    // DEBUG: Salva TODOS os webhooks recebidos para análise
-    let parsedForDebug: any = null;
-    try {
-      parsedForDebug = JSON.parse(rawBody);
-    } catch {
-      parsedForDebug = { rawBody: rawBody.substring(0, 1000) };
+    const secret = process.env.BLING_WEBHOOK_SECRET;
+    if (!secret) return NextResponse.json({ error: 'Webhook não configurado.' }, { status: 503 });
+    const signature = request.headers.get('X-Bling-Signature-256') || request.headers.get('X-Bling-Signature');
+    if (!signature) return NextResponse.json({ error: 'Assinatura obrigatória.' }, { status: 401 });
+    const reader = request.body?.getReader();
+    if (!reader) return NextResponse.json({ error: 'Payload vazio.' }, { status: 400 });
+    let size = 0; const chunks: Uint8Array[] = [];
+    while (true) {
+      const { value, done } = await reader.read(); if (done) break;
+      size += value.byteLength;
+      if (size > 1024 * 1024) { await reader.cancel(); return NextResponse.json({ error: 'Payload muito grande.' }, { status: 413 }); }
+      chunks.push(value);
     }
-    await logWebhookDebug({
-      source: 'bling-webhook',
-      event: parsedForDebug?.event || 'unknown',
-      hasSignature: !!signature,
-      payload: parsedForDebug,
-      headers: {
-        contentType: request.headers.get('content-type'),
-        userAgent: request.headers.get('user-agent'),
-      },
-    });
-
-    // Verify signature if secret is configured
-    const webhookSecret = process.env.BLING_WEBHOOK_SECRET;
-    if (webhookSecret && signature) {
-      if (!verifySignature(rawBody, signature, webhookSecret)) {
-        console.error('❌ [WEBHOOK] Assinatura inválida');
-        return NextResponse.json({ error: 'Assinatura inválida' }, { status: 401 });
-      }
-      console.log('✅ [WEBHOOK] Assinatura verificada');
-    }
+    const rawBody = Buffer.concat(chunks).toString('utf8');
+    if (!verifySignature(rawBody, signature, secret)) return NextResponse.json({ error: 'Assinatura inválida.' }, { status: 401 });
 
     // Parse payload
     let payload;
@@ -445,7 +325,8 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'JSON inválido' }, { status: 400 });
     }
 
-    const { event, data } = payload;
+    const { event, data } = z.object({ event: z.string().min(1).max(100), data: z.record(z.unknown()) }).parse(payload);
+    await logWebhookDebug({ source: 'bling-webhook', event, hasSignature: true });
     console.log(`📋 [WEBHOOK] Evento: ${event}`);
     console.log(`📋 [WEBHOOK] Dados: ${JSON.stringify(data).substring(0, 200)}...`);
 
@@ -456,7 +337,7 @@ export async function POST(request: Request) {
 
     // Process order events
     if (isOrderEvent(event)) {
-      const orderId = data.id;
+      const orderId = z.number().int().positive().safe().parse(data.id);
       const action = getEventAction(event);
 
       if (!orderId) {
@@ -527,7 +408,7 @@ export async function POST(request: Request) {
       await updateWebhookStatus(orderId, event);
 
       // Invalida o cache de estoque para garantir dados atualizados na próxima requisição
-      invalidateStockCache();
+      invalidateProductStockCache();
 
       console.log(`✅ [WEBHOOK] Pedido ${orderDetails.numero || orderId} salvo com sucesso`);
       console.log(`⏱️ [WEBHOOK] Processado em ${Date.now() - startTime}ms`);
@@ -578,7 +459,7 @@ export async function POST(request: Request) {
     // Always return 200 to prevent infinite retries from Bling
     return NextResponse.json({
       success: false,
-      error: error.message,
+      error: 'Falha ao processar evento autenticado.',
       processedIn: `${Date.now() - startTime}ms`,
     });
   }
@@ -586,9 +467,6 @@ export async function POST(request: Request) {
 
 // GET - Health check endpoint
 export async function GET() {
-  const webhookStatus = await getDoc(webhookStatusDocRef);
-  const statusData = webhookStatus.exists() ? webhookStatus.data() : null;
-
   return NextResponse.json({
     status: 'ok',
     message: 'Webhook do Bling está ativo',
@@ -602,11 +480,5 @@ export async function GET() {
       'estoque.deleted',
     ],
     signatureVerification: !!process.env.BLING_WEBHOOK_SECRET,
-    lastWebhook: statusData ? {
-      lastUpdate: statusData.lastUpdate,
-      lastOrderId: statusData.lastOrderId,
-      lastEvent: statusData.lastEvent,
-      totalReceived: statusData.totalReceived,
-    } : null,
   });
 }

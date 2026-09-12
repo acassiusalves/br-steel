@@ -15,17 +15,20 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useToast } from '@/hooks/use-toast';
-import { getUsers, addUser, deleteUser, updateUserRole, seedUsers } from '@/services/user-service';
+import { getUsers, addUser, deleteUser, updateUserRole, setUserActive } from '@/services/user-service';
 import { loadAppSettings, saveAppSettings } from '@/services/app-settings-service';
 import type { User } from '@/types/user';
 import { pagePermissions as defaultPagePermissions, availableRoles } from "@/lib/permissions";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Switch } from '@/components/ui/switch';
+import { useAuth } from '@/contexts/AuthContext';
 
 
 function UsersPageContent() {
     const [users, setUsers] = React.useState<User[]>([]);
-    const [currentUser, setCurrentUser] = React.useState<User | null>(null);
+    const { user: currentUser, refreshPermissions } = useAuth();
+    const originalUsers = React.useRef<User[]>([]);
+    const [newCredential, setNewCredential] = React.useState<{ email: string; password: string } | null>(null);
     const [permissions, setPermissions] = React.useState(defaultPagePermissions);
     const [inactivePages, setInactivePages] = React.useState<string[]>([]);
 
@@ -33,35 +36,24 @@ function UsersPageContent() {
     const [isFormOpen, setIsFormOpen] = React.useState(false);
 
     const [isSaving, setIsSaving] = React.useState(false);
-    const [isSavingPermissions, setIsSavingPermissions] = React.useState(false);
     const [hasUnsavedChanges, setHasUnsavedChanges] = React.useState(false);
 
     const [deletingUser, setDeletingUser] = React.useState<User | null>(null);
     const { toast } = useToast();
 
     // Validação de permissão
-    const isAdmin = React.useMemo(() => currentUser?.role === 'Administrador', [currentUser]);
+    const isAdmin = currentUser?.role === 'Administrador';
 
     const fetchInitialData = React.useCallback(async () => {
         setIsLoading(true);
         try {
-            const userEmail = localStorage.getItem('userEmail');
             const [userList, appSettings] = await Promise.all([
                 getUsers(),
                 loadAppSettings()
             ]);
 
-            const loggedInUser = userList.find(u => u.email === userEmail);
-            setCurrentUser(loggedInUser || null);
-
-            // Seed users apenas se não houver usuários
-            if (userList.length === 0) {
-              await seedUsers();
-              const seededUsers = await getUsers();
-              setUsers(seededUsers);
-            } else {
-              setUsers(userList);
-            }
+            originalUsers.current = userList;
+            setUsers(userList);
 
             // Merge: defaults do código + Firestore (Firestore tem prioridade)
             const mergedPermissions = {
@@ -158,12 +150,14 @@ function UsersPageContent() {
 
         setIsSaving(true);
         try {
-            // Salva permissões e funções de usuários em paralelo
-            const updatePromises = users.map(user => updateUserRole(user.id, user.role));
-            await Promise.all([
-                saveAppSettings({ permissions: permissions, inactivePages: inactivePages }),
-                ...updatePromises
-            ]);
+            await saveAppSettings({ permissions, inactivePages });
+            for (const user of users) {
+                const original = originalUsers.current.find(item => item.id === user.id);
+                if (original?.role !== user.role) await updateUserRole(user.id, user.role);
+                if ((original?.active !== false) !== (user.active !== false)) await setUserActive(user.id, user.active !== false);
+            }
+            await fetchInitialData();
+            await refreshPermissions();
 
             setHasUnsavedChanges(false);
             toast({
@@ -171,7 +165,7 @@ function UsersPageContent() {
                 description: "Todas as configurações foram atualizadas com sucesso."
             });
         } catch (e) {
-             toast({ variant: "destructive", title: "Erro", description: "Não foi possível salvar as configurações."})
+             toast({ variant: "destructive", title: "Erro", description: e instanceof Error ? e.message : "Não foi possível salvar as configurações."})
         } finally {
             setIsSaving(false);
         }
@@ -194,10 +188,11 @@ function UsersPageContent() {
         };
 
         try {
-            await addUser(userData);
+            const created = await addUser(userData);
+            setNewCredential({ email: userData.email, password: created.temporaryPassword });
             toast({
                 title: 'Usuário Adicionado!',
-                description: 'Senha temporária para o primeiro acesso: 123456.'
+                description: 'Entregue a senha temporária ao novo usuário.'
             });
             setIsFormOpen(false);
             fetchInitialData();
@@ -256,22 +251,16 @@ function UsersPageContent() {
     }
 
 
+    if (!isAdmin) {
+        return <Card><CardHeader><CardTitle>Acesso restrito</CardTitle><CardDescription>Apenas administradores podem acessar os dados desta página.</CardDescription></CardHeader></Card>;
+    }
+
     return (
         <div className="space-y-8">
-            {!isAdmin && (
-                <Card className="border-yellow-500 bg-yellow-50 dark:bg-yellow-950">
-                    <CardContent className="pt-6">
-                        <p className="text-sm text-yellow-800 dark:text-yellow-200">
-                            Você está visualizando esta página no modo somente leitura. Apenas administradores podem fazer alterações.
-                        </p>
-                    </CardContent>
-                </Card>
-            )}
-
            <Card>
                 <CardHeader>
                     <CardTitle className="flex items-center gap-2"><Lock /> Permissões por Função</CardTitle>
-                    <CardDescription>Defina o que cada função pode ver e fazer no sistema. A função de Administrador sempre tem acesso a tudo.</CardDescription>
+                    <CardDescription>Defina o que cada função pode ver e fazer no sistema. Administradores acessam todas as páginas ativas.</CardDescription>
                 </CardHeader>
                 <CardContent>
                     <div className="rounded-md border overflow-auto">
@@ -337,7 +326,7 @@ function UsersPageContent() {
                                 <DialogHeader>
                                     <DialogTitle>Adicionar Novo Usuário</DialogTitle>
                                     <DialogDescription>
-                                        Preencha os dados abaixo para criar um novo acesso. A senha padrão para o primeiro login será '123456'. O usuário poderá entrar no sistema imediatamente.
+                                        Uma senha temporária individual será exibida após a criação. O usuário deverá trocá-la no primeiro acesso.
                                     </DialogDescription>
                                 </DialogHeader>
                                 <div className="grid gap-4 py-4">
@@ -384,20 +373,20 @@ function UsersPageContent() {
                                     <TableHead>Nome</TableHead>
                                     <TableHead>Email</TableHead>
                                     <TableHead>Função</TableHead>
+                                    <TableHead>Ativo</TableHead>
                                     <TableHead className="text-right">Ações</TableHead>
                                 </TableRow>
                             </TableHeader>
                             <TableBody>
                                 {isLoading ? (
                                     <TableRow>
-                                        <TableCell colSpan={4} className="h-24 text-center">
+                                        <TableCell colSpan={5} className="h-24 text-center">
                                             <Loader2 className="mx-auto h-6 w-6 animate-spin" />
                                         </TableCell>
                                     </TableRow>
                                 ) : users.length > 0 ? (
                                     users.map(user => {
-                                        const isAdministrator = user.role === 'Administrador';
-                                        const isCurrentUserFromState = user.email === currentUser?.email;
+                                        const isCurrentUserFromState = user.id === currentUser?.id;
 
                                         return (
                                             <TableRow key={user.id}>
@@ -423,7 +412,7 @@ function UsersPageContent() {
                                                     <Select
                                                         value={user.role}
                                                         onValueChange={(newRole) => handleRoleChange(user.id, newRole)}
-                                                        disabled={!isAdmin || isAdministrator || isCurrentUserFromState}
+                                                        disabled={!isAdmin || isSaving || isCurrentUserFromState}
                                                     >
                                                         <SelectTrigger className="w-[180px]">
                                                             <SelectValue placeholder="Selecione a função" />
@@ -437,12 +426,23 @@ function UsersPageContent() {
                                                         </SelectContent>
                                                     </Select>
                                                 </TableCell>
+                                                <TableCell>
+                                                    <Switch
+                                                        aria-label={`Acesso ativo de ${user.name}`}
+                                                        checked={user.active !== false}
+                                                        disabled={!isAdmin || isSaving || isCurrentUserFromState}
+                                                        onCheckedChange={active => {
+                                                            setUsers(items => items.map(item => item.id === user.id ? { ...item, active } : item));
+                                                            setHasUnsavedChanges(true);
+                                                        }}
+                                                    />
+                                                </TableCell>
                                                 <TableCell className="text-right">
                                                     <Button
                                                       variant="ghost"
                                                       size="icon"
                                                       onClick={() => setDeletingUser(user)}
-                                                      disabled={!isAdmin || isAdministrator || isCurrentUserFromState}
+                                                      disabled={!isAdmin || isSaving || isCurrentUserFromState}
                                                     >
                                                         <Trash2 className="h-4 w-4 text-destructive" />
                                                     </Button>
@@ -452,7 +452,7 @@ function UsersPageContent() {
                                     })
                                 ) : (
                                      <TableRow>
-                                        <TableCell colSpan={4} className="h-24 text-center">
+                                        <TableCell colSpan={5} className="h-24 text-center">
                                             Nenhum usuário cadastrado.
                                         </TableCell>
                                     </TableRow>
@@ -478,6 +478,22 @@ function UsersPageContent() {
                     </Button>
                 </div>
             )}
+
+            <Dialog open={!!newCredential} onOpenChange={open => { if (!open) setNewCredential(null); }}>
+                <DialogContent>
+                    <DialogHeader>
+                        <DialogTitle>Senha temporária criada</DialogTitle>
+                        <DialogDescription>
+                            Entregue esta senha a {newCredential?.email}. Ela aparece somente agora e deverá ser trocada no primeiro acesso.
+                        </DialogDescription>
+                    </DialogHeader>
+                    <Label htmlFor="temporary-password">Senha temporária</Label>
+                    <Input id="temporary-password" value={newCredential?.password || ''} readOnly autoComplete="off" onFocus={event => event.target.select()} />
+                    <DialogFooter>
+                        <Button onClick={() => setNewCredential(null)}>Concluir</Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
 
             <AlertDialog open={!!deletingUser} onOpenChange={(open) => !open && setDeletingUser(null)}>
                 <AlertDialogContent>

@@ -1,33 +1,30 @@
-"use server";
+'use server';
 
-import { db } from '@/lib/firebase';
-import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { z } from 'zod';
+import { adminDb } from '@/lib/firebase-admin';
+import { pagePermissions } from '@/lib/permissions';
+import { requireActionPage, requireAdministrator } from '@/server/access/current-user';
+import { loadAppAccessSettings } from '@/lib/server-auth';
+import type { AccessSettings } from '@/server/access/types';
 
-interface AppSettings {
-    permissions?: Record<string, string[]>;
-    inactivePages?: string[];
+const pageSchema = z.string().refine(p => Object.hasOwn(pagePermissions, p), 'Página inválida');
+const settingsSchema = z.object({
+  permissions: z.record(pageSchema, z.array(z.enum(['Administrador', 'Vendedor', 'Operador']))).optional(),
+  inactivePages: z.array(pageSchema).refine(pages => !pages.includes('/configuracoes') && !pages.includes('/perfil'), 'Configurações e perfil devem permanecer ativos').optional(),
+}).strict();
+export async function loadAppSettings(): Promise<AccessSettings> {
+  await requireAdministrator();
+  return loadAppAccessSettings();
 }
-
-const settingsDocRef = doc(db, "appSettings", "general");
-
-export async function loadAppSettings(): Promise<AppSettings | null> {
-    try {
-        const docSnap = await getDoc(settingsDocRef);
-        if (docSnap.exists()) {
-            return docSnap.data() as AppSettings;
-        }
-        return null;
-    } catch (error) {
-        console.error("Erro ao carregar configurações do app:", error);
-        throw new Error("Não foi possível carregar as configurações.");
-    }
+export async function saveAppSettings(settings: Partial<AccessSettings>): Promise<void> {
+  await requireAdministrator();
+  const validated = settingsSchema.parse(settings);
+  await adminDb.collection('appSettings').doc('general').set(validated, { merge: true });
 }
-
-export async function saveAppSettings(settings: AppSettings): Promise<void> {
-    try {
-        await setDoc(settingsDocRef, settings, { merge: true });
-    } catch (error) {
-        console.error("Erro ao salvar configurações do app:", error);
-        throw new Error("Não foi possível salvar as configurações.");
-    }
+/** Exposes only the pricing field needed by the legacy catalog reader. */
+export async function loadPricingSettings(): Promise<{ gordura_variable: number }> {
+  await requireActionPage('/buscar-mercado-livre');
+  const data = (await adminDb.collection('appSettings').doc('general').get()).data();
+  const value = Number(data?.gordura_variable);
+  return { gordura_variable: Number.isFinite(value) ? value : 0 };
 }

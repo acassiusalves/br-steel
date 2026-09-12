@@ -1,202 +1,90 @@
-import crypto from 'crypto';
+import 'server-only';
+import crypto from 'node:crypto';
 import { NextResponse } from 'next/server';
-import {
-  collection,
-  doc as firestoreDoc,
-  getDoc,
-  getDocs,
-  limit,
-  query,
-  where,
-} from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+import { adminDb } from '@/lib/firebase-admin';
 import { pagePermissions } from '@/lib/permissions';
+import { findUserById, isKnownRole, publicUser, validDocumentId } from '@/server/access/users';
+import { canAccessPage } from '@/server/access/policy';
+import type { User } from '@/types/user';
+export { findUserByEmail, normalizeUserEmail } from '@/server/access/users';
+export { DEFAULT_INITIAL_PASSWORD, hashPassword, verifyPassword } from '@/server/access/passwords';
 
 export const AUTH_COOKIE_NAME = 'brsteel_session';
 const SESSION_TTL_MS = 8 * 60 * 60 * 1000;
-export const DEFAULT_INITIAL_PASSWORD = '123456';
-
-export interface SessionUser {
-  id: string;
-  name: string;
-  email: string;
-  role: string;
-}
-
-interface SessionPayload {
-  user: SessionUser;
-  exp: number;
-}
-
-interface StoredUser extends SessionUser {
-  normalizedEmail?: string | null;
-  passwordHash?: string | null;
-  passwordSalt?: string | null;
-  mustChangePassword?: boolean;
-}
-
-export function normalizeUserEmail(email: string) {
-  return email.trim().toLowerCase();
-}
+export interface SessionUser { id: string; name: string; email: string; role: string; }
+export interface SessionPayload { user: SessionUser; exp: number; authVersion: number; }
 
 function getSecret() {
-  return (
-    process.env.AUTH_SESSION_SECRET ||
-    process.env.NEXTAUTH_SECRET ||
-    process.env.BR_STEEL_WEBHOOK_SECRET ||
-    'brsteel-dev-session-secret'
-  );
+  const secret = process.env.AUTH_SESSION_SECRET?.trim() || process.env.NEXTAUTH_SECRET?.trim();
+  if (secret) return secret;
+  if (process.env.NODE_ENV === 'production') throw new Error('AUTH_SESSION_SECRET must be configured in production');
+  return 'brsteel-dev-session-secret';
 }
-
-function base64url(input: Buffer | string) {
-  return Buffer.from(input).toString('base64url');
-}
-
-function sign(value: string) {
-  return crypto.createHmac('sha256', getSecret()).update(value).digest('base64url');
-}
-
-function parseCookies(cookieHeader?: string | null) {
-  const cookies: Record<string, string> = {};
-  for (const part of (cookieHeader || '').split(';')) {
-    const [rawName, ...rawValue] = part.trim().split('=');
-    if (!rawName) continue;
-    cookies[rawName] = decodeURIComponent(rawValue.join('=') || '');
-  }
-  return cookies;
-}
-
-export function createSessionToken(user: SessionUser) {
-  const payload = base64url(
-    JSON.stringify({
-      user,
-      exp: Date.now() + SESSION_TTL_MS,
-    } satisfies SessionPayload)
-  );
+function sign(value: string) { return crypto.createHmac('sha256', getSecret()).update(value).digest('base64url'); }
+export function createSessionToken(user: SessionUser, authVersion = 0) {
+  const payload = Buffer.from(JSON.stringify({
+    user: { id: user.id, name: user.name, email: user.email, role: user.role },
+    exp: Date.now() + SESSION_TTL_MS, authVersion,
+  } satisfies SessionPayload)).toString('base64url');
   return `${payload}.${sign(payload)}`;
 }
-
+/** Verifies the signature only. Authorization must use getSessionFromToken. */
 export function verifySessionToken(token?: string | null): SessionPayload | null {
-  if (!token) return null;
-  const [payload, signature] = token.split('.');
-  if (!payload || !signature) return null;
-  const expected = sign(payload);
-  const a = Buffer.from(signature);
-  const b = Buffer.from(expected);
-  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return null;
-
+  if (!token || token.length > 8192) return null;
+  const parts = token.split('.');
+  if (parts.length !== 2 || !parts.every(p => /^[A-Za-z0-9_-]+$/.test(p))) return null;
+  const [payload, signature] = parts;
+  const actual = Buffer.from(signature);
+  const expected = Buffer.from(sign(payload));
+  if (actual.length !== expected.length || !crypto.timingSafeEqual(actual, expected)) return null;
   try {
-    const parsed = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')) as SessionPayload;
-    if (!parsed?.user?.email || !parsed?.exp || parsed.exp < Date.now()) return null;
-    return parsed;
-  } catch {
-    return null;
-  }
+    const parsed = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
+    if (!parsed || !Number.isSafeInteger(parsed.exp) || parsed.exp <= Date.now()
+      || typeof parsed.user?.id !== 'string' || !validDocumentId(parsed.user.id)
+      || typeof parsed.user.email !== 'string' || !parsed.user.email
+      || typeof parsed.user.name !== 'string' || !isKnownRole(parsed.user.role)
+      || (parsed.authVersion !== undefined && (!Number.isSafeInteger(parsed.authVersion) || parsed.authVersion < 0))) return null;
+    return { user: parsed.user, exp: parsed.exp, authVersion: parsed.authVersion ?? 0 };
+  } catch { return null; }
 }
-
-export function getSessionFromRequest(request: Request) {
-  const token = parseCookies(request.headers.get('cookie'))[AUTH_COOKIE_NAME];
-  return verifySessionToken(token);
+export async function getSessionFromToken(token?: string | null): Promise<(SessionPayload & { user: User }) | null> {
+  const session = verifySessionToken(token);
+  if (!session) return null;
+  const stored = await findUserById(session.user.id);
+  if (!stored || stored.active === false || !isKnownRole(stored.role) || stored.authVersion !== session.authVersion) return null;
+  return { ...session, user: publicUser(stored) };
 }
-
+export async function getSessionFromRequest(request: Request) {
+  const cookie = (request.headers.get('cookie') || '').split(';').map(p => p.trim())
+    .find(p => p.startsWith(`${AUTH_COOKIE_NAME}=`));
+  if (!cookie) return null;
+  let token: string;
+  try { token = decodeURIComponent(cookie.slice(AUTH_COOKIE_NAME.length + 1)); } catch { return null; }
+  return getSessionFromToken(token);
+}
 export function sessionCookieHeader(token: string) {
   const secure = process.env.NODE_ENV === 'production' ? '; Secure' : '';
-  return `${AUTH_COOKIE_NAME}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${
-    SESSION_TTL_MS / 1000
-  }${secure}`;
+  return `${AUTH_COOKIE_NAME}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${SESSION_TTL_MS / 1000}${secure}`;
 }
-
 export function clearSessionCookieHeader() {
-  return `${AUTH_COOKIE_NAME}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`;
+  return `${AUTH_COOKIE_NAME}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${process.env.NODE_ENV === 'production' ? '; Secure' : ''}`;
 }
-
-export function hashPassword(password: string, salt = crypto.randomBytes(16).toString('base64url')) {
-  const hash = crypto.scryptSync(password, salt, 64).toString('base64url');
-  return { hash, salt };
-}
-
-export function verifyPassword(password: string, hash?: string | null, salt?: string | null) {
-  if (!hash || !salt) return password === DEFAULT_INITIAL_PASSWORD;
-  const candidate = crypto.scryptSync(password, salt, 64);
-  const stored = Buffer.from(hash, 'base64url');
-  return candidate.length === stored.length && crypto.timingSafeEqual(candidate, stored);
-}
-
-function storedUserFromDoc(id: string, data: any, fallbackEmail: string): StoredUser {
-  const email = normalizeUserEmail(String(data.email || data.normalizedEmail || fallbackEmail || id));
-  return {
-    id,
-    name: data.name,
-    email,
-    normalizedEmail: data.normalizedEmail || email,
-    role: data.role,
-    passwordHash: data.passwordHash,
-    passwordSalt: data.passwordSalt,
-    mustChangePassword: data.mustChangePassword,
-  };
-}
-
-export async function findUserByEmail(email: string): Promise<StoredUser | null> {
-  const normalized = normalizeUserEmail(email);
-  if (!normalized) return null;
-
-  const direct = await getDoc(firestoreDoc(db, 'users', normalized));
-  if (direct.exists()) {
-    return storedUserFromDoc(direct.id, direct.data(), normalized);
-  }
-
-  const normalizedSnap = await getDocs(
-    query(collection(db, 'users'), where('normalizedEmail', '==', normalized), limit(1))
-  );
-  if (!normalizedSnap.empty) {
-    const doc = normalizedSnap.docs[0];
-    return storedUserFromDoc(doc.id, doc.data(), normalized);
-  }
-
-  const snap = await getDocs(query(collection(db, 'users'), where('email', '==', normalized), limit(1)));
-  if (!snap.empty) {
-    const doc = snap.docs[0];
-    return storedUserFromDoc(doc.id, doc.data(), normalized);
-  }
-
-  const allUsers = await getDocs(collection(db, 'users'));
-  const caseInsensitiveMatch = allUsers.docs.find((doc) => {
-    const data = doc.data() as any;
-    return normalizeUserEmail(String(data.email || data.normalizedEmail || doc.id)) === normalized;
-  });
-  if (!caseInsensitiveMatch) return null;
-
-  return storedUserFromDoc(caseInsensitiveMatch.id, caseInsensitiveMatch.data(), normalized);
-}
-
 export async function loadAppAccessSettings() {
-  const snap = await getDoc(firestoreDoc(db, 'appSettings', 'general'));
-  const data = snap.exists() ? (snap.data() as any) : {};
-  return {
-    permissions: { ...pagePermissions, ...(data.permissions || {}) },
-    inactivePages: Array.isArray(data.inactivePages) ? data.inactivePages : [],
-  };
+  const snap = await adminDb.collection('appSettings').doc('general').get();
+  const data = snap.data() || {};
+  const permissions: Record<string, string[]> = { ...pagePermissions };
+  for (const [page, roles] of Object.entries(data.permissions || {})) {
+    if (Object.hasOwn(pagePermissions, page)) permissions[page] = Array.isArray(roles) ? roles.filter(isKnownRole) : [];
+  }
+  return { permissions, inactivePages: Array.isArray(data.inactivePages)
+    ? data.inactivePages.filter((p: unknown): p is string => typeof p === 'string') : [] };
 }
-
 export async function requirePagePermission(request: Request, pagePath: string) {
-  const session = getSessionFromRequest(request);
-  if (!session) {
-    return {
-      ok: false as const,
-      response: NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 }),
-    };
+  const session = await getSessionFromRequest(request);
+  if (!session) return { ok: false as const, response: NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 }) };
+  const settings = await loadAppAccessSettings();
+  if (!canAccessPage(session.user, settings, pagePath)) {
+    return { ok: false as const, response: NextResponse.json({ ok: false, error: 'forbidden' }, { status: 403 }) };
   }
-
-  const { permissions, inactivePages } = await loadAppAccessSettings();
-  const role = session.user.role;
-  const allowed = role === 'Administrador' || permissions[pagePath]?.includes(role);
-  const active = !inactivePages.includes(pagePath);
-  if (!allowed || !active) {
-    return {
-      ok: false as const,
-      response: NextResponse.json({ ok: false, error: 'forbidden' }, { status: 403 }),
-    };
-  }
-
   return { ok: true as const, user: session.user };
 }

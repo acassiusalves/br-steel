@@ -1,3 +1,4 @@
+import { clearBridgeCookieHeader } from '@/server/oauth/cookies';
 import { NextResponse } from 'next/server';
 import {
   createSessionToken,
@@ -6,13 +7,16 @@ import {
   sessionCookieHeader,
   verifyPassword,
 } from '@/lib/server-auth';
-import { doc, setDoc } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+import { adminDb } from '@/lib/firebase-admin';
+import { isKnownRole, publicUser } from '@/server/access/users';
+import { rejectCrossOrigin } from '@/server/access/request';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
 export async function POST(request: Request) {
+  const originError = rejectCrossOrigin(request);
+  if (originError) return originError;
   let body: any;
   try {
     body = await request.json();
@@ -20,35 +24,27 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: false, error: 'JSON inválido' }, { status: 400 });
   }
 
-  const email = String(body?.email || '').trim().toLowerCase();
-  const password = String(body?.password || '');
-  if (!email || !password) {
+  const email = typeof body?.email === 'string' ? body.email.trim().toLowerCase() : '';
+  const password = typeof body?.password === 'string' ? body.password : '';
+  if (!email || email.length > 254 || !password || password.length > 1024) {
     return NextResponse.json({ ok: false, error: 'E-mail e senha são obrigatórios.' }, { status: 400 });
   }
 
   const user = await findUserByEmail(email);
-  if (!user || !verifyPassword(password, user.passwordHash, user.passwordSalt)) {
+  if (!user || user.active === false || !isKnownRole(user.role) || !verifyPassword(password, user.passwordHash, user.passwordSalt)) {
     return NextResponse.json({ ok: false, error: 'Usuário ou senha inválidos.' }, { status: 401 });
   }
 
-  const sessionUser = {
-    id: user.id,
-    name: user.name,
-    email: user.email,
-    role: user.role,
-  };
-  await setDoc(doc(db, 'users', user.id), { lastLogin: new Date().toISOString() }, { merge: true })
-    .catch(() => undefined);
-  const token = createSessionToken(sessionUser);
+  await adminDb.collection('users').doc(user.id).update({ lastLogin: new Date().toISOString() });
+  const token = createSessionToken(user, user.authVersion);
   const access = await loadAppAccessSettings();
   const response = NextResponse.json({
     ok: true,
-    user: {
-      ...sessionUser,
-      mustChangePassword: !!user.mustChangePassword || !user.passwordHash,
-    },
+    user: publicUser(user),
     ...access,
   });
   response.headers.set('Set-Cookie', sessionCookieHeader(token));
+  response.headers.set('Cache-Control', 'no-store');
+  response.headers.append('Set-Cookie', clearBridgeCookieHeader());
   return response;
 }

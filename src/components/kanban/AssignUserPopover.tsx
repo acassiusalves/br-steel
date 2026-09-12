@@ -1,9 +1,9 @@
 'use client';
 
 import * as React from 'react';
-import { collection, getDocs, query, orderBy } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
-import { Check, Loader2, User, UserMinus, UserPlus } from 'lucide-react';
+import { getAssignableUsers } from '@/services/user-service';
+import { useToast } from '@/hooks/use-toast';
+import { Check, Loader2, User, UserMinus } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import {
@@ -20,8 +20,8 @@ import {
   CommandList,
 } from '@/components/ui/command';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
-import { cn } from '@/lib/utils';
-import type { User as UserType } from '@/types/user';
+import type { User as SystemUser } from '@/types/user';
+type UserType = Pick<SystemUser, 'id' | 'name' | 'role'>;
 import type { AssignedUser } from '@/types/kanban';
 
 interface AssignUserPopoverProps {
@@ -34,33 +34,17 @@ export function AssignUserPopover({ currentUser, onAssign }: AssignUserPopoverPr
   const [users, setUsers] = React.useState<UserType[]>([]);
   const [isLoading, setIsLoading] = React.useState(false);
 
-  // Carrega usuários quando o popover abre
-  React.useEffect(() => {
-    if (isOpen && users.length === 0) {
-      loadUsers();
-    }
-  }, [isOpen]);
+  const { toast } = useToast();
 
-  const loadUsers = async () => {
+  const handleOpenChange = async (open: boolean) => {
+    setIsOpen(open);
+    if (!open) return;
     setIsLoading(true);
     try {
-      const usersRef = collection(db, 'users');
-      const q = query(usersRef, orderBy('name', 'asc'));
-      const snapshot = await getDocs(q);
-
-      const usersData = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data(),
-      })) as UserType[];
-
-      // Filtra apenas usuários que podem ser atribuídos (Operador e Administrador)
-      const assignableUsers = usersData.filter(
-        u => u.role === 'Operador' || u.role === 'Administrador'
-      );
-
-      setUsers(assignableUsers);
+      setUsers(await getAssignableUsers());
     } catch (error) {
-      console.error('Erro ao carregar usuários:', error);
+      setUsers([]);
+      toast({ variant: 'destructive', title: 'Erro ao carregar responsáveis', description: error instanceof Error ? error.message : 'Tente novamente.' });
     } finally {
       setIsLoading(false);
     }
@@ -90,7 +74,7 @@ export function AssignUserPopover({ currentUser, onAssign }: AssignUserPopoverPr
   };
 
   return (
-    <Popover open={isOpen} onOpenChange={setIsOpen}>
+    <Popover open={isOpen} onOpenChange={handleOpenChange}>
       <PopoverTrigger asChild>
         <Button variant="outline" className="w-full justify-start">
           {currentUser ? (

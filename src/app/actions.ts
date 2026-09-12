@@ -1,23 +1,25 @@
 
 "use server";
 
-import * as fs from 'fs/promises';
-import * as path from 'path';
-import { cookies } from 'next/headers';
-import { format, parseISO, startOfMonth, endOfMonth, eachMonthOfInterval, getMonth, getYear, differenceInDays } from 'date-fns';
-import { collection, getDocs, doc, writeBatch, query, where, setDoc, getDoc, deleteField, addDoc, deleteDoc, orderBy, serverTimestamp, Timestamp } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+import { getFullBlingCredentials, blingFetchWithRefresh, blingGetPaged } from '@/server/integrations/bling';
+import { beginBlingConnection } from '@/server/integrations/bling-oauth';
+import { requireWebContext } from '@/server/operations/context';
+import { requireOperation, documentIdSchema, dateRangeSchema } from '@/server/operations/common';
+import { summarizeSales } from '@/server/operations/sales';
+import { readStockSnapshot, invalidateProductStockCache, refreshProductionSku } from '@/server/operations/stock';
+import { productionDemand } from '@/server/operations/production-demand';
+import { adminDb } from '@/lib/firebase-admin';
+import { FieldValue } from 'firebase-admin/firestore';
+import { z } from 'zod';
+import { format } from 'date-fns';
 
 import { saveSalesOrders, filterNewOrders, getLastImportedOrderDate, orderExists, saveSalesOrdersOptimized, getImportedOrderIdsWithDetails } from '@/services/order-service';
-import { updateSupplyBySku } from '@/services/supply-service';
+
 import {
     createInvoiceEnrichmentStats,
     enrichOrderWithInvoice,
     mergeInvoiceEnrichmentStats,
 } from '@/services/bling-invoice-service';
-import type { SaleOrder } from '@/types/sale-order';
-import type { Supply } from '@/types/supply';
-import { seedUsers as seedUsersService, getUsers as getUsersService, addUser as addUserService, deleteUser as deleteUserService } from '@/services/user-service';
 import {
     searchMlDocumentation as _searchMlDocumentation,
     getMlDocumentationPage as _getMlDocumentationPage,
@@ -52,10 +54,10 @@ import {
     type MlAdsSyncReport,
 } from '@/services/ml-ads-analytics-cache';
 import {
-    AUTH_COOKIE_NAME,
-    verifySessionToken,
     type SessionUser,
 } from '@/lib/server-auth';
+import { getUsers as getUsersService, addUser as addUserService, deleteUser as deleteUserService } from '@/services/user-service';
+import { requireAdministrator, requireActionPage } from '@/server/access/current-user';
 import { fetchBrSteelProductsSheet } from '@/services/brsteel-products-sheet';
 import {
     approveSafeBrSteelSkuAssociations,
@@ -77,18 +79,13 @@ type BlingCredentials = {
 
 // --- Firestore-based Credential Storage ---
 
-const credentialsDocRef = doc(db, "appConfig", "blingCredentials");
-const syncProgressDocRef = doc(db, "appConfig", "syncProgress");
+const credentialsDocRef = adminDb.collection("appConfig").doc("blingCredentials");
+const syncProgressDocRef = adminDb.collection("appConfig").doc("syncProgress");
 const MAX_INVOICE_DETAILS_PER_SYNC = 60;
 const MAX_INVOICE_XML_PER_SYNC = 20;
 
 async function getCurrentServerActionUser(): Promise<SessionUser> {
-    const cookieStore = await cookies();
-    const session = verifySessionToken(cookieStore.get(AUTH_COOKIE_NAME)?.value);
-    if (!session?.user) {
-        throw new Error('Sessão expirada. Faça login novamente.');
-    }
-    return session.user;
+    return requireActionPage('/anuncios-mercado-livre');
 }
 
 // Gemini / IA
@@ -156,8 +153,9 @@ export type OrderSyncOptions = {
 };
 
 export async function updateSyncProgress(progress: Partial<SyncProgress>): Promise<void> {
+    requireOperation(await requireWebContext(), 'vendas:sync');
     try {
-        await setDoc(syncProgressDocRef, {
+        await syncProgressDocRef.set( {
             ...progress,
             updatedAt: new Date().toISOString(),
         }, { merge: true });
@@ -167,9 +165,10 @@ export async function updateSyncProgress(progress: Partial<SyncProgress>): Promi
 }
 
 export async function getSyncProgress(): Promise<SyncProgress | null> {
+    requireOperation(await requireWebContext(), 'vendas:read');
     try {
-        const snap = await getDoc(syncProgressDocRef);
-        if (!snap.exists()) return null;
+        const snap = await syncProgressDocRef.get();
+        if (!snap.exists) return null;
         return snap.data() as SyncProgress;
     } catch (error) {
         console.error('Erro ao obter progresso da sincronização:', error);
@@ -178,8 +177,9 @@ export async function getSyncProgress(): Promise<SyncProgress | null> {
 }
 
 export async function clearSyncProgress(): Promise<void> {
+    requireOperation(await requireWebContext(), 'vendas:sync');
     try {
-        await setDoc(syncProgressDocRef, {
+        await syncProgressDocRef.set( {
             isRunning: false,
             currentStep: '',
             currentOrder: 0,
@@ -193,33 +193,36 @@ export async function clearSyncProgress(): Promise<void> {
     }
 }
 
+export async function startBlingOAuth() { return beginBlingConnection(); }
+
 export async function disconnectBling(): Promise<void> {
-  await setDoc(
-    credentialsDocRef,
+  await requireAdministrator();
+  await credentialsDocRef.set(
     {
-      clientId: deleteField(),
-      clientSecret: deleteField(),
-      accessToken: deleteField(),
-      refreshToken: deleteField(),
-      expiresAt: deleteField(),
+      clientId: FieldValue.delete(),
+      clientSecret: FieldValue.delete(),
+      accessToken: FieldValue.delete(),
+      refreshToken: FieldValue.delete(),
+      expiresAt: FieldValue.delete(),
     },
     { merge: true }
   );
 }
 
 function asField(v?: string | null) {
-  return v === '' || v == null ? deleteField() : v;
+  return v === '' || v == null ? FieldValue.delete() : v;
 }
 
 export async function saveBlingCredentials(partial: Partial<BlingCredentials>): Promise<void> {
-  await setDoc(
-    credentialsDocRef,
+  await requireAdministrator();
+  z.object({ clientId: z.string().max(500).optional(), clientSecret: z.string().max(2000).optional(), accessToken: z.string().max(4000).optional(), refreshToken: z.string().max(4000).optional(), expiresAt: z.number().finite().optional() }).strict().parse(partial);
+  await credentialsDocRef.set(
     {
       ...(partial.clientId       !== undefined ? { clientId: asField(partial.clientId) }       : {}),
       ...(partial.clientSecret   !== undefined ? { clientSecret: asField(partial.clientSecret) } : {}),
       ...(partial.accessToken    !== undefined ? { accessToken: asField(partial.accessToken) }   : {}),
       ...(partial.refreshToken   !== undefined ? { refreshToken: asField(partial.refreshToken) } : {}),
-      ...(partial.expiresAt      !== undefined ? { expiresAt: partial.expiresAt ?? deleteField() } : {}),
+      ...(partial.expiresAt      !== undefined ? { expiresAt: partial.expiresAt ?? FieldValue.delete() } : {}),
     },
     { merge: true }
   );
@@ -230,8 +233,9 @@ export async function getBlingCredentials(): Promise<{
   clientSecret?: string; // mascarado
   connected: boolean;
 }> {
-  const snap = await getDoc(credentialsDocRef);
-  if (!snap.exists()) return { connected: false };
+  await requireActionPage('/api-settings');
+  const snap = await credentialsDocRef.get();
+  if (!snap.exists) return { connected: false };
 
   const d = snap.data() as BlingCredentials;
   return {
@@ -246,201 +250,6 @@ export async function getBlingCredentials(): Promise<{
  * Fetches all Bling credentials, including secrets, for server-side use.
  * @returns The complete credentials object.
  */
-async function getFullBlingCredentials(): Promise<BlingCredentials> {
-  const snap = await getDoc(credentialsDocRef);
-  const saved = snap.exists() ? (snap.data() as BlingCredentials) : {};
-  return {
-    clientId:     saved.clientId     || process.env.BLING_CLIENT_ID,
-    clientSecret: saved.clientSecret || process.env.BLING_CLIENT_SECRET,
-    accessToken:  saved.accessToken,
-    refreshToken: saved.refreshToken,
-    expiresAt:    saved.expiresAt,
-  };
-}
-
-
-async function refreshAccessToken() {
-  const creds = await getFullBlingCredentials();
-  if (!creds.clientId || !creds.clientSecret || !creds.refreshToken) {
-    throw new Error('Credenciais do Bling incompletas para renovar o token.');
-  }
-
-  const basic = Buffer.from(`${creds.clientId}:${creds.clientSecret}`).toString('base64');
-  const body = new URLSearchParams({
-    grant_type: 'refresh_token',
-    refresh_token: String(creds.refreshToken),
-  });
-
-  const res = await fetch('https://www.bling.com.br/Api/v3/oauth/token', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/x-www-form-urlencoded',
-      'Authorization': `Basic ${basic}`,
-      'Accept': '1.0', // obrigatório no Bling
-    },
-    body: body.toString(),
-    cache: 'no-store',
-  });
-
-  const json = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(`Refresh falhou (${res.status}): ${json?.error?.description || res.statusText}`);
-
-  const update: Partial<BlingCredentials> = {};
-  if (json.access_token) update.accessToken = json.access_token;
-  if (json.refresh_token) update.refreshToken = json.refresh_token;
-  if (json.expires_in)   update.expiresAt   = Date.now() + Number(json.expires_in) * 1000;
-
-  await saveBlingCredentials(update);
-  return { ...creds, ...update };
-}
-
-// Rate limiter: max 3 req/sec using a queue-based approach
-// This ensures requests are truly serialized even when called in parallel
-const MIN_REQUEST_INTERVAL = 400; // ~2.5 req/sec with extra safety margin
-
-class RequestQueue {
-  private queue: Array<{ resolve: () => void }> = [];
-  private processing = false;
-  private lastRequestTime = 0;
-
-  async waitForTurn(): Promise<void> {
-    return new Promise((resolve) => {
-      this.queue.push({ resolve });
-      this.processQueue();
-    });
-  }
-
-  private async processQueue() {
-    if (this.processing) return;
-    this.processing = true;
-
-    while (this.queue.length > 0) {
-      const now = Date.now();
-      const timeSinceLastRequest = now - this.lastRequestTime;
-
-      if (timeSinceLastRequest < MIN_REQUEST_INTERVAL) {
-        await new Promise(r => setTimeout(r, MIN_REQUEST_INTERVAL - timeSinceLastRequest));
-      }
-
-      this.lastRequestTime = Date.now();
-      const item = this.queue.shift();
-      if (item) {
-        item.resolve();
-      }
-    }
-
-    this.processing = false;
-  }
-}
-
-const requestQueue = new RequestQueue();
-
-async function blingFetchWithRefresh(url: string, init?: RequestInit, retryCount = 0): Promise<any> {
-  // Rate limiting - wait for our turn in the queue
-  await requestQueue.waitForTurn();
-
-  const startTime = Date.now();
-
-  let creds = await getFullBlingCredentials();
-  const skewMs = 60 * 1000;
-
-  const needsEarlyRefresh = !creds.expiresAt || (Date.now() + skewMs >= creds.expiresAt);
-  if (needsEarlyRefresh) {
-    console.log('🔑 [BLING API] Token próximo de expirar, renovando...');
-    try { creds = await refreshAccessToken(); } catch (e) {
-      console.error('❌ [BLING API] Falha ao renovar token:', e);
-    }
-  }
-
-  const call = async (token: string) => {
-    const res = await fetch(url, {
-      ...init,
-      headers: {
-        'Accept': 'application/json',
-        'Authorization': `Bearer ${token}`,
-        ...(init?.headers || {}),
-      },
-      cache: 'no-store',
-    });
-    const text = await res.text();
-    return { res, text };
-  };
-
-  let { res, text } = await call(String(creds.accessToken || ''));
-
-  const maybeInvalid = (status: number, body: string) =>
-    status === 401 || (status === 400 && /invalid_token|token expir|unauthorized/i.test(body));
-
-  if (maybeInvalid(res.status, text)) {
-    console.log('🔄 [BLING API] Token inválido, tentando renovar...');
-    creds = await refreshAccessToken();
-    ({ res, text } = await call(String(creds.accessToken || '')));
-  }
-
-  const elapsed = Date.now() - startTime;
-
-  // Handle rate limit (429) with retry
-  if (res.status === 429 && retryCount < 3) {
-    const waitTime = Math.pow(2, retryCount + 1) * 1000; // Exponential backoff: 2s, 4s, 8s
-    console.warn(`⚠️ [BLING API] Rate limit atingido, aguardando ${waitTime/1000}s antes de tentar novamente...`);
-    await new Promise(resolve => setTimeout(resolve, waitTime));
-    return blingFetchWithRefresh(url, init, retryCount + 1);
-  }
-
-  if (!res.ok) {
-    let payload: any; try { payload = JSON.parse(text); } catch {}
-    const msg = payload?.error?.description || res.statusText || text;
-    console.error(`❌ [BLING API] Erro ${res.status} após ${elapsed}ms: ${msg}`);
-    throw new Error(`Erro do Bling (${res.status}): ${msg}`);
-  }
-
-  if (retryCount === 0) {
-    // Only log if not a retry (to avoid noise)
-    // console.log(`✅ [BLING API] Resposta OK em ${elapsed}ms`);
-  }
-
-  try { return text ? JSON.parse(text) : null; }
-  catch { throw new Error('A resposta da API do Bling não era um JSON válido.'); }
-}
-
-
-async function blingGetPaged(baseUrl: string) {
-    console.log(`📄 [PAGINAÇÃO] Iniciando busca paginada: ${baseUrl.substring(0, 80)}...`);
-    const allData: any[] = [];
-    let page = 1;
-    const limit = 100;
-
-    while (true) {
-        const url = new URL(baseUrl);
-        url.searchParams.set('pagina', String(page));
-        url.searchParams.set('limite', String(limit));
-
-        console.log(`📄 [PAGINAÇÃO] Buscando página ${page}...`);
-
-        try {
-            const responseData = await blingFetchWithRefresh(url.toString());
-
-            const dataOnPage = responseData.data || [];
-            allData.push(...dataOnPage);
-
-            console.log(`📄 [PAGINAÇÃO] Página ${page}: ${dataOnPage.length} itens (total acumulado: ${allData.length})`);
-
-            if (dataOnPage.length < limit) {
-                console.log(`📄 [PAGINAÇÃO] Fim da paginação - última página tinha ${dataOnPage.length} itens`);
-                break;
-            }
-            page++;
-        } catch (error: any) {
-            console.error(`❌ [PAGINAÇÃO] Erro na página ${page}: ${error.message}`);
-            throw error;
-        }
-    }
-
-    console.log(`📄 [PAGINAÇÃO] Concluído! Total de ${allData.length} itens em ${page} página(s)`);
-    return allData;
-}
-
-
 async function getBlingSalesOrdersOptimized({
     from,
     to,
@@ -751,6 +560,9 @@ async function getBlingSalesOrdersOptimized({
 
 
 export async function smartSyncOrders(from?: Date, to?: Date, options: OrderSyncOptions = {}) {
+    requireOperation(await requireWebContext(), 'vendas:sync');
+    if (from || to) civilRange(from, to);
+    z.object({ includeInvoiceDetails: z.boolean().optional(), fetchInvoiceXml: z.boolean().optional() }).strict().parse(options);
     console.log('🧠 Iniciando sincronização inteligente...');
     const result = await getBlingSalesOrdersOptimized({ 
         from,
@@ -764,6 +576,9 @@ export async function smartSyncOrders(from?: Date, to?: Date, options: OrderSync
 }
 
 export async function fullSyncOrders(from?: Date, to?: Date, options: OrderSyncOptions = {}) {
+    requireOperation(await requireWebContext(), 'vendas:sync');
+    if (from || to) civilRange(from, to);
+    z.object({ includeInvoiceDetails: z.boolean().optional(), fetchInvoiceXml: z.boolean().optional() }).strict().parse(options);
     console.log('🔄 Iniciando sincronização completa...');
     const result = await getBlingSalesOrdersOptimized({ 
         from, 
@@ -778,6 +593,8 @@ export async function fullSyncOrders(from?: Date, to?: Date, options: OrderSyncO
 
 
 export async function getBlingOrderDetails(orderId: string): Promise<any> {
+    requireOperation(await requireWebContext(), 'vendas:sync');
+    z.string().regex(/^\d+$/).max(30).parse(orderId);
     if (!orderId) {
         throw new Error('O ID do pedido é obrigatório.');
     }
@@ -800,6 +617,8 @@ export async function getBlingOrderDetails(orderId: string): Promise<any> {
 }
 
 export async function getBlingChannelByOrderId(orderId: string) {
+    requireOperation(await requireWebContext(), 'vendas:read');
+    z.string().regex(/^\d+$/).max(30).parse(orderId);
   if (!orderId) {
     throw new Error('O ID do pedido é obrigatório.');
   }
@@ -839,8 +658,9 @@ export async function getBlingChannelByOrderId(orderId: string) {
 
 
 export async function getBlingProducts(limit: number = 100): Promise<any> {
+    requireOperation(await requireWebContext(), 'estoque:read');
     const baseUrl = new URL('https://api.bling.com.br/Api/v3/produtos');
-    baseUrl.searchParams.set('limite', String(limit));
+    baseUrl.searchParams.set('limite', String(z.number().int().min(1).max(100).parse(limit)));
     
     try {
         const products = await blingFetchWithRefresh(baseUrl.toString());
@@ -852,6 +672,7 @@ export async function getBlingProducts(limit: number = 100): Promise<any> {
 }
 
 export async function getBlingProductBySku(sku: string): Promise<any> {
+    requireOperation(await requireWebContext(), 'estoque:read');
     if (!sku) {
         throw new Error('O SKU do produto é obrigatório.');
     }
@@ -875,673 +696,48 @@ export async function getBlingProductBySku(sku: string): Promise<any> {
     }
 }
 
-export type ProductStock = {
-  produto: {
-    id: number;
-    codigo: string;
-    nome: string;
-  };
-  deposito: {
-    id: number;
-    nome: string;
-  };
-  saldoFisico: number;
-  saldoVirtual: number;
-  saldoFisicoTotal: number;
-  saldoVirtualTotal: number;
-};
-
-// Cache de estoque com TTL de 5 minutos
-const stockCache: {
-    data: ProductStock[] | null;
-    timestamp: number;
-    TTL: number;
-} = {
-    data: null,
-    timestamp: 0,
-    TTL: 5 * 60 * 1000 // 5 minutos
-};
-
-// Busca dados de estoque que vieram via webhook (Firebase)
-// NOTA: Só retorna dados de webhooks REAIS do Bling (ignora testes)
-async function getStockFromWebhook(): Promise<Map<string, { estoqueAtual: number; updatedAt: string }>> {
-    const stockMap = new Map<string, { estoqueAtual: number; updatedAt: string }>();
-
-    try {
-        const stockUpdatesSnapshot = await getDocs(collection(db, 'stockUpdates'));
-
-        stockUpdatesSnapshot.forEach(docSnapshot => {
-            const data = docSnapshot.data();
-            const sku = data.sku || docSnapshot.id;
-            const lastEvent = data.lastEvent || '';
-
-            // Ignora dados de teste - só usa webhooks reais do Bling
-            if (lastEvent.includes('(test)')) {
-                return; // skip this item
-            }
-
-            stockMap.set(sku, {
-                estoqueAtual: data.estoqueAtual ?? 0,
-                updatedAt: data.webhookReceivedAt || '',
-            });
-        });
-
-        if (stockMap.size > 0) {
-            console.log(`📦 [WEBHOOK-ESTOQUE] ${stockMap.size} SKUs com estoque via webhook real`);
-        }
-    } catch (error) {
-        console.error('❌ [WEBHOOK-ESTOQUE] Erro ao buscar estoque do Firebase:', error);
-    }
-
-    return stockMap;
+export type { ProductStock } from '@/types/product-stock';
+export type { ProductionDemand } from '@/server/operations/production-demand';
+function civilRange(from?: Date, to?: Date) {
+  return dateRangeSchema.parse({ from: from && format(from, 'yyyy-MM-dd'), to: to && format(to, 'yyyy-MM-dd') });
 }
-
-// Limpa todos os dados de estoque da collection stockUpdates (para testes)
 export async function clearStockUpdates(): Promise<{ deleted: number }> {
-    try {
-        const stockUpdatesSnapshot = await getDocs(collection(db, 'stockUpdates'));
-        const batch = writeBatch(db);
-        let count = 0;
-
-        stockUpdatesSnapshot.forEach(docSnapshot => {
-            batch.delete(docSnapshot.ref);
-            count++;
-        });
-
-        if (count > 0) {
-            await batch.commit();
-            console.log(`🗑️ [STOCK-UPDATES] Removidos ${count} documentos`);
-        }
-
-        return { deleted: count };
-    } catch (error) {
-        console.error('❌ [STOCK-UPDATES] Erro ao limpar:', error);
-        return { deleted: 0 };
-    }
+  await requireAdministrator();
+  const rows = await adminDb.collection('stockUpdates').get();
+  for (let i = 0; i < rows.size; i += 400) {
+    const batch = adminDb.batch(); rows.docs.slice(i, i + 400).forEach(doc => batch.delete(doc.ref)); await batch.commit();
+  }
+  invalidateProductStockCache(); return { deleted: rows.size };
 }
-
-// Função para invalidar o cache (chamada pelo webhook quando há atualização)
 export async function invalidateStockCache(): Promise<void> {
-    console.log('🗑️ [CACHE] Invalidando cache de estoque');
-    stockCache.data = null;
-    stockCache.timestamp = 0;
+  requireOperation(await requireWebContext(), 'estoque:read'); invalidateProductStockCache();
 }
-
-export async function getProductsStock(): Promise<{ data: ProductStock[], isSimulated?: boolean }> {
-    // Verifica se há dados em cache válidos
-    const now = Date.now();
-    if (stockCache.data && (now - stockCache.timestamp) < stockCache.TTL) {
-        const cacheAge = Math.round((now - stockCache.timestamp) / 1000);
-        console.log(`📦 [CACHE] Retornando estoque do cache (idade: ${cacheAge}s)`);
-
-        // Mesmo usando cache, verifica se há atualizações via webhook
-        const webhookStock = await getStockFromWebhook();
-        if (webhookStock.size > 0) {
-            // Mescla dados do webhook com o cache
-            const mergedData = stockCache.data.map(item => {
-                const webhookData = webhookStock.get(item.produto.codigo);
-                if (webhookData) {
-                    return {
-                        ...item,
-                        saldoVirtualTotal: webhookData.estoqueAtual,
-                        saldoVirtual: webhookData.estoqueAtual,
-                    };
-                }
-                return item;
-            });
-            return { data: mergedData, isSimulated: false };
-        }
-
-        return { data: stockCache.data, isSimulated: false };
-    }
-
-    console.log('🚀 INICIANDO BUSCA DE ESTOQUE (cache expirado ou vazio)');
-
-    // Busca dados do webhook em paralelo com a API
-    const [webhookStock, apiResult] = await Promise.all([
-        getStockFromWebhook(),
-        (async () => {
-            try {
-                const stockUrl = 'https://api.bling.com.br/Api/v3/produtos';
-                console.log('🔍 Tentando endpoint:', stockUrl);
-
-                const stockData = await blingGetPaged(stockUrl);
-                console.log('📦 Dados recebidos do estoque:', stockData?.length || 0, 'itens');
-
-                if (stockData && stockData.length > 0) {
-                    return stockData;
-                }
-            } catch (error: any) {
-                console.log('❌ Erro no endpoint de estoque:', error.message);
-            }
-            return null;
-        })()
-    ]);
-
-    if (apiResult && apiResult.length > 0) {
-        console.log('✅ SUCESSO: DADOS REAIS DE ESTOQUE');
-
-        const formattedData: ProductStock[] = apiResult.map((item: any) => {
-            const sku = item.codigo || `PROD-${item.id}`;
-            const webhookData = webhookStock.get(sku);
-
-            // Se temos dados mais recentes do webhook, usa eles
-            const saldoVirtualTotal = webhookData
-                ? webhookData.estoqueAtual
-                : (item.estoque?.saldoVirtualTotal || item.estoque?.saldoVirtual || 0);
-
-            return {
-                produto: {
-                    id: item.id || 0,
-                    codigo: sku,
-                    nome: item.nome || 'Produto sem nome',
-                },
-                deposito: {
-                    id: item.deposito?.id || 0,
-                    nome: item.deposito?.nome || 'Depósito padrão',
-                },
-                saldoFisico: item.estoque?.saldoFisico || 0,
-                saldoVirtual: saldoVirtualTotal,
-                saldoFisicoTotal: item.estoque?.saldoFisicoTotal || item.estoque?.saldoFisico || 0,
-                saldoVirtualTotal: saldoVirtualTotal,
-            };
-        });
-
-        // Atualiza o cache
-        stockCache.data = formattedData;
-        stockCache.timestamp = now;
-        console.log('💾 [CACHE] Estoque salvo no cache');
-
-        if (webhookStock.size > 0) {
-            console.log(`📦 [WEBHOOK] ${webhookStock.size} SKUs atualizados via webhook`);
-        }
-
-        return { data: formattedData, isSimulated: false };
-    }
-
-    console.log('🔄 Usando fallback - buscando produtos...');
-    const productsData = await blingGetPaged('https://api.bling.com.br/Api/v3/produtos');
-    if (productsData && productsData.length > 0) {
-        console.log('⚠️ GERANDO DADOS SIMULADOS');
-
-        const simulatedData: ProductStock[] = productsData.slice(0, 20).map((product: any) => ({
-            produto: {
-                id: product.id,
-                codigo: product.codigo || `PROD-${product.id}`,
-                nome: product.nome || 'Produto sem nome',
-            },
-            deposito: { id: 1, nome: 'Depósito Principal' },
-            saldoFisico: Math.floor(Math.random() * 100),
-            saldoVirtual: Math.floor(Math.random() * 100),
-            saldoFisicoTotal: Math.floor(Math.random() * 100),
-            saldoVirtualTotal: Math.floor(Math.random() * 100),
-        }));
-
-        return { data: simulatedData, isSimulated: true };
-    }
-
-    throw new Error('Nenhum dado encontrado');
+export async function getProductsStock() {
+  requireOperation(await requireWebContext(), 'estoque:read'); return readStockSnapshot();
 }
-
-
 export async function countImportedOrders(): Promise<number> {
-    try {
-        const ordersCollection = collection(db, 'salesOrders');
-        const snapshot = await getDocs(ordersCollection);
-        return snapshot.size;
-    } catch (error) {
-        console.error("Failed to count imported orders:", error);
-        return 0;
-    }
+  requireOperation(await requireWebContext(), 'vendas:read');
+  return (await adminDb.collection('salesOrders').count().get()).data().count;
 }
-
-export async function getSalesDashboardData(
-  { from, to }: { from?: Date, to?: Date }
-): Promise<{
-  totalRevenue: number;
-  totalSales: number;
-  averageTicket: number;
-  uniqueCustomers: number;
-  topProducts: { name: string, total: number, revenue: number }[];
-  salesByState: { state: string, revenue: number }[];
-  stats: {
-      totalRevenue: { value: number, change: number };
-      totalSales: { value: number, change: number };
-      averageTicket: { value: number, change: number };
-      uniqueCustomers: { value: number, change: number };
-  }
-}> {
-  if (!from || !to) {
-    throw new Error('É necessário um período (data de início e fim) para a consulta.');
-  }
-
-  const salesCollection = collection(db, 'salesOrders');
-  const fromDateStr = format(from, 'yyyy-MM-dd');
-  const toDateStr = format(to, 'yyyy-MM-dd');
-
-  // Otimização: Query com filtros no Firestore em vez de filtrar em memória
-  const q = query(
-    salesCollection,
-    where('data', '>=', fromDateStr),
-    where('data', '<=', toDateStr)
-  );
-
-  const snapshot = await getDocs(q);
-
-  const orders: SaleOrder[] = [];
-  snapshot.forEach(doc => {
-    const order = doc.data() as SaleOrder;
-    // Agora só filtra por itens, pois a data já foi filtrada no query
-    if(order.itens && order.itens.length > 0) {
-      orders.push(order);
-    }
-  });
-
-  const totalRevenue = orders.reduce((sum, order) => sum + (order.total || 0), 0);
-  const totalSales = orders.length;
-  const averageTicket = totalSales > 0 ? totalRevenue / totalSales : 0;
-  
-  const customerIds = new Set(orders.map(order => order.contato.id));
-  const uniqueCustomers = customerIds.size;
-
-  const productSales = new Map<string, { total: number, revenue: number }>();
-  const stateSales = new Map<string, number>();
-
-  orders.forEach(order => {
-      order.itens?.forEach(item => {
-          const productName = item.descricao || 'Produto sem nome';
-          const currentData = productSales.get(productName) || { total: 0, revenue: 0 };
-          currentData.total += item.quantidade;
-          currentData.revenue += item.quantidade * item.valor;
-          productSales.set(productName, currentData);
-      });
-
-      const state = order.transporte?.etiqueta?.uf || 'N/A';
-      const currentRevenue = stateSales.get(state) || 0;
-      stateSales.set(state, currentRevenue + (order.total || 0));
-  });
-
-  const topProducts = Array.from(productSales.entries())
-      .map(([name, data]) => ({ name, total: data.total, revenue: data.revenue }))
-      .sort((a, b) => b.revenue - a.revenue)
-      .slice(0, 10);
-      
-  const salesByState = Array.from(stateSales.entries())
-      .map(([state, revenue]) => ({ state, revenue }))
-      .sort((a, b) => b.revenue - a.revenue);
-  
-
-  const mockChange = () => parseFloat((Math.random() * 40 - 10).toFixed(1));
-
-  return {
-    totalRevenue,
-    totalSales,
-    averageTicket,
-    uniqueCustomers,
-    topProducts,
-    salesByState,
-    stats: {
-        totalRevenue: { value: totalRevenue, change: mockChange() },
-        totalSales: { value: totalSales, change: mockChange() },
-        averageTicket: { value: averageTicket, change: mockChange() },
-        uniqueCustomers: { value: uniqueCustomers, change: mockChange() },
-    }
-  };
+export async function getSalesDashboardData({ from, to }: { from?: Date; to?: Date }) {
+  return (await summarizeSales(await requireWebContext(), civilRange(from, to))).data;
 }
-
-export type ProductionDemand = {
-  sku: string;
-  description: string;
-  orderCount: number;
-  totalQuantitySold: number;
-  weeklyAverage: number;
-  corte: number;
-  dobra: number;
-  stockLevel?: number;
-  stockMin?: number;
-  stockMax?: number;
-};
-
-export async function getProductionDemand(
-    { from, to }: { from?: Date, to?: Date }
-): Promise<ProductionDemand[]> {
-    if (!from || !to) {
-        return [];
-    }
-
-    const fromDateStr = format(from, 'yyyy-MM-dd');
-    const toDateStr = format(to, 'yyyy-MM-dd');
-
-    console.log('═══════════════════════════════════════════════════════════');
-    console.log(`📊 [PRODUÇÃO] Análise de demanda: ${fromDateStr} a ${toDateStr}`);
-    console.log('═══════════════════════════════════════════════════════════');
-
-    // Busca otimizada: filtra por data E notaFiscal.id no Firestore (server-side)
-    // Isso reduz drasticamente a quantidade de dados transferidos
-    const [salesSnapshot, stockDataResult, suppliesSnapshot] = await Promise.all([
-        getDocs(query(
-            collection(db, 'salesOrders'),
-            where('data', '>=', fromDateStr),
-            where('data', '<=', toDateStr)
-        )),
-        getProductsStock(),
-        getDocs(query(collection(db, "supplies")))
-    ]);
-
-    console.log(`📊 [PRODUÇÃO] Pedidos no período (server-side): ${salesSnapshot.size}`);
-
-    const stockMap = new Map<string, number>();
-    stockDataResult.data.forEach(stockItem => {
-        stockMap.set(stockItem.produto.codigo, stockItem.saldoVirtualTotal);
-    });
-
-    const supplyInfoMap = new Map<string, { stockMin?: number; stockMax?: number }>();
-    suppliesSnapshot.forEach(d => {
-        const s = d.data() as Supply;
-        const key = (s?.codigo as string) || d.id;
-        if (key) {
-            supplyInfoMap.set(key, {
-            stockMin: s?.estoqueMinimo,
-            stockMax: s?.estoqueMaximo,
-            });
-        }
-    });
-
-    const days = differenceInDays(to, from) + 1;
-    const weeks = Math.max(1, days / 7);
-
-    const productDemand = new Map<string, {
-        description: string,
-        orderIds: Set<number>,
-        totalQuantity: number
-    }>();
-
-    // Contadores para log
-    let ordersWithNF = 0;
-
-    salesSnapshot.forEach(doc => {
-        const order = doc.data() as SaleOrder;
-
-        // Filtra apenas pedidos com nota fiscal (o filtro de data já foi feito no Firestore)
-        const hasNF = order.notaFiscal && order.notaFiscal.id;
-        if (!hasNF) return;
-
-        ordersWithNF++;
-
-        // Processa itens do pedido
-        order.itens?.forEach(item => {
-            const sku = item.codigo || 'SKU_INDEFINIDO';
-            const currentData = productDemand.get(sku) || {
-                description: item.descricao,
-                orderIds: new Set(),
-                totalQuantity: 0
-            };
-
-            currentData.orderIds.add(order.id);
-            currentData.totalQuantity += item.quantidade;
-            productDemand.set(sku, currentData);
-        });
-    });
-
-    console.log(`📊 [PRODUÇÃO] Pedidos com NF no período: ${ordersWithNF}`);
-
-    const result = Array.from(productDemand.entries())
-        .map(([sku, data]) => {
-            const orderCount = data.orderIds.size;
-            const weeklyAverage = data.totalQuantity / weeks;
-            const corte = Math.floor(weeklyAverage * 2);
-            const dobra = Math.floor(weeklyAverage * 1.5);
-            const supplyInfo = supplyInfoMap.get(sku);
-
-            return {
-                sku,
-                description: data.description,
-                orderCount: orderCount,
-                totalQuantitySold: data.totalQuantity,
-                weeklyAverage: weeklyAverage,
-                corte: corte,
-                dobra: dobra,
-                stockLevel: stockMap.get(sku),
-                stockMin: supplyInfo?.stockMin,
-                stockMax: supplyInfo?.stockMax,
-            };
-        })
-        .sort((a, b) => b.weeklyAverage - a.weeklyAverage);
-
-    return result;
+export async function getProductionDemand({ from, to }: { from?: Date; to?: Date }) {
+  return (await productionDemand(await requireWebContext(), civilRange(from, to))).data;
 }
-
-/**
- * Busca dados de demanda de produção DIRETAMENTE do Bling
- * Isso evita problemas de divergência com dados locais do Firebase
- */
-export async function getProductionDemandFromBling(
-    { from, to }: { from?: Date, to?: Date }
-): Promise<ProductionDemand[]> {
-    if (!from || !to) {
-        return [];
-    }
-
-    const formatDate = (d: Date) => d.toISOString().split('T')[0];
-    const fromDateStr = formatDate(from);
-    const toDateStr = formatDate(to);
-
-    console.log('═══════════════════════════════════════════════════════════');
-    console.log(`📊 [PRODUÇÃO BLING] Buscando demanda DIRETO do Bling`);
-    console.log(`📊 [PRODUÇÃO BLING] Período: ${fromDateStr} a ${toDateStr}`);
-    console.log('═══════════════════════════════════════════════════════════');
-
-    // Buscar estoque e supplies em paralelo enquanto processamos os pedidos
-    const [stockDataResult, suppliesSnapshot] = await Promise.all([
-        getProductsStock(),
-        getDocs(query(collection(db, "supplies")))
-    ]);
-
-    const stockMap = new Map<string, number>();
-    stockDataResult.data.forEach(stockItem => {
-        stockMap.set(stockItem.produto.codigo, stockItem.saldoVirtualTotal);
-    });
-
-    const supplyInfoMap = new Map<string, { stockMin?: number; stockMax?: number }>();
-    suppliesSnapshot.forEach(d => {
-        const s = d.data() as Supply;
-        const key = (s?.codigo as string) || d.id;
-        if (key) {
-            supplyInfoMap.set(key, {
-                stockMin: s?.estoqueMinimo,
-                stockMax: s?.estoqueMaximo,
-            });
-        }
-    });
-
-    // Buscar pedidos do Bling
-    const blingUrl = `https://api.bling.com.br/Api/v3/pedidos/vendas?dataInicial=${fromDateStr}&dataFinal=${toDateStr}`;
-
-    console.log('📥 [PRODUÇÃO BLING] Listando todos os pedidos do período...');
-    const allBlingOrders = await blingGetPaged(blingUrl);
-    console.log(`📊 [PRODUÇÃO BLING] Total de pedidos no período: ${allBlingOrders.length}`);
-
-    const productDemand = new Map<string, {
-        description: string,
-        orderIds: Set<number>,
-        totalQuantity: number
-    }>();
-
-    let ordersWithNF = 0;
-    let ordersProcessed = 0;
-    let ordersWithItems = 0;
-
-    // Debug específico para SKU de teste
-    const DEBUG_SKU = 'CNUL440205140IN';
-    const debugSkuOrders: { orderId: number, orderDate: string, nfId: number | null, qty: number }[] = [];
-
-    console.log('📦 [PRODUÇÃO BLING] Buscando detalhes de cada pedido...');
-    console.log('⚠️ Isso pode levar alguns minutos devido ao rate limit da API...');
-
-    for (const order of allBlingOrders) {
-        ordersProcessed++;
-
-        if (ordersProcessed % 100 === 0) {
-            console.log(`🔄 [PRODUÇÃO BLING] Progresso: ${ordersProcessed}/${allBlingOrders.length} pedidos...`);
-        }
-
-        try {
-            const details = await blingFetchWithRefresh(`https://api.bling.com.br/Api/v3/pedidos/vendas/${order.id}`);
-            const orderData = details?.data;
-
-            if (!orderData) continue;
-
-            // Verificar se tem nota fiscal
-            const hasNF = orderData.notaFiscal && orderData.notaFiscal.id;
-            if (!hasNF) continue;
-
-            ordersWithNF++;
-
-            if (!orderData.itens || orderData.itens.length === 0) continue;
-            ordersWithItems++;
-
-            // Processar itens do pedido
-            orderData.itens.forEach((item: any) => {
-                const sku = item.codigo || 'SKU_INDEFINIDO';
-                const currentData = productDemand.get(sku) || {
-                    description: item.descricao,
-                    orderIds: new Set(),
-                    totalQuantity: 0
-                };
-
-                currentData.orderIds.add(orderData.id);
-                currentData.totalQuantity += item.quantidade || 0;
-                productDemand.set(sku, currentData);
-
-                // Debug para SKU específico
-                if (sku === DEBUG_SKU) {
-                    debugSkuOrders.push({
-                        orderId: orderData.id,
-                        orderDate: orderData.data,
-                        nfId: orderData.notaFiscal?.id || null,
-                        qty: item.quantidade || 0
-                    });
-                }
-            });
-        } catch (e: any) {
-            console.warn(`⚠️ [PRODUÇÃO BLING] Erro ao buscar pedido ${order.id}: ${e.message}`);
-        }
-    }
-
-    console.log('───────────────────────────────────────────────────────────');
-    console.log(`📊 [PRODUÇÃO BLING] Total pedidos processados: ${ordersProcessed}`);
-    console.log(`📊 [PRODUÇÃO BLING] Pedidos COM nota fiscal: ${ordersWithNF}`);
-    console.log(`📊 [PRODUÇÃO BLING] Pedidos COM NF e itens: ${ordersWithItems}`);
-    console.log('───────────────────────────────────────────────────────────');
-
-    // Log específico do SKU de debug
-    if (debugSkuOrders.length > 0) {
-        const totalQty = debugSkuOrders.reduce((sum, o) => sum + o.qty, 0);
-        const uniqueOrders = new Set(debugSkuOrders.map(o => o.orderId)).size;
-        console.log(`🔍 [DEBUG SKU BLING: ${DEBUG_SKU}]`);
-        console.log(`   - Pedidos únicos: ${uniqueOrders}`);
-        console.log(`   - Quantidade total: ${totalQty}`);
-        console.log(`   - Detalhes dos pedidos:`);
-        debugSkuOrders.slice(0, 10).forEach(o => {
-            console.log(`     * Pedido ${o.orderId} | Data: ${o.orderDate} | NF: ${o.nfId} | Qty: ${o.qty}`);
-        });
-        if (debugSkuOrders.length > 10) {
-            console.log(`     ... e mais ${debugSkuOrders.length - 10} pedidos`);
-        }
-    }
-    console.log('───────────────────────────────────────────────────────────');
-
-    const days = differenceInDays(to, from) + 1;
-    const weeks = Math.max(1, days / 7);
-
-    const result = Array.from(productDemand.entries())
-        .map(([sku, data]) => {
-            const orderCount = data.orderIds.size;
-            const weeklyAverage = data.totalQuantity / weeks;
-            const corte = Math.floor(weeklyAverage * 2);
-            const dobra = Math.floor(weeklyAverage * 1.5);
-            const supplyInfo = supplyInfoMap.get(sku);
-
-            return {
-                sku,
-                description: data.description,
-                orderCount: orderCount,
-                totalQuantitySold: data.totalQuantity,
-                weeklyAverage: weeklyAverage,
-                corte: corte,
-                dobra: dobra,
-                stockLevel: stockMap.get(sku),
-                stockMin: supplyInfo?.stockMin,
-                stockMax: supplyInfo?.stockMax,
-            };
-        })
-        .sort((a, b) => b.weeklyAverage - a.weeklyAverage);
-
-    console.log('═══════════════════════════════════════════════════════════');
-    console.log(`✅ [PRODUÇÃO BLING] Análise concluída! ${result.length} SKUs encontrados`);
-    console.log('═══════════════════════════════════════════════════════════');
-
-    return result;
+/** Compatibility entry point: demand uses imported orders and the shared stock source. */
+export async function getProductionDemandFromBling(input: { from?: Date; to?: Date }) { return getProductionDemand(input); }
+export type StockData = { stockLevel: number | null; stockMin?: number; stockMax?: number };
+export async function updateSingleSkuStock(sku: string): Promise<StockData> {
+  return (await refreshProductionSku(await requireWebContext(), sku)).data;
 }
-
-export type StockData = {
-    stockLevel?: number;
-    stockMin?: number;
-    stockMax?: number;
-}
-
-export async function updateSingleSkuStock(sku: string): Promise<StockData | null> {
-    try {
-        const productData = await getBlingProductBySku(sku);
-        if (productData?.data) {
-            const { estoque } = productData.data;
-
-            const stockInfo: StockData = {
-                stockLevel: estoque?.saldoVirtualTotal,
-                stockMin: typeof estoque?.minimo === "number" ? estoque.minimo : undefined,
-                stockMax: typeof estoque?.maximo === "number" ? estoque.maximo : undefined,
-            };
-
-            await updateSupplyBySku(sku, {
-                estoqueMinimo: stockInfo.stockMin,
-                estoqueMaximo: stockInfo.stockMax,
-            });
-
-            return stockInfo;
-        }
-        return null;
-    } catch (error: any) {
-        console.error(`Falha ao buscar dados de estoque para o SKU ${sku}:`, error);
-        throw new Error(`Não foi possível atualizar o estoque para o SKU ${sku}.`);
-    }
-}
-
-
 export async function deleteAllSalesOrders(): Promise<{ deletedCount: number }> {
-    const ordersCollection = collection(db, 'salesOrders');
-    const snapshot = await getDocs(ordersCollection);
-    
-    if (snapshot.empty) {
-        return { deletedCount: 0 };
-    }
-
-    // Firestore allows a maximum of 500 operations in a single batch.
-    const batchSize = 500;
-    let deletedCount = 0;
-
-    for (let i = 0; i < snapshot.docs.length; i += batchSize) {
-        const batch = writeBatch(db);
-        const chunk = snapshot.docs.slice(i, i + batchSize);
-        chunk.forEach(doc => {
-            batch.delete(doc.ref);
-        });
-        await batch.commit();
-        deletedCount += chunk.length;
-        console.log(`Deleted ${chunk.length} orders in batch.`);
-    }
-
-    console.log(`Successfully deleted ${deletedCount} total orders.`);
-    return { deletedCount };
+  await requireAdministrator();
+  const rows = await adminDb.collection('salesOrders').get();
+  for (let i = 0; i < rows.size; i += 400) {
+    const batch = adminDb.batch(); rows.docs.slice(i, i + 400).forEach(doc => batch.delete(doc.ref)); await batch.commit();
+  }
+  return { deletedCount: rows.size };
 }
 
 // ============================================================================
@@ -1549,7 +745,7 @@ export async function deleteAllSalesOrders(): Promise<{ deletedCount: number }> 
 // ============================================================================
 
 import type { MercadoLivreCredentials } from '@/lib/types';
-import { adminDb } from '@/lib/firebase-admin';
+
 import {
     saveMlCredentialsAdmin,
     getPrimaryMlAccountIdAdmin,
@@ -2201,7 +1397,6 @@ export async function createCatalogListingAction(prevState: any, formData: FormD
 export const getUsers = getUsersService;
 export const addUser = addUserService;
 export const deleteUser = deleteUserService;
-export const seedUsers = seedUsersService;
 
 
 // =========================================================================

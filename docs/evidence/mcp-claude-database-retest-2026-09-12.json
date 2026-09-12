@@ -1,0 +1,53 @@
+{
+  "checkedAt": "2026-09-12T00:14:44.754Z",
+  "origin": "https://br-steel-mcp-staging.vercel.app",
+  "deploymentUnderTest": "dpl_3K3Xt92mbCFYSdNUsiPBRswE5kqk",
+  "userReportedCorrectDatabaseOnlyResponses": true,
+  "allThreeDomainsConfirmedInAudit": true,
+  "connectionActive": true,
+  "callsAfterFix": [
+    {
+      "tool": "resumir_vendas",
+      "result": "success",
+      "createdAt": "2026-09-11T23:21:42.671Z"
+    },
+    {
+      "tool": "consultar_estoque_produtos",
+      "result": "success",
+      "createdAt": "2026-09-11T23:21:44.569Z"
+    },
+    {
+      "tool": "consultar_demanda_producao",
+      "result": "success",
+      "createdAt": "2026-09-11T23:21:45.715Z"
+    },
+    {
+      "tool": "consultar_meu_acesso",
+      "result": "success",
+      "createdAt": "2026-09-12T00:12:58.315Z"
+    },
+    {
+      "tool": "resumir_vendas",
+      "result": "success",
+      "createdAt": "2026-09-12T00:13:24.223Z"
+    },
+    {
+      "tool": "consultar_estoque_produtos",
+      "result": "success",
+      "createdAt": "2026-09-12T00:13:25.225Z"
+    },
+    {
+      "tool": "consultar_demanda_producao",
+      "result": "success",
+      "createdAt": "2026-09-12T00:13:26.294Z"
+    }
+  ],
+  "businessCollectionCounts": {
+    "salesOrders": 0,
+    "stockUpdates": 0,
+    "supplies": 0,
+    "productionLots": 0
+  },
+  "writesEnabled": false,
+  "acceptanceScope": "Authenticated hosted Claude reads from an empty staging database; populated data and hosted revocation/reconnect remain unverified"
+}

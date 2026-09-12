@@ -1,0 +1,116 @@
+{
+  "dateUtc": "2026-09-12",
+  "phase": "Production application and access migration; MCP remains disabled",
+  "sourceCommit": "5aafb81",
+  "projectId": "marketflow-9h4tg",
+  "billing": {
+    "userAuthorized": true,
+    "accountSuffix": "7132D4",
+    "enabled": true,
+    "otherProjectsChanged": false
+  },
+  "dataInventory": {
+    "users": 5,
+    "salesOrders": 12521,
+    "storedStockObservations": 361,
+    "suppliesCollectionDocuments": 54,
+    "productionLots": 3,
+    "note": "Supplies includes SKU threshold configuration documents, not 54 complete supply registrations."
+  },
+  "referenceReads": {
+    "sales": {
+      "from": "2026-09-01",
+      "to": "2026-09-11",
+      "orders": 466,
+      "revenue": 215757.67
+    },
+    "storedStock": {
+      "validObservations": 361,
+      "zeroBalances": 35,
+      "invalidObservationDates": 0,
+      "simulatedObservations": 0
+    }
+  },
+  "indexes": {
+    "compositeReady": 11,
+    "existingIndexesPreserved": 2,
+    "ttlActive": [
+      "mcpAuditLogs.expiresAt",
+      "mcpRateLimits.expiresAt"
+    ]
+  },
+  "deployment": {
+    "id": "dpl_dPnsKCEQvbt9YRh9grXbUpA25J5F",
+    "origin": "https://br-steel.vercel.app",
+    "status": "READY",
+    "promoted": true,
+    "cloudBuildPassed": true,
+    "productionCrons": 3,
+    "mcpEnabled": false,
+    "oauthEnabled": false,
+    "mcpWritesEnabled": false
+  },
+  "configuration": {
+    "verifiedProductionVariableChanges": 16,
+    "unrelatedValuesPreserved": true,
+    "previewAuthDomainValuePreserved": true,
+    "uploadedSourceFilesSecretScanned": 412,
+    "privateValueMatches": 0
+  },
+  "rules": {
+    "ruleset": "97cdee08-477f-45e1-a40f-1da9b351702f",
+    "matchesReviewedSource": true,
+    "anonymousDeniedPaths": [
+      "users",
+      "appSettings",
+      "salesOrders",
+      "stockUpdates",
+      "supplies",
+      "productionLots",
+      "mcpConnections",
+      "appConfig/blingCredentials"
+    ]
+  },
+  "actualUserVerification": {
+    "login": true,
+    "salesDashboard": {
+      "orders": 466,
+      "revenue": 215757.67
+    },
+    "kanbanLots": 3,
+    "webStockSkus": 814,
+    "productionDemandSkus": 59,
+    "webStockSource": "mixed; MCP database-only path remains separate"
+  },
+  "observedRegression": {
+    "page": "/insumos",
+    "error": "Cannot read properties of undefined (reading localeCompare)",
+    "cause": "New read included threshold-only documents excluded by the old orderBy(nome) query",
+    "fixStatus": "Implementation and local verification in progress; no production data migration"
+  },
+  "runtimeLogs": {
+    "sampleRequests": 100,
+    "unexpected5xx": 0,
+    "scheduledDrain200": 6,
+    "scheduledBackfill200": 2,
+    "note": "The client-side supplies error occurred with HTTP 200, so this status scan alone does not establish UI correctness."
+  },
+  "supabase": {
+    "projectRef": "mlumbvxpaqfzpdjnvzxc",
+    "hookBackupMatchesHistoricalStaging": true,
+    "privateSchemaExposed": false,
+    "oauthConsumers": {
+      "users": 1,
+      "registeredClients": 8
+    },
+    "productionHookApplied": false,
+    "siteUrlStillStaging": true
+  },
+  "businessWritesByAgent": false,
+  "productionClaudeVerified": false,
+  "remaining": [
+    "Finish and review supply-list compatibility fix",
+    "Publish verified fix and enable read-only OAuth/MCP after hosted provider configuration",
+    "Validate real production Claude reads, current permissions and revocation/reconnection"
+  ]
+}
