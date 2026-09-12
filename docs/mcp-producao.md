@@ -1,58 +1,60 @@
-# Implantação MCP de leitura em produção
+# MCP de leitura em produção
 
-Autorizada pelo usuário em 12/09/2026 UTC: publicar o conector no BR Steel real, reutilizando usuários, permissões e banco operacional, inicialmente sem escrita de negócio. A preparação está local; **o conector de produção ainda não foi publicado nem habilitado**.
+Publicado e habilitado em 12/09/2026 UTC, conforme autorização do usuário. O conector usa os usuários, as permissões e o banco operacional do BR Steel. A conexão pelo Claude pessoal em produção ainda aguarda validação do usuário. Escrita MCP permanece desabilitada.
 
-## Destino confirmado
+## Destinos e versão
 
 | Recurso | Destino |
 | --- | --- |
-| Aplicação existente | `https://br-steel.vercel.app` |
-| Projeto Vercel | `br-steel`, `prj_nKDQAAfkgJ7DePQsIZy5gMELWuWj`, Node 22.x |
-| Endpoint previsto | `https://br-steel.vercel.app/api/mcp` — ainda não disponível |
+| Aplicação | https://br-steel.vercel.app |
+| Endpoint para cadastrar no Claude | https://br-steel.vercel.app/api/mcp |
+| Projeto Vercel | `prj_nKDQAAfkgJ7DePQsIZy5gMELWuWj`, Node 22.x |
+| Publicação ativa | `dpl_25QP3Q2cjkbABU45pB3tKJbMUhA5`, código `7f8c9a5` |
 | Banco operacional | Firestore `(default)`, projeto `marketflow-9h4tg`, região `nam5` |
-| Provedor OAuth escolhido | Supabase `mlumbvxpaqfzpdjnvzxc` |
-| Publicação atual preservada | `dpl_FJQePtgMfdmvtdLfLcdUaUwz1mkW` |
+| Autenticação OAuth | Supabase `mlumbvxpaqfzpdjnvzxc` |
 
-O domínio e a conta de serviço em produção apontam para esses destinos. A publicação anterior tem os três crons do Mercado Livre ativos; eles devem ser preservados. Os ambientes de teste mantêm seu banco e seu usuário piloto separados.
+O servidor MCP roda na aplicação Vercel. O Supabase emite os tokens OAuth; os dados de negócio e as permissões continuam no Firestore. As ferramentas MCP de estoque e demanda consultam somente os registros persistidos, sem Bling ao vivo nem seu cache. A tela web de estoque mantém seu comportamento existente com fontes combinadas.
 
-## Impedimento observado
+## Publicação realizada
 
-O Firestore de produção retornou código 8, `Quota exceeded`, tanto nas consultas agregadas quanto na leitura isolada de `appSettings/general`. Não foi possível inventariar usuários, suas condições de primeiro acesso nem os dados operacionais. Isso é falha da consulta; **não significa banco vazio**.
+O banco inicialmente recusava consultas com `Quota exceeded` e faturamento desabilitado. Após o usuário escolher explicitamente a conta terminada em `7132D4`, somente `marketflow-9h4tg` foi vinculado; a leitura voltou a funcionar. Outros projetos e a antiga conta encerrada não foram alterados.
 
-A consulta administrativa confirmou `billingEnabled: false`, banco com `freeTier: true` e `open: false` na conta de faturamento vinculada. A regularização do faturamento exige ação/autorização explícita porque pode habilitar cobrança. Não houve reativação, troca de conta ou nova despesa autorizada nesta tarefa. O Google documenta a cota gratuita diária e sua renovação aproximadamente à meia-noite do Pacífico; essa renovação não equivale à regularização de uma conta encerrada. [Cotas do Firestore](https://firebase.google.com/docs/firestore/quotas).
+O inventário encontrou 5 usuários, 12.521 pedidos, 361 observações de estoque e 3 lotes. Os 54 documentos de `supplies` incluem configurações de limites por SKU e formatos antigos; não equivalem a 54 cadastros completos. As permissões personalizadas existentes foram preservadas.
 
-As configurações atuais da Vercel, suas variáveis e as regras/índices do Firestore foram salvas privadamente para comparação e reversão. As regras atuais permitem acesso legado direto a usuários, permissões e dados de negócio. Por isso, a camada de autenticação e os consumidores web migrados precisam entrar antes de fechar essas coleções, e o MCP só pode ser habilitado depois desse fechamento.
+A aplicação com autenticação e consumidores web migrados entrou primeiro, com MCP/OAuth desligados. O usuário efetuou login real e foram verificadas as telas de vendas, estoque, Kanban e demanda. Depois foram publicadas as regras restritas: oito caminhos sensíveis recusaram leitura anônima com HTTP 403. Os 11 índices compostos estão prontos, preservando os dois existentes; TTL está ativo para auditoria e limites de requisição MCP.
 
-## Preparação implementada
+A verificação real detectou uma falha em insumos: documentos de configuração sem nome chegavam à ordenação do cadastro. A correção preserva a seleção de registros nomeados do leitor anterior, mantém a paginação e apresenta campos ausentes como “Não informado”. Nenhum documento foi corrigido, apagado ou preenchido automaticamente. Cadastro e estoque de insumos foram verificados no navegador com a sessão legítima do usuário após a publicação final.
 
-- `MCP_USER_ACCESS_MODE=authenticated` permite usuários com identidade OAuth e concessão válidas, sem uma segunda lista manual. Papel, páginas ativas, consentimento, versão de autenticação e revogação continuam verificados em cada chamada. O padrão continua `allowlist`; homologação recusa o modo aberto a usuários autenticados.
-- Novas identidades OAuth recebem `app_metadata.brsteel_mcp_resource` pelo servidor. Identidade de outro ambiente é recusada. O hook preparado em `supabase/hosted/production/` emite uma única audiência para o recurso correto e preserva os tokens do piloto antigo. `user_metadata` não tem autoridade.
-- `config/mcp-production.env.example` lista o ambiente sem segredos. `scripts/mcp-production-check.ts` valida offline os projetos, domínio, credenciais, flags, ausência de emuladores e preservação dos três crons. Aceita a preparação com MCP/OAuth desligados e a fase de leitura habilitada; sempre recusa escrita.
-- O ambiente final foi preparado em arquivo privado, sem upload. A produção ainda não possuía `AUTH_SESSION_SECRET` nem `CRON_SECRET`; os novos valores são exclusivos. A troca do segredo de sessão exigirá novo login, preservando as senhas existentes. Contas ainda com senha inicial seguem o fluxo já implementado de troca pessoal antes de autorizar o Claude.
+O hook privado do Supabase foi atualizado e suas asserções remotas passaram. Proprietário e permissões ficaram idênticos; `private` continua fora da Data API. Site URL aponta para produção e os dois retornos exatos de consentimento, produção e homologação, estão cadastrados. O hook mantém a audiência legada do piloto; seu refresh real após a alteração ainda não foi observado. A conexão piloto não foi revogada.
 
-## Sequência de publicação
+Os três crons e os segredos das integrações existentes foram preservados. Os novos segredos exclusivos de sessão/cron foram configurados na primeira publicação; o usuário já entrou novamente sem alteração de sua senha. O segredo temporário que a CLI Vercel criou para testar a publicação protegida foi revogado após as verificações.
 
-1. Restabelecer uma leitura no banco operacional. Inventariar os usuários e configurações atuais sem expor senhas, conferir datas/formato dos pedidos e observações de estoque, e selecionar registros reais para comparação. Não cadastrar fixtures nem alterar negócio em produção.
-2. Comparar e provisionar os índices necessários preservando os dois índices existentes. Aguardar `READY`. Tratar retenção TTL conforme a situação de faturamento; não presumir que está habilitada.
-3. Executar testes locais, revisão e build. Validar o ambiente por `node --import tsx scripts/mcp-production-check.ts` usando apenas as variáveis preparadas e o `vercel.json` efetivo. Não substituir o manifesto de produção pelo manifesto sem crons da homologação.
-4. Publicar a aplicação migrada com `MCP_ENABLED=false` e `MCP_OAUTH_ENABLED=false`, sempre `MCP_WRITES_ENABLED=false`. Conferir novo login, primeiro acesso quando aplicável, perfis, telas e APIs dos módulos com os dados conhecidos. Recarregar as abas antigas para usar os novos consumidores autenticados.
-5. Publicar as regras restritas após a migração dos consumidores. Conferir recusa anônima nas coleções migradas. Não habilitar MCP enquanto usuários/permissões puderem ser alterados diretamente por clientes anônimos.
-6. Inventariar e salvar privadamente o hook/configuração do Supabase, aplicar atomicamente o SQL de produção e executar suas asserções/advisors. Atualizar Site URL e consentimento para o domínio real. Validar audiência de código/refresh, sessões comuns e continuidade do refresh do piloto; os testes SQL locais não substituem essa emissão real.
-7. Publicar `MCP_ENABLED=true`, `MCP_OAUTH_ENABLED=true`, `MCP_USER_ACCESS_MODE=authenticated`, escrita desabilitada. Confirmar alias, crons, challenge HTTP 401 sem token e metadados canônicos.
-8. Conectar o Claude com o login real do usuário, autorizar somente capacidades disponíveis e comparar as três leituras com os registros conhecidos. Validar recusa por permissão, revogação e reconexão. Não fabricar cookies nem usar credenciais de serviço como se fossem uma autenticação de usuário.
+## Acesso e ferramentas
 
-A preparação não faz push/merge nem altera a branch principal. Antes de integrar ao GitHub, considerar que a branch contém também a migração necessária da autenticação e dos consumidores web; não publicar apenas a rota MCP isoladamente.
+`MCP_ENABLED=true`, `MCP_OAUTH_ENABLED=true`, `MCP_WRITES_ENABLED=false` e `MCP_USER_ACCESS_MODE=authenticated`.
 
-## Verificação da preparação
+O modo authenticated dispensa a lista manual de pilotos. Cada chamada continua verificando identidade OAuth, assinatura, audiência, cliente, concessão, versão da autenticação, usuário ativo, papel e permissões atuais. O consentimento não amplia o acesso além do permitido no sistema. Contas com senha inicial precisam concluir sua troca pessoal antes de autorizar o Claude.
 
-Em 12/09/2026 UTC, a suíte local passou com 157 testes em 26 arquivos e o build terminou com sucesso. A checagem TypeScript continua com os mesmos 25 erros preexistentes, sem erros novos. Após uma correção apenas na tipagem do ambiente do teste de subprocesso, os quatro testes de produção passaram novamente e a comparação TypeScript permaneceu idêntica à base.
+Há 12 ferramentas de leitura, filtradas pelo acesso efetivo: consultar acesso, listar/detalhar/resumir pedidos, estoque de produtos, insumos e movimentações, demanda/pedidos de produção, colunas/lotes/detalhes do Kanban. Não há ferramenta MCP de escrita publicada.
 
-O validador offline passou nas duas fases usando a configuração privada preparada e o manifesto real, sempre com escrita desabilitada. A primeira fase tem **ambas** as flags MCP e OAuth desligadas; o resumo `preparation` do validador, isoladamente, não comprova isso. O teste SQL local confirmou seleção de audiência, preservação das permissões, reversão e recusa de ACL insegura. A revisão independente não encontrou defeitos acionáveis, inclusive na correção final do teste.
+## Verificação e próximo teste
 
-Esses resultados verificam a preparação local. Inventário operacional, publicação, regras/índices em produção, emissão real de tokens de produção e aceitação pelo Claude continuam pendentes. Nenhuma mudança de faturamento, Vercel, Firebase ou Supabase foi aplicada nesta etapa. Evidência sanitizada em `docs/evidence/mcp-production-preparation-2026-09-12.json`.
+A suíte passou com 160 testes em 27 arquivos. Os builds local e Vercel passaram; a checagem TypeScript manteve exatamente os 25 diagnósticos preexistentes, sem novos erros. Revisão independente aprovada. O validador de configuração confirmou o destino e a fase de leitura; os 414 arquivos regulares enviados foram examinados sem correspondência de valores privados.
+
+No domínio canônico, login e metadados respondem 200; MCP sem token responde 401 com o endereço correto de descoberta. APIs de sessão, vendas, insumos e cron recusam acesso anônimo. O Supabase apresentou somente o aviso de proteção contra senhas vazadas desativada; o fluxo usa login próprio BR Steel e não solicita senha Supabase do usuário. Nenhum problema de banco/função foi indicado pelos advisors.
+
+Para a aceitação de produção:
+
+1. Cadastrar `https://br-steel.vercel.app/api/mcp` no Claude e autenticar com o usuário real do BR Steel.
+2. Consultar o próprio acesso e os três indicadores. A referência verificada para 01/09 a 11/09/2026 é 466 pedidos, R$ 215.757,67; havia 361 observações válidas de estoque. Os dados podem mudar com a sincronização normal.
+3. Conferir permissões, código/refresh legítimos, revogação e reconexão. Esses passos ainda não foram comprovados pelo Claude em produção; as asserções SQL não substituem a emissão real.
+
+Evidências: `docs/evidence/mcp-production-readonly-2026-09-12.json` e o registro histórico `docs/evidence/mcp-production-phase1-2026-09-12.json`. O checkpoint de preparação permanece como histórico, sem representar o estado atual.
+
+As alterações estão na branch local `codex/mcp-auth-foundation`. Não houve push/merge no GitHub nem alteração da branch principal. A integração futura deve incluir a autenticação e os consumidores web migrados, além da rota MCP.
 
 ## Reversão
 
-Desabilitar o conector antes de desfazer sua configuração. Preservar o backup real do hook e das variáveis para restaurar somente as mudanças desta implantação. As instruções de reversão SQL estão em `supabase/hosted/production/README.md`.
+Desabilitar MCP/OAuth antes de desfazer a configuração do provedor. Preservar backups privados e comparar mudanças posteriores; instruções SQL em `supabase/hosted/production/README.md`. Alterar o hook não revoga tokens já emitidos.
 
-Depois de fechar as regras, não restaurar o frontend antigo isoladamente: seus leitores diretos deixarão de funcionar. Uma falha nessa fase pede correção mantendo as regras protegidas, ou uma reversão coordenada especificamente revisada. Os backups não autorizam reabrir automaticamente coleções sensíveis.
+Depois do fechamento das regras, não restaurar o frontend antigo isoladamente: seus leitores diretos deixarão de funcionar. Corrigir mantendo as regras protegidas ou preparar uma reversão coordenada. Os backups não autorizam reabrir automaticamente coleções sensíveis.

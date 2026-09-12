@@ -1,6 +1,6 @@
 # Audiência OAuth de produção
 
-Preparação exclusiva para Supabase `mlumbvxpaqfzpdjnvzxc`. O recurso de produção é `https://br-steel.vercel.app/api/mcp`; o legado é `https://br-steel-mcp-staging.vercel.app/api/mcp`. Nenhum arquivo de homologação foi alterado. Estes artefatos ficam fora da cadeia local `supabase/migrations`; não usar `db push`.
+Configuração exclusiva para Supabase `mlumbvxpaqfzpdjnvzxc`. O recurso de produção é `https://br-steel.vercel.app/api/mcp`; o legado é `https://br-steel-mcp-staging.vercel.app/api/mcp`. Nenhum arquivo de homologação foi alterado. Estes artefatos ficam fora da cadeia local `supabase/migrations`; não usar `db push`.
 
 Somente `claims.client_id` não vazio aciona a seleção. Dentro de `claims.app_metadata`, `brsteel_mcp_resource` exatamente igual ao recurso de produção seleciona produção; exatamente igual a homologação seleciona homologação. Chave ausente, JSON `null` e string vazia selecionam homologação para preservar o piloto. Qualquer outro valor não vazio, incluindo espaços, URL com barra extra, número, objeto ou array, aborta com SQLSTATE `22023`. `user_metadata` e `client_id` fora de `claims` nunca autorizam nem selecionam audiência. Sem cliente OAuth, o objeto `claims` permanece JSONB-idêntico, inclusive sua audiência; o envelope de retorno continua `{claims: ...}`, como no hook anterior. A saída OAuth tem uma única audiência string, nunca um array.
 
@@ -15,7 +15,7 @@ Não aplicar enquanto a disponibilidade do Firestore de produção e a sequênci
 3. Aplicar a migration inteira em uma única chamada; não dividir seu conteúdo. O arquivo foi criado por `supabase migration new mcp_production_oauth_audience` com CLI 2.114.0 em diretório temporário isolado.
 4. Executar o teste CLI e capturar novamente `backup.sql` para comparar proprietário/ACL. Inspecionar advisors de segurança e a configuração externa. Somente o responsável da publicação altera Site URL/configuração e habilita a aplicação, conforme o plano de produção.
 
-Comandos a executar na raiz do worktree, **ainda não executados remotamente nesta preparação**:
+Comandos executados na raiz do worktree em 12/09/2026 UTC, após a aplicação migrada e as regras restritas entrarem em produção:
 
 ```sh
 supabase db query --linked --project-ref mlumbvxpaqfzpdjnvzxc --file supabase/hosted/production/backup.sql --output-format json
@@ -43,6 +43,8 @@ Reproduzir com Node e um pacote `@electric-sql/pglite` disponível, ou definir `
 node supabase/hosted/production/tests/verify_local.cjs
 ```
 
-Esses resultados são locais. Aplicação remota, advisors remotos e emissão real de produção permanecem pendentes. O teste em memória não reproduz a infraestrutura/versão/configuração completa do Supabase hospedado.
+A migration foi aplicada remotamente em 12/09/2026 UTC. As asserções CLI passaram e a comparação independente dos backups confirmou proprietário, ACL da função/schema, search_path e SECURITY INVOKER preservados. O painel confirmou o hook selecionado em private e esse schema fora da Data API. Site URL agora é https://br-steel.vercel.app; os retornos exatos de produção e homologação estão autorizados, OAuth/DCR seguem habilitados e Authorization Path permanece /oauth/consent.
+
+Os advisors não encontraram problemas de banco/função; retornaram apenas o aviso de proteção de senhas vazadas desativada no Auth. O login BR Steel usa sua própria autenticação e a ponte não solicita senha Supabase do usuário; não foi alterada a política de senhas do provedor. Emissão real de código/refresh de produção, refresh do piloto e aceitação no Claude ainda aguardam um fluxo legítimo de usuário. As asserções SQL não substituem essas verificações.
 
 Consultados o [changelog Supabase](https://supabase.com/changelog) e a documentação de [Custom Access Token Hook](https://supabase.com/docs/guides/auth/auth-hooks/custom-access-token-hook). As mudanças listadas de schemas gerenciados e infraestrutura self-hosted não alteram este hook privado no projeto hospedado.
