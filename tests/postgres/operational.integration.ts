@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { after, test } from 'node:test';
+import { after, before, test } from 'node:test';
 import { Pool } from 'pg';
 import { COLLECTIONS, type OperationalSnapshot } from '../../src/server/migration/operational-snapshot';
 import { createLocalImportPool, importSnapshot, verifySnapshot } from '../../src/server/migration/operational-import';
@@ -18,6 +18,12 @@ assert.ok(url, 'Run through scripts/operational-postgres-local.mjs');
 const pool = createLocalImportPool(url);
 const readerPool = new Pool({ connectionString: url, max: 2, options: '-c role=brsteel_ops_reader' });
 const sales = createPostgresSalesRepository(readerPool);
+before(async () => {
+  assert.equal(process.env.FIRESTORE_EMULATOR_HOST, '127.0.0.1:8188');
+  await pool.query('truncate brsteel_import.runs cascade');
+  const reset = await fetch('http://127.0.0.1:8188/emulator/v1/projects/demo-brsteel-auth/databases/(default)/documents', { method: 'DELETE' });
+  assert.ok(reset.ok);
+});
 after(async () => { await readerPool.end(); await pool.end(); });
 
 const snapshot = (): OperationalSnapshot => ({ formatVersion: 1, sourceProject: 'demo-brsteel-auth', capturedAt: '2026-09-12T12:00:00.000Z',

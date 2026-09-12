@@ -1,7 +1,7 @@
 // Runs only synthetic integration tests in a disposable, loopback-only PostgreSQL container.
 import { spawn, spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { readFileSync, mkdtempSync, rmSync } from 'node:fs';
+import { readFileSync, readdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import net from 'node:net';
@@ -11,7 +11,7 @@ const port = 55436;
 const name = `brsteel-operational-test-${process.pid}`;
 const password = randomBytes(24).toString('hex');
 const image = 'public.ecr.aws/supabase/postgres:17.6.1.167';
-const migration = new URL('../supabase/operational/migrations/20260912154522_operational_core.sql',import.meta.url);
+const migrations = new URL('../supabase/operational/migrations/',import.meta.url);
 const bootstrap = `mkdir -p /measure/data
 chown -R postgres:postgres /measure
 printf '%s' "$POSTGRES_PASSWORD" > /measure/password
@@ -51,7 +51,22 @@ try {
   try {
     // Simulate a Supabase anonymous principal to prove it has no operational access.
     await pool.query("do $$ begin if not exists(select from pg_roles where rolname='anon') then create role anon nologin; end if; if not exists(select from pg_roles where rolname='authenticated') then create role authenticated nologin; end if; end $$;");
-    await pool.query(readFileSync(migration,'utf8'));
+    for (const file of readdirSync(migrations).filter(file => file.endsWith('.sql')).sort()) {
+      const rebuild = file.endsWith('_operational_read_models.sql');
+      if (rebuild) {
+        // Simulate a ready pre-projection copy in this fresh disposable database.
+        await pool.query(`insert into brsteel_import.runs(id,source_project,captured_at,status,next_index,total_records,completed_at)
+          values(repeat('a',64),'demo-brsteel-auth','2026-01-01','complete',0,0,now());
+          insert into brsteel_import.state(singleton,source_project,active_run,ready) values(true,'demo-brsteel-auth',repeat('a',64),true);`);
+      }
+      await pool.query(readFileSync(new URL(file,migrations),'utf8'));
+      if (rebuild) {
+        const state = (await pool.query('select s.ready,r.status,r.next_index from brsteel_import.state s join brsteel_import.runs r on r.id=s.active_run')).rows[0];
+        if (state.ready || state.status !== 'loading' || state.next_index !== 0) throw new Error('Existing copy was not invalidated for projection rebuild');
+        await pool.query('delete from brsteel_import.state; delete from brsteel_import.runs');
+        console.log('Existing copy invalidated for projection rebuild: passed');
+      }
+    }
     for (const role of ['anon', 'authenticated']) {
       await pool.query(`set role ${role}`);
       let denied = false;
@@ -89,7 +104,7 @@ try {
     NEXT_PUBLIC_FIREBASE_PROJECT_ID:'demo-brsteel-auth',GCLOUD_PROJECT:'demo-brsteel-auth' };
   const code = await new Promise((resolve,reject) => {
     const child=spawn('firebase',['emulators:exec','--only','firestore','--project','demo-brsteel-auth','--config','firebase.test.json',
-      'node --conditions=react-server --import tsx --test tests/postgres/operational.integration.ts'],{ env,stdio:'inherit' });
+      'node --conditions=react-server --import tsx --test --test-concurrency=1 tests/postgres/*.integration.ts'],{ env,stdio:'inherit' });
     child.once('error',reject); child.once('exit',c=>resolve(c ?? 1));
   });
   process.exitCode = code;

@@ -1,6 +1,6 @@
 # Migração do banco operacional para PostgreSQL
 
-Status: roteiro preparado a pedido do usuário em 12/09/2026. Medições e primeira etapa concluídas localmente. A etapa 2 já tem schema, importação retomável e adaptador candidato de vendas; faltam os adaptadores de estoque/produção antes do piloto hospedado. O PostgreSQL operacional ainda não foi ativado.
+Status: roteiro preparado a pedido do usuário em 12/09/2026. Medições, preparação da leitura, schema e importação foram concluídos localmente. A continuação da etapa 2 implementa os adaptadores candidatos de estoque, insumos, produção e demanda, além de vendas. O PostgreSQL operacional ainda não foi ativado; dados reais e desempenho hospedado serão validados no piloto.
 
 ## Objetivo e escopo
 
@@ -47,7 +47,7 @@ Os demais módulos, documentos de credenciais e integrações de Mercado Livre f
 | 5. Trocar a fonte | Procedimento de manutenção, conferência final e ativação coordenada | Escritores antigos bloqueados, divergência zero no corte e recuperação demonstrada |
 | 6. Observar e consolidar | Leituras e gravações do núcleo no PostgreSQL, métricas e backup | Período de observação encerrado com critérios atendidos; consumidores restantes inventariados |
 
-O primeiro plano executável está em [preparação da leitura](../plans/2026-09-12-operational-postgres-phase1.md). O plano da primeira entrega da etapa 2 está em [schema, importação e leitura local de vendas](../plans/2026-09-12-operational-postgres-phase2.md). Estoque e produção foram cobertos nesta entrega por preservação dos dados e vínculos; seus adaptadores de leitura e a agregação de demanda continuam pendentes dentro da etapa 2. As etapas 3 a 6 receberão seus planos técnicos depois de verificar os resultados e contratos anteriores.
+O primeiro plano executável está em [preparação da leitura](../plans/2026-09-12-operational-postgres-phase1.md). A etapa 2 foi dividida em [schema, importação e leitura local de vendas](../plans/2026-09-12-operational-postgres-phase2.md) e [consultas de estoque, insumos e produção](../plans/2026-09-12-operational-postgres-readers.md). As etapas 3 a 6 receberão seus planos técnicos depois de verificar os resultados e contratos anteriores.
 
 ## Conferência, atualização e troca de fonte
 

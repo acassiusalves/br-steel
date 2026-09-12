@@ -1,5 +1,18 @@
 import { FieldPath, Timestamp, type Firestore } from 'firebase-admin/firestore';
-import { COLLECTIONS, prepareSnapshot, type OperationalSnapshot, type SourceRecord } from './operational-snapshot';
+import { COLLECTIONS, prepareSnapshot, type OperationalCollection, type OperationalSnapshot, type SourceRecord } from './operational-snapshot';
+
+function requireReadCompatibleTypes(collection: OperationalCollection, data: Record<string,unknown>) {
+  // These source types cannot be reconstructed from legacy JSON snapshots. Reject before
+  // normalization can change query eligibility or the precision exposed by existing readers.
+  function inspect(value: unknown) {
+    if (value instanceof Timestamp || value instanceof Date) throw new Error(`Source timestamp requires explicit normalization: ${collection}`);
+    if (Array.isArray(value)) value.forEach(inspect);
+    else if (value && typeof value === 'object' && Object.getPrototypeOf(value) === Object.prototype) Object.values(value).forEach(inspect);
+  }
+  if (collection === 'stockUpdates') {
+    for (const field of ['sku','nome','webhookReceivedAt']) inspect(data[field]);
+  } else if (collection !== 'supplyCodes' && collection !== 'operationsMetadata') inspect(data);
+}
 
 function jsonValue(value: unknown): unknown {
   if (value instanceof Timestamp) {
@@ -30,8 +43,10 @@ export async function exportOperationalSnapshot(db: Firestore, sourceProject: st
       for (const doc of page.docs) {
         if (collection === 'operationsMetadata' && !/^production-lots-\d{4}$/.test(doc.id)) continue;
         if (!doc.updateTime) throw new Error(`Source version unavailable: ${collection}/${doc.id}`);
+        const data = doc.data();
+        requireReadCompatibleTypes(collection, data);
         records.push({ collection,id:doc.id,version:(BigInt(doc.updateTime.seconds)*BigInt(1000000000)+BigInt(doc.updateTime.nanoseconds)).toString(),
-          data:jsonValue(doc.data()) as Record<string,unknown> });
+          data:jsonValue(data) as Record<string,unknown> });
       }
       if (page.size<500) break;
       cursor=page.docs.at(-1)!.id;

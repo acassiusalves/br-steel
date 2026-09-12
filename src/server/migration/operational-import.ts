@@ -1,5 +1,6 @@
 import { Pool, type PoolClient } from 'pg';
 import { COLLECTIONS, TABLES, contentHash, prepareSnapshot, type PreparedSnapshot } from './operational-snapshot';
+import { prepareStockReadModels } from '../persistence/stored-stock-model';
 
 export function createLocalImportPool(connectionString: string): Pool {
   const url = new URL(connectionString);
@@ -44,6 +45,19 @@ async function compare(client: PoolClient, snapshot: PreparedSnapshot) {
     const source = expectedItems.get(`${item.order_id}/${item.position}`);
     if (!source || contentHash(source) !== contentHash(item.payload)) throw new Error('Order item content mismatch');
   }
+  const stockModels = prepareStockReadModels(snapshot.records.filter(row => row.collection === 'stockUpdates'));
+  for (const row of (await client.query(`select source_id,stock_read,observed_at_ms,sku_order
+    from brsteel_ops.stock_observations where not source_deleted`)).rows) {
+    const expected = stockModels.get(row.source_id);
+    if (contentHash(row.stock_read) !== contentHash(expected?.stock ?? null)
+      || row.observed_at_ms !== (expected?.observedAtMs ?? null) || row.sku_order !== (expected?.skuOrder ?? null)) {
+      throw new Error('Stock read model mismatch');
+    }
+  }
+  const limits = new Map(snapshot.records.filter(row => row.collection === 'supplies').map(row => [row.id,String(row.data.codigo || row.id)]));
+  for (const row of (await client.query('select source_id,lookup_sku from brsteel_ops.supplies where not source_deleted')).rows) {
+    if (row.lookup_sku !== limits.get(row.source_id)) throw new Error('Supply lookup key mismatch');
+  }
   return { records, items: items.rows.length, hash: snapshot.hash };
 }
 
@@ -68,6 +82,7 @@ export async function importSnapshot(pool: Pool, raw: unknown, options: {
   onProgress?: (progress: { processed: number; total: number }) => void | Promise<void>;
 } = {}) {
   const snapshot = prepareSnapshot(raw), size = options.batchSize ?? 100;
+  const stockModels = prepareStockReadModels(snapshot.records.filter(row => row.collection === 'stockUpdates'));
   if (!Number.isInteger(size) || size < 1 || size > 500) throw new Error('Batch size must be between 1 and 500');
   const client = await pool.connect();
   let locked = false;
@@ -113,6 +128,14 @@ export async function importSnapshot(pool: Pool, raw: unknown, options: {
             on conflict(source_id) do update set payload=excluded.payload,source_version=excluded.source_version,
             source_hash=excluded.source_hash,import_run_id=excluded.import_run_id,source_deleted=false`,
           [row.id,JSON.stringify(row.data),row.version,contentHash(row.data),snapshot.hash]);
+          if (row.collection === 'stockUpdates') {
+            const model = stockModels.get(row.id);
+            await client.query(`update brsteel_ops.stock_observations set stock_read=$2,observed_at_ms=$3,sku_order=$4 where source_id=$1`,
+              [row.id, model ? JSON.stringify(model.stock) : null, model?.observedAtMs ?? null, model?.skuOrder ?? null]);
+          }
+          if (row.collection === 'supplies') {
+            await client.query('update brsteel_ops.supplies set lookup_sku=$2 where source_id=$1', [row.id,String(row.data.codigo || row.id)]);
+          }
           if (row.collection === 'salesOrders') {
             await client.query('delete from brsteel_ops.sales_order_items where order_id=$1', [row.id]);
             await client.query(`insert into brsteel_ops.sales_order_items(order_id,position,payload)

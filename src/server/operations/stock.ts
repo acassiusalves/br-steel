@@ -4,6 +4,8 @@ import { adminDb } from '@/lib/firebase-admin';
 import { blingGetPaged, blingFetchWithRefresh } from '@/server/integrations/bling';
 import type { ProductStock } from '@/types/product-stock';
 import type { AccessContext } from '@/server/access/types';
+import { stockReadRepository } from '@/server/persistence/stock';
+import type { StockReadRepository } from '@/server/persistence/stock-contract';
 import { documentIdSchema, pageInputSchema, requireOperation, result, OperationError } from './common';
 let cached: { data: ProductStock[]; asOf: string; expiresAt: number } | null = null;
 let loading: Promise<void> | null = null;
@@ -20,31 +22,15 @@ function normalize(item: any, asOf: string): ProductStock | null {
     source: 'bling', asOf, physicalAsOf: physical === null ? null : asOf, virtualAsOf: virtual === null ? null : asOf };
 }
 /** Persisted observations only. Callers authorize stock access or a minimal production projection. */
-export async function readStoredStockSnapshot() {
-  const snapshot = await adminDb.collection('stockUpdates').get();
-  const bySku = new Map<string, ProductStock>();
-  let latestObservation: string | undefined;
-  for (const doc of snapshot.docs) {
-    const data = doc.data(), balance = number(data.estoqueAtual);
-    if (data.isSimulated || data.source === 'simulated' || String(data.lastEvent ?? '').includes('(test)') || balance === null) continue;
-    const sku = String(data.sku || doc.id), at = String(data.webhookReceivedAt || '');
-    if (!Number.isFinite(Date.parse(at))) continue;
-    const existing = bySku.get(sku);
-    if (existing && Date.parse(existing.asOf) > Date.parse(at)) continue;
-    bySku.set(sku, {
-      produto: { id: number(data.produtoId) ?? 0, codigo: sku, nome: String(data.nome || sku) },
-      deposito: { id: 0, nome: '' }, saldoFisico: null, saldoFisicoTotal: null,
-      saldoVirtual: balance, saldoVirtualTotal: balance,
-      source: 'firestore', asOf: at, physicalAsOf: null, virtualAsOf: at,
-    });
-    if (!latestObservation || Date.parse(at) > Date.parse(latestObservation)) latestObservation = at;
-  }
-  const data = [...bySku.values()].sort((a, b) => a.produto.codigo.localeCompare(b.produto.codigo));
-  const warnings = ['Consulta somente aos saldos salvos no banco de dados deste ambiente. A data de cada saldo indica sua última observação; integrações externas não são consultadas.'];
-  if (!data.length) warnings.push('Nenhum saldo de produto válido está salvo no banco de dados deste ambiente.');
-  else warnings.push('Saldos físicos não registrados são nulos, não zero.');
-  return result(data, 'firestore', warnings, null, latestObservation ?? new Date().toISOString());
+export const readStoredStockSnapshot = () => stockReadRepository.snapshot();
+export function createStoredStockOperations(repository: StockReadRepository) {
+  return { async listProductStock(context: AccessContext, raw: unknown) {
+    requireOperation(context, 'estoque:read');
+    const input = pageInputSchema.extend({ sku: z.string().max(200).optional() }).strict().parse(raw);
+    return repository.list(input);
+  } };
 }
+const storedOperations = createStoredStockOperations(stockReadRepository);
 /** Live ERP/cache source for the web application; MCP uses readStoredStockSnapshot. */
 export async function readStockSnapshot() {
   let failed = false, fromCache = Boolean(cached && cached.expiresAt > Date.now());
@@ -80,11 +66,11 @@ export async function readStockSnapshot() {
   return result(data, source, warnings, null, cached?.asOf ?? data.at(-1)?.asOf ?? new Date().toISOString());
 }
 export async function listProductStock(context: AccessContext, raw: unknown) {
+  if (context.actor.source === 'mcp') return storedOperations.listProductStock(context, raw);
   requireOperation(context, 'estoque:read');
   const input = pageInputSchema.extend({ sku: z.string().max(200).optional() }).strict().parse(raw);
-  const snapshot = await (context.actor.source === 'mcp' ? readStoredStockSnapshot() : readStockSnapshot());
+  const snapshot = await readStockSnapshot();
   const rows = input.sku ? snapshot.data.filter(row => row.produto.codigo === input.sku) : snapshot.data;
-  if (context.actor.source === 'mcp' && input.sku && snapshot.data.length && !rows.length) snapshot.warnings.push('Não há saldo de produto salvo no banco para o SKU informado.');
   let offset = 0; if (input.cursor) { if (!/^\d+$/.test(input.cursor)) throw new OperationError('INVALID_CURSOR', 'Paginação inválida.'); offset = Number(input.cursor); if (!Number.isSafeInteger(offset)) throw new OperationError('INVALID_CURSOR', 'Paginação inválida.'); }
   return { ...snapshot, data: rows.slice(offset, offset + input.limit), nextCursor: offset + input.limit < rows.length ? String(offset + input.limit) : null };
 }
