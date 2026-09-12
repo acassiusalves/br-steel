@@ -18,6 +18,7 @@ export function validateMcpStaging(env: Environment, config: DeploymentConfig) {
  require(origin && origin === env.APP_ORIGIN && origin === env.BRSTEEL_STAGING_ORIGIN && !['https://br-steel.vercel.app','https://br-steel-acassius-alves-projects.vercel.app','https://br-steel-git-main-acassius-alves-projects.vercel.app'].includes(origin), 'Configure uma origem HTTPS exclusiva de homologação.');
  require(origin && env.MCP_PUBLIC_URL === `${origin}/api/mcp`, 'MCP_PUBLIC_URL deve corresponder à origem de homologação.');
  require(env.MCP_ENABLED === 'true' && env.MCP_OAUTH_ENABLED === 'true' && env.MCP_WRITES_ENABLED === 'false', 'Homologação exige MCP/OAuth habilitados e escrita desabilitada.');
+ require((env.MCP_USER_ACCESS_MODE ?? 'allowlist') === 'allowlist', 'Homologação exige MCP_USER_ACCESS_MODE allowlist.');
  require(env.MCP_ALLOWED_USER_IDS?.split(',').some(id => id.trim()), 'Defina os IDs dos usuários sintéticos do piloto.');
  for (const allowed of (env.MCP_ALLOWED_ORIGINS ?? '').split(',').map(v => v.trim()).filter(Boolean)) require(httpsRoot(allowed) === allowed, 'MCP_ALLOWED_ORIGINS aceita apenas origens HTTPS exatas.');
  require(env.AUTH_SESSION_SECRET && env.AUTH_SESSION_SECRET.length >= 32, 'Configure AUTH_SESSION_SECRET exclusivo com pelo menos 32 caracteres.');

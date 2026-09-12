@@ -43,3 +43,29 @@ describe('MCP resource authentication', () => {
     vi.stubEnv('MCP_PUBLIC_URL', 'https://wrong.test/api/mcp'); expect((await handleMcp(request(valid))).status).toBe(503);
   });
 });
+
+it('authenticated access mode still requires a valid current grant and user', async () => {
+  vi.stubEnv('MCP_USER_ACCESS_MODE', 'authenticated'); vi.stubEnv('MCP_ALLOWED_USER_IDS', '');
+  const valid = await token();
+  expect((await authenticateMcp(request(valid))).context.actor.userId).toBe('ops-admin');
+  await adminDb.collection('mcpConnections').doc(grantId).update({ status: 'revoked' });
+  expect((await handleMcp(request(valid))).status).toBe(401);
+  await adminDb.collection('mcpConnections').doc(grantId).update({ status: 'active' });
+  await adminDb.collection('users').doc('ops-admin').update({ active: false });
+  expect((await handleMcp(request(valid))).status).toBe(401);
+});
+it('fails closed on malformed access modes', async () => {
+  for (const mode of ['', 'Authenticated', 'all', ' allowlist']) {
+    vi.stubEnv('MCP_USER_ACCESS_MODE', mode);
+    expect((await handleMcp(request(await token()))).status).toBe(503);
+  }
+});
+it('authenticated mode cannot widen current roles or consent capabilities', async () => {
+  await mcpFixture('Operador'); vi.stubEnv('MCP_USER_ACCESS_MODE', 'authenticated'); vi.stubEnv('MCP_ALLOWED_USER_IDS', '');
+  const valid = await token();
+  const list = await (await handleMcp(request(valid))).json();
+  expect(list.result.tools.map((tool: { name: string }) => tool.name)).not.toContain('listar_pedidos');
+  await adminDb.collection('mcpConnections').doc(grantId).update({ capabilities: [] });
+  const limited = await (await handleMcp(request(valid))).json();
+  expect(limited.result.tools.map((tool: { name: string }) => tool.name)).toEqual(['consultar_meu_acesso']);
+});

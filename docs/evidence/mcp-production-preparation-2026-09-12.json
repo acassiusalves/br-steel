@@ -1,0 +1,65 @@
+{
+  "dateUtc": "2026-09-12",
+  "scope": "Local preparation for authorized production read-only MCP rollout",
+  "targets": {
+    "origin": "https://br-steel.vercel.app",
+    "mcpResource": "https://br-steel.vercel.app/api/mcp",
+    "vercelProjectId": "prj_nKDQAAfkgJ7DePQsIZy5gMELWuWj",
+    "firebaseProjectId": "marketflow-9h4tg",
+    "supabaseProjectRef": "mlumbvxpaqfzpdjnvzxc"
+  },
+  "productionReadiness": {
+    "aggregateQueries": "Failed with Firestore code 8: Quota exceeded",
+    "singleDocumentRead": "Failed with Firestore code 8: Quota exceeded",
+    "businessInventoryAvailable": false,
+    "emptyDatabaseEstablished": false,
+    "billingEnabled": false,
+    "linkedBillingAccountOpen": false,
+    "billingChangeAuthorized": false,
+    "currentDeploymentPreserved": "dpl_FJQePtgMfdmvtdLfLcdUaUwz1mkW",
+    "existingCronsPreserved": 3,
+    "existingCompositeIndexesObserved": 2,
+    "privateConfigurationAndRulesBackupsSaved": true
+  },
+  "localVerification": {
+    "fullSuite": { "passedTests": 157, "passedFiles": 26 },
+    "build": "passed",
+    "typecheck": { "preexistingErrors": 25, "newErrors": 0, "exactBaselineMatch": true },
+    "finalTestOnlyTypingChange": {
+      "productionTestsPassed": 4,
+      "independentScopedReview": "No regression found"
+    },
+    "offlineProductionPreflight": {
+      "preparationPhase": "passed",
+      "readOnlyPhase": "passed",
+      "preparedInitialMcpEnabled": false,
+      "preparedInitialOAuthEnabled": false,
+      "writesEnabledInEitherPhase": false
+    },
+    "sqlLocalPGlite": {
+      "migrationAssertionsAndAclPreservation": "passed",
+      "rollbackToStaging": "passed",
+      "repeatMigrationAndUnsafeAclRejection": "passed"
+    },
+    "independentPreparationReview": "No actionable defects found"
+  },
+  "cloudChangesThisPreparation": {
+    "billing": false,
+    "vercel": false,
+    "firebase": false,
+    "supabase": false,
+    "businessData": false
+  },
+  "productionMcpPublished": false,
+  "productionClaudeAcceptanceVerified": false,
+  "stagingPilotAndConnectionPreserved": true,
+  "remaining": [
+    "Restore operational Firestore reads; billing changes need explicit account selection and authorization",
+    "Inspect current users, permissions, settings and known business records",
+    "Provision required indexes and verify readiness",
+    "Deploy migrated web application with MCP and OAuth disabled; verify real login and screens",
+    "Close migrated Firestore collections and verify anonymous denial",
+    "Back up and apply hosted OAuth configuration; verify actual token audiences and staging refresh",
+    "Enable production read-only MCP and validate real Claude reads, permissions, revocation and reconnection"
+  ]
+}

@@ -76,3 +76,7 @@ describe('isolated MCP staging configuration', () => {
   expect(validateMcpStaging(fixture(), { ...config, crons: [{ path: '/api/cron/ml-health', schedule: '* * * * *' }] }).errors.length).toBeGreaterThan(0);
  });
 });
+
+it('refuses authenticated access mode in staging', () => {
+ expect(validateMcpStaging({ ...fixture(), MCP_USER_ACCESS_MODE: 'authenticated' }, config).errors.length).toBeGreaterThan(0);
+});

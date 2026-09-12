@@ -8,6 +8,8 @@ export const AUDIT_RETENTION_DAYS = 90;
 export function getMcpConfig() {
   if (process.env.MCP_ENABLED !== 'true') throw new McpHttpError('DISABLED', 'Conector indisponível neste ambiente.', 503);
   try {
+    const userAccessMode = process.env.MCP_USER_ACCESS_MODE ?? 'allowlist';
+    if (userAccessMode !== 'allowlist' && userAccessMode !== 'authenticated') throw new Error('Invalid access mode');
     const oauth = getOAuthConfig();
     const allowedOrigins = new Set([oauth.appOrigin]);
     for (const origin of (process.env.MCP_ALLOWED_ORIGINS ?? '').split(',').map(v => v.trim()).filter(Boolean)) {
@@ -16,7 +18,7 @@ export function getMcpConfig() {
         && !(url.protocol === 'http:' && ['localhost', '127.0.0.1'].includes(url.hostname)))) throw new Error('Invalid origin');
       allowedOrigins.add(origin);
     }
-    return { resource: oauth.resource, issuer: oauth.issuer, appOrigin: oauth.appOrigin,
+    return { userAccessMode, resource: oauth.resource, issuer: oauth.issuer, appOrigin: oauth.appOrigin,
       metadataUrl: `${oauth.appOrigin}/.well-known/oauth-protected-resource/api/mcp`, allowedOrigins,
       allowedUserIds: new Set((process.env.MCP_ALLOWED_USER_IDS ?? '').split(',').map(id => id.trim()).filter(Boolean)) };
   } catch { throw new McpHttpError('CONFIGURATION', 'Conector indisponível neste ambiente.', 503); }

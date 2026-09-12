@@ -25,7 +25,7 @@ export function getOAuthProvider(): OAuthProvider {
       if (result.error && result.error.status !== 404) throw providerFailure();
       if (!result.data.user) {
         result = await api.createUser({ id: sub, email: user.email, email_confirm: true,
-          app_metadata: { brsteel_user_id: user.id }, user_metadata: { name: user.name } });
+          app_metadata: { brsteel_user_id: user.id, brsteel_mcp_resource: config.resource }, user_metadata: { name: user.name } });
         if (result.error) {
           // Another attempt may have completed the same reserved ID. Never adopt by email.
           result = await api.getUserById(sub);
@@ -33,7 +33,12 @@ export function getOAuthProvider(): OAuthProvider {
         }
       }
       const external = result.data.user;
-      if (external?.id !== sub || external.app_metadata.brsteel_user_id !== user.id || !external.email) {
+      const marker = external?.app_metadata?.brsteel_mcp_resource;
+      const resourceUrl = new URL(config.resource);
+      const legacyAllowed = config.resource === 'https://br-steel-mcp-staging.vercel.app/api/mcp'
+        || ['localhost', '127.0.0.1'].includes(resourceUrl.hostname);
+      const resourceMatches = marker === config.resource || (marker === undefined && legacyAllowed);
+      if (!resourceMatches || external?.id !== sub || external.app_metadata.brsteel_user_id !== user.id || !external.email) {
         throw new OAuthError('IDENTITY_COLLISION', 'Identidade já vinculada a outro cadastro.', 409);
       }
       return { sub, email: external.email };
