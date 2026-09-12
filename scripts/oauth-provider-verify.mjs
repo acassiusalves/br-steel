@@ -50,7 +50,7 @@ async function validate(token, aud = env.MCP_PUBLIC_URL) {
 async function begin({ prompt, redirect = callback } = {}) {
   const verifier = randomBytes(48).toString('base64url');
   const params = new URLSearchParams({ response_type: 'code', client_id: clientId,
-    redirect_uri: redirect, scope: 'openid profile email offline_access', state: randomUUID(),
+    redirect_uri: redirect, scope: 'openid profile email offline_access', resource: env.MCP_PUBLIC_URL, state: randomUUID(),
     code_challenge: createHash('sha256').update(verifier).digest('base64url'), code_challenge_method: 'S256' });
   if (prompt) params.set('prompt', prompt);
   const response = await http(`${metadata.authorization_endpoint}?${params}`);
@@ -109,11 +109,18 @@ try {
   evidence.dynamicRegistration = true;
 
   const request = await begin();
+  const rpcArgs = { p_authorization_id: request.id };
+  assert.equal(requireSuccess(await admin.rpc('brsteel_mcp_consent_resource', rpcArgs), 'Consent resource lookup'), env.MCP_PUBLIC_URL);
+  const anonymous = createClient(env.SUPABASE_URL, env.SUPABASE_PUBLISHABLE_KEY, options);
+  assert.equal((await anonymous.rpc('brsteel_mcp_consent_resource', rpcArgs)).error?.code, '42501');
+  assert.equal((await sessionClient.rpc('brsteel_mcp_consent_resource', rpcArgs)).error?.code, '42501');
+  evidence.consentResourceLookup = { serviceRole: true, anonymousDenied: true, authenticatedDenied: true };
   const detail = await details(request);
   assert.equal(detail.client.id, clientId);
   assert.equal(detail.redirect_uri, callback);
   assert.equal(detail.redirect_url, undefined);
   const code = await authorize(request, detail);
+  assert.equal(requireSuccess(await admin.rpc('brsteel_mcp_consent_resource', rpcArgs), 'Used consent resource'), null);
   const tokens = await exchange(code, request.verifier);
   assert.equal(tokens.status, 200, `Token exchange ${tokens.status}: ${tokens.body.error ?? 'unknown'}`);
   const claims = await validate(tokens.body.access_token);

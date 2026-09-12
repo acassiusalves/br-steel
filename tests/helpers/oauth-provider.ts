@@ -3,7 +3,7 @@ import { createSessionToken, hashPassword } from '@/lib/server-auth';
 import { resetDatabase, seedUser } from './firestore';
 
 const mocks = vi.hoisted(() => ({
-  ensureIdentity: vi.fn(), createSession: vi.fn(), getUser: vi.fn(),
+  getAuthorizationResource: vi.fn(), ensureIdentity: vi.fn(), createSession: vi.fn(), getUser: vi.fn(),
   getAuthorizationDetails: vi.fn(), approveAuthorization: vi.fn(), denyAuthorization: vi.fn(),
   revokeGrant: vi.fn(), signOut: vi.fn(),
 }));
@@ -23,6 +23,7 @@ export async function oauthFixture() {
   const { hash, salt } = hashPassword('test-individual-password');
   await seedUser(actor.id, { ...actor, passwordHash: hash, passwordSalt: salt });
   for (const mock of Object.values(provider)) mock.mockReset();
+  provider.getAuthorizationResource.mockImplementation(async () => process.env.MCP_PUBLIC_URL);
   provider.ensureIdentity.mockImplementation(async (sub, user) => ({ sub, email: user.email }));
   provider.createSession.mockImplementation(async (identity) => ({
     sub: identity.sub, access_token: 'private-access-token', refresh_token: 'private-refresh-token', expires_at: Math.floor(Date.now() / 1000) + 900,

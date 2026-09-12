@@ -4,6 +4,7 @@ export type { OAuthAuthorizationDetails };
 export interface OAuthIdentity { sub: string; email: string; }
 export interface ProviderSession { sub: string; access_token: string; refresh_token: string; expires_at: number; }
 export interface OAuthProvider {
+  getAuthorizationResource(authorizationId: string): Promise<string | null>;
   ensureIdentity(sub: string, user: SessionUser): Promise<OAuthIdentity>;
   createSession(identity: OAuthIdentity): Promise<ProviderSession>;
   getUser(session: ProviderSession): Promise<{ sub: string }>;

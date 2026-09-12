@@ -11,7 +11,8 @@ process.chdir(root);
 const network = 'brsteel-mcp-oauth-local';
 const keyPath = 'supabase/.env.signing-keys.local';
 const privateLog = 'supabase/.env.start.local';
-const exclude = 'realtime,storage-api,imgproxy,mailpit,postgrest,postgres-meta,studio,edge-runtime,logflare,vector,supavisor';
+// PostgREST serves the service-role-only pre-login consent resource RPC.
+const exclude = 'realtime,storage-api,imgproxy,mailpit,postgres-meta,studio,edge-runtime,logflare,vector,supavisor';
 
 function run(command, args, { allowFailure = false } = {}) {
   const result = spawnSync(command, args, { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 });
