@@ -1,6 +1,8 @@
-# Banco operacional: preparação local
+# Banco operacional: preparação e piloto de leitura
 
-Esta pasta contém a base SQL e as ferramentas de importação do núcleo operacional. A aplicação e o MCP continuam usando Firestore. O OAuth permanece na configuração Supabase existente; esta migration fica fora da cadeia `supabase/migrations` para impedir aplicação incidental ao provedor de identidade.
+Esta pasta contém a base SQL e as ferramentas de importação do núcleo operacional. A aplicação e o MCP continuam usando Firestore. O OAuth permanece na configuração Supabase existente; as migrations operacionais ficam fora da cadeia `supabase/migrations` para impedir aplicação incidental ao provedor de identidade.
+
+O [piloto hospedado de 12/09/2026](../../docs/evidence/operational-postgres-hosted-pilot.md) copiou e conferiu 12.967 registros reais e mediu os leitores candidatos. Os acessos temporários foram revogados ao encerrar o ensaio. Não houve ativação dos leitores nos endpoints de produção.
 
 ## Verificação reproduzível
 
@@ -27,7 +29,27 @@ node --import tsx scripts/operational-import.ts import-local /absolute/snapshot.
 node --import tsx scripts/operational-import.ts verify-local /absolute/snapshot.json
 ```
 
-A URL de importação deve apontar explicitamente para `127.0.0.1` ou `::1`, ter porta e usar o banco `brsteel_ops_local`, sem parâmetros extras. A CLI não oferece exportação de produção nem importação hospedada. O arquivo exportado nasce com permissão `0600` e não substitui arquivo existente. A entrada de importação é limitada a 128 MiB; erros da CLI não imprimem documentos nem detalhes de conexão.
+A URL da CLI local deve apontar explicitamente para `127.0.0.1` ou `::1`, ter porta e usar o banco `brsteel_ops_local`, sem parâmetros extras. Essa CLI continua exclusiva do emulador/banco local. O arquivo exportado nasce com permissão `0600` e não substitui arquivo existente. A entrada de importação é limitada a 128 MiB; erros da CLI não imprimem documentos nem detalhes de conexão.
+
+## Ensaio hospedado
+
+`scripts/operational-hosted-pilot.ts` oferece `import`, `verify` e `measure` com origem fixa `marketflow-9h4tg` e destino fixo `mlumbvxpaqfzpdjnvzxc`. Usa snapshot novo produzido por `exportOperationalSnapshot` com a credencial da origem e validação dos tipos nativos. Não usar um JSON antigo como prova de compatibilidade.
+
+```sh
+# Configure um arquivo privado de ambiente fora do Git, com permissão 0600:
+# BRSTEEL_PG_PILOT_IMPORTER_URL: login brsteel_pilot_importer, conexão direta ou pooler de sessão em 5432
+# BRSTEEL_PG_PILOT_READER_URL: login brsteel_pilot_reader, pooler transacional em 6543
+# BRSTEEL_PG_CA_FILE: certificado raiz obtido na configuração SSL do projeto
+node --env-file=/absolute/private.env --conditions=react-server --import tsx scripts/operational-hosted-pilot.ts import /absolute/snapshot.json /absolute/import-report.json
+node --env-file=/absolute/private.env --conditions=react-server --import tsx scripts/operational-hosted-pilot.ts verify /absolute/snapshot.json /absolute/verify-report.json
+node --env-file=/absolute/private.env --conditions=react-server --import tsx scripts/operational-hosted-pilot.ts measure /absolute/snapshot.json /absolute/measure-report.json
+```
+
+Relatórios são criados de forma exclusiva (0600), contêm somente métricas/hashes e passam a `failed` em caso de erro. A medição exige a mesma cópia pronta no início/fim, usa cinco amostras sequenciais por consulta e um pool de uma conexão. Os contadores são bytes do protocolo PostgreSQL decodificado; não são egress faturado nem medição do caminho completo pela Vercel. Nenhum comando muda seletores de runtime.
+
+As fábricas rejeitam `postgres`, outro projeto/banco, parâmetros que alterem TLS e pooler transacional no importador, que depende de lock de sessão. TLS verifica CA e hostname. Os papéis de piloto nascem sem login. Uma execução autorizada deve provisionar senha aleatória/expiração e associação somente a `brsteel_ops_reader` ou `brsteel_ops_importer`. Ao terminar, desativar logins, remover senhas, revogar as associações e encerrar as sessões desses dois logins. Esse encerramento foi executado no primeiro ensaio; reexecutar exige provisionar os acessos novamente.
+
+O conector gera versões próprias no histórico hospedado, mapeadas na evidência do piloto. Não misturar essa cadeia com `supabase/migrations` nem aplicar `db push` incidentalmente ao projeto OAuth.
 
 ## Contrato e recuperação
 

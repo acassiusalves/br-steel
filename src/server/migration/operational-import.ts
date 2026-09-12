@@ -1,15 +1,13 @@
 import { Pool, type PoolClient } from 'pg';
 import { COLLECTIONS, TABLES, contentHash, prepareSnapshot, type PreparedSnapshot } from './operational-snapshot';
 import { prepareStockReadModels } from '../persistence/stored-stock-model';
+import { checkImportTarget } from './operational-hosted';
 
 export function createLocalImportPool(connectionString: string): Pool {
   const url = new URL(connectionString);
   if (!['postgres:', 'postgresql:'].includes(url.protocol) || !['127.0.0.1', '[::1]'].includes(url.hostname)
     || url.pathname !== '/brsteel_ops_local' || !url.port || url.search || url.hash) throw new Error('Explicit local operational database required');
   return new Pool({ connectionString, max: 2, connectionTimeoutMillis: 5000, ssl: false });
-}
-async function checkTarget(client: PoolClient) {
-  if ((await client.query('select current_database() as db')).rows[0].db !== 'brsteel_ops_local') throw new Error('Local import target required');
 }
 async function transaction<T>(client: PoolClient, fn: () => Promise<T>) {
   await client.query('begin');
@@ -65,7 +63,7 @@ async function compare(client: PoolClient, snapshot: PreparedSnapshot) {
 export async function verifySnapshot(pool: Pool, raw: unknown) {
   const snapshot = prepareSnapshot(raw), client = await pool.connect();
   try {
-    await checkTarget(client);
+    await checkImportTarget(pool, client, snapshot.sourceProject);
     await client.query('begin isolation level repeatable read read only');
     await client.query('set local role brsteel_ops_importer');
     const state=(await client.query('select source_project,ready from brsteel_import.state where singleton')).rows[0];
@@ -87,7 +85,7 @@ export async function importSnapshot(pool: Pool, raw: unknown, options: {
   const client = await pool.connect();
   let locked = false;
   try {
-    await checkTarget(client);
+    await checkImportTarget(pool, client, snapshot.sourceProject);
     locked = (await client.query('select pg_try_advisory_lock(738219, 1) as locked')).rows[0].locked;
     if (!locked) throw new Error('Another import is running');
     const initial = await transaction(client, async () => {

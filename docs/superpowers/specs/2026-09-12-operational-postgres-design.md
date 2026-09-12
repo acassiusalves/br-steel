@@ -1,6 +1,6 @@
 # Migração do banco operacional para PostgreSQL
 
-Status: roteiro preparado a pedido do usuário em 12/09/2026. Medições, preparação da leitura, schema e importação foram concluídos localmente. A continuação da etapa 2 implementa os adaptadores candidatos de estoque, insumos, produção e demanda, além de vendas. O PostgreSQL operacional ainda não foi ativado; dados reais e desempenho hospedado serão validados no piloto.
+Status: etapas 1 e 2 concluídas localmente. Em 12/09/2026, o primeiro ensaio da etapa 3 criou e conferiu uma cópia real no Supabase e mediu os leitores com credencial restrita. [Evidência do piloto](../../evidence/operational-postgres-hosted-pilot.md). A aplicação e o MCP continuam no Firestore; ainda faltam o piloto dos endpoints com usuários restritos, a medição Vercel e o backup do schema final antes de concluir a etapa 3.
 
 ## Objetivo e escopo
 

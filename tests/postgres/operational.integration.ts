@@ -198,3 +198,21 @@ test('applies newer versions and reconciles documents absent from a complete sna
   await pool.query("update brsteel_ops.sales_orders set payload=jsonb_set(payload,'{total}','999') where source_id='1'");
   await assert.rejects(verifySnapshot(pool, updated), /Content mismatch/);
 });
+
+test('pilot logins start disabled and the reader cannot acquire import privileges or write', async () => {
+  const roles=(await pool.query("select rolname,rolcanlogin,rolsuper,rolbypassrls from pg_roles where rolname in ('brsteel_pilot_reader','brsteel_pilot_importer')")).rows;
+  assert.equal(roles.length,2);
+  assert.ok(roles.every(role=>!role.rolcanlogin && !role.rolsuper && !role.rolbypassrls));
+  const c=await pool.connect();
+  try {
+    await c.query('begin read write');
+    await c.query('set local role brsteel_pilot_reader');
+    await c.query('select ready from brsteel_import.state');
+    assert.equal((await c.query("select pg_has_role(current_user,'brsteel_ops_importer','MEMBER') as member")).rows[0].member,false);
+    await assert.rejects(c.query('update brsteel_ops.sales_orders set source_deleted=true where false'),(error:unknown)=>(error as {code:string}).code==='42501');
+    await c.query('rollback');
+    await c.query('begin');
+    await c.query('set local role brsteel_pilot_reader');
+    await assert.rejects(c.query('select count(*) from brsteel_import.runs'),(error:unknown)=>(error as {code:string}).code==='42501');
+  } finally { await c.query('rollback');c.release(); }
+});
