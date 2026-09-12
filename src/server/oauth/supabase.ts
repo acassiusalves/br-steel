@@ -2,6 +2,7 @@ import 'server-only';
 import { createClient } from '@supabase/supabase-js';
 import { getOAuthConfig } from './config';
 import { OAuthError, RevocationNotSentError } from './errors';
+import { authorizationIdPattern } from '@/lib/oauth-return-path';
 import type { OAuthProvider, ProviderSession } from './types';
 
 function providerFailure() { return new OAuthError('PROVIDER_UNAVAILABLE', 'Não foi possível concluir a solicitação no provedor. Tente novamente.', 503); }
@@ -19,6 +20,12 @@ export function getOAuthProvider(): OAuthProvider {
     return scoped;
   }
   return {
+    async getAuthorizationResource(authorizationId) {
+      if (!authorizationIdPattern.test(authorizationId)) return null;
+      const { data, error } = await admin().rpc('brsteel_mcp_consent_resource', { p_authorization_id: authorizationId });
+      if (error || (data !== null && typeof data !== 'string')) throw providerFailure();
+      return data;
+    },
     async ensureIdentity(sub, user) {
       const api = admin().auth.admin;
       let result = await api.getUserById(sub);

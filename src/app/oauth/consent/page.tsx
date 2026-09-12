@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation';
 import { AUTH_COOKIE_NAME, getSessionFromToken } from '@/lib/server-auth';
 import { consentReturnPath } from '@/lib/oauth-return-path';
 import { oauthEnabled } from '@/server/oauth/config';
+import { consentDestination } from '@/server/oauth/consent-routing';
 import ConsentClient from './ConsentClient';
 
 export const runtime = 'nodejs';
@@ -20,6 +21,10 @@ export default async function ConsentPage({ searchParams }: {
   } catch {
     return <Message text="Solicitação de autorização inválida. Inicie novamente a conexão no Claude." />;
   }
+  let destination: string | null;
+  try { destination = await consentDestination(id as string); }
+  catch { return <Message text="Não foi possível validar esta solicitação. Inicie novamente a conexão no Claude." />; }
+  if (destination) redirect(destination);
   const session = await getSessionFromToken((await cookies()).get(AUTH_COOKIE_NAME)?.value);
   if (!session) redirect(`/login?next=${encodeURIComponent(next)}`);
   if (session.user.mustChangePassword) redirect(`/perfil?next=${encodeURIComponent(next)}`);

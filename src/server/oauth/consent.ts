@@ -9,6 +9,7 @@ import { getOAuthConfig } from './config';
 import { getOAuthProvider } from './supabase';
 import { boundIdentity, ensureOAuthIdentity } from './identity-bridge';
 import { OAuthError } from './errors';
+import { requireConsentResource } from './consent-routing';
 import { openBridgeSession, sealBridgeSession } from './cookies';
 import { beginDecision, completeApproval, connectionId, connectionRef, intentRef, readIntent, rollbackApproval, storeIntent } from './grants';
 
@@ -55,6 +56,7 @@ export function validateProviderRedirect(raw: string, registered: string) {
 export async function establishConsentSession(request: Request, authorizationId: string) {
   authorizationIdSchema.parse(authorizationId);
   const local = await requireOAuthUser(request);
+  await requireConsentResource(authorizationId);
   const identity = await ensureOAuthIdentity(local.user);
   const provider = getOAuthProvider();
   const session = await provider.createSession(identity);

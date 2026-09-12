@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-const api = vi.hoisted(() => ({ getUserById: vi.fn(), createUser: vi.fn() }));
-vi.mock('@supabase/supabase-js', () => ({ createClient: () => ({ auth: { admin: api } }) }));
+const api = vi.hoisted(() => ({ getUserById: vi.fn(), createUser: vi.fn(), rpc: vi.fn() }));
+vi.mock('@supabase/supabase-js', () => ({ createClient: () => ({ auth: { admin: api }, rpc: api.rpc }) }));
 import { getOAuthProvider } from '@/server/oauth/supabase';
 const user = { id: 'local-user', name: 'Local', email: 'local@example.test', role: 'Administrador' } as Parameters<ReturnType<typeof getOAuthProvider>['ensureIdentity']>[1];
 const staging = 'https://br-steel-mcp-staging.vercel.app';
@@ -14,6 +14,28 @@ beforeEach(() => {
  vi.stubEnv('SUPABASE_URL', 'https://provider.example.test'); vi.stubEnv('SUPABASE_SECRET_KEY', 'secret'); vi.stubEnv('SUPABASE_PUBLISHABLE_KEY', 'public');
 });
 afterEach(() => vi.unstubAllEnvs());
+it('looks up only the provider-stored resource using the server RPC', async () => {
+ const id = 'pending-authorization-123';
+ api.rpc.mockResolvedValue({ data: `${staging}/api/mcp`, error: null });
+ await expect(getOAuthProvider().getAuthorizationResource(id)).resolves.toBe(`${staging}/api/mcp`);
+ expect(api.rpc).toHaveBeenCalledExactlyOnceWith('brsteel_mcp_consent_resource', { p_authorization_id: id });
+ api.rpc.mockResolvedValue({ data: null, error: null });
+ await expect(getOAuthProvider().getAuthorizationResource(id)).resolves.toBeNull();
+});
+it('does not query the provider for a malformed authorization ID', async () => {
+ for (const id of ['', 'short', '../pending-authorization-123', 'x'.repeat(129)]) {
+  await expect(getOAuthProvider().getAuthorizationResource(id)).resolves.toBeNull();
+ }
+ expect(api.rpc).not.toHaveBeenCalled();
+});
+it('sanitizes RPC failures and rejects malformed responses', async () => {
+ for (const result of [{ data: null, error: { message: 'private SQL details' } }, { data: 42, error: null }, { data: {}, error: null }, { data: undefined, error: null }]) {
+  api.rpc.mockResolvedValue(result);
+  await expect(getOAuthProvider().getAuthorizationResource('pending-authorization-123')).rejects.toMatchObject({
+   code: 'PROVIDER_UNAVAILABLE', status: 503, message: 'Não foi possível concluir a solicitação no provedor. Tente novamente.',
+  });
+ }
+});
 it('tags new identities with the configured resource in admin metadata', async () => {
  api.getUserById.mockResolvedValue({ data: { user: null }, error: { status: 404 } });
  api.createUser.mockResolvedValue(external(`${production}/api/mcp`));
