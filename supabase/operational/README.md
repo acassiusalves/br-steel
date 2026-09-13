@@ -33,6 +33,10 @@ node --import tsx scripts/operational-import.ts verify-local /absolute/snapshot.
 
 A URL da CLI local deve apontar explicitamente para `127.0.0.1` ou `::1`, ter porta e usar o banco `brsteel_ops_local`, sem parâmetros extras. Essa CLI continua exclusiva do emulador/banco local. O arquivo exportado nasce com permissão `0600` e não substitui arquivo existente. A entrada de importação é limitada a 128 MiB; erros da CLI não imprimem documentos nem detalhes de conexão.
 
+## Provisionamento do ensaio do corte
+
+O [roteiro de provisionamento](cutover-rehearsal.md) lista, passo a passo, o que precisa ser provisionado antes do ensaio da etapa 5: as duas migrations posteriores ao piloto, o login temporário de runtime, a cópia nova dos dados reais e as variáveis de homologação. O código do corte já existe e está testado; o que falta é credencial.
+
 ## Ensaio hospedado
 
 `scripts/operational-hosted-pilot.ts` oferece `import`, `verify` e `measure` com origem fixa `marketflow-9h4tg` e destino fixo `mlumbvxpaqfzpdjnvzxc`. Usa snapshot novo produzido por `exportOperationalSnapshot` com a credencial da origem e validação dos tipos nativos. Não usar um JSON antigo como prova de compatibilidade.

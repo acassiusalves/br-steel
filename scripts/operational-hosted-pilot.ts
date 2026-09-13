@@ -1,9 +1,10 @@
-import { readFile, stat } from 'node:fs/promises';
+import { readFile, stat, writeFile } from 'node:fs/promises';
 import { performance } from 'node:perf_hooks';
 import type { Pool } from 'pg';
 import { createHostedPilotPool, checkHostedConnection, HOSTED_PROJECT, assertHostedSource } from '../src/server/migration/operational-hosted';
 import { importSnapshot, verifySnapshot } from '../src/server/migration/operational-import';
 import { prepareSnapshot } from '../src/server/migration/operational-snapshot';
+import { exportOperationalSnapshot } from '../src/server/migration/operational-export';
 import { createPostgresSalesRepository } from '../src/server/persistence/postgres-sales';
 import { createPostgresStockRepository } from '../src/server/persistence/postgres-stock';
 import { createPostgresProductionRepository } from '../src/server/persistence/postgres-production';
@@ -23,10 +24,33 @@ function wireCounter(pool: Pool) {
   return () => ({ received:streams.reduce((sum,s)=>sum+s.bytesRead,0),sent:streams.reduce((sum,s)=>sum+s.bytesWritten,0) });
 }
 
+/**
+ * Exports a fresh snapshot from the real source. The pilot did this ad hoc, which left the runbook
+ * with a step nobody could run. Written exclusively with mode 0600: it carries real order data.
+ */
+async function exportSource(path: string) {
+  const { initializeApp, deleteApp } = await import('firebase-admin/app');
+  const { getFirestore } = await import('firebase-admin/firestore');
+  const sourceProject = process.env.BRSTEEL_PG_SOURCE_PROJECT ?? '';
+  assertHostedSource(sourceProject);
+  const app = initializeApp({ projectId: sourceProject }, 'operational-hosted-export');
+  try {
+    const snapshot = await exportOperationalSnapshot(getFirestore(app), sourceProject);
+    await writeFile(path, JSON.stringify(snapshot), { encoding: 'utf8', mode: 0o600, flag: 'wx' });
+    console.log(JSON.stringify({ exported: snapshot.records.length, capturedAt: snapshot.capturedAt }));
+  } finally { await deleteApp(app); }
+}
+
 async function main() {
   const [command,path,reportPath,...extra] = process.argv.slice(2);
+  if (command === 'export') {
+    if (!path?.startsWith('/') || reportPath || extra.length) {
+      throw new Error('Usage: operational-hosted-pilot.ts export /absolute/snapshot.json');
+    }
+    return exportSource(path);
+  }
   if (!['import','verify','measure'].includes(command) || !path?.startsWith('/') || !reportPath?.startsWith('/') || extra.length) {
-    throw new Error('Usage: operational-hosted-pilot.ts import|verify|measure /absolute/snapshot.json /absolute/report.json');
+    throw new Error('Usage: operational-hosted-pilot.ts export|import|verify|measure /absolute/snapshot.json [/absolute/report.json]');
   }
   const metadata = await stat(path);
   if (!metadata.isFile() || metadata.size > 128*1024*1024) throw new Error('Snapshot limit exceeded');
