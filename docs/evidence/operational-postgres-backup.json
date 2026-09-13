@@ -1,0 +1,266 @@
+{
+  "startedAt": "2026-09-12T19:47:18.250Z",
+  "project": "mlumbvxpaqfzpdjnvzxc",
+  "sourceProject": "marketflow-9h4tg",
+  "cleanup": {
+    "containerRemoved": true
+  },
+  "docker": {
+    "endpoint": "local Unix socket",
+    "network": "none",
+    "image": "public.ecr.aws/supabase/postgres:17.6.1.167"
+  },
+  "backup": {
+    "durationMs": 2288.366916,
+    "pgDumpVersion": "pg_dump (PostgreSQL) 17.11",
+    "compressedBytes": 4435068,
+    "encryptedBytes": 4436340,
+    "tcp": {
+      "received": 34997169,
+      "sent": 22594,
+      "connections": 1
+    },
+    "copy": {
+      "active_run": "8a783d1454afcb13a045545de0dbdf7d2d4af000998c05bae5d09fe4f9faeae9",
+      "ready": true,
+      "source_project": "marketflow-9h4tg",
+      "captured_at": "2026-09-12 17:41:15.802+00",
+      "completed_at": "2026-09-12 17:54:50.432273+00"
+    }
+  },
+  "tamper": {
+    "rejected": true,
+    "partialSchemas": 0
+  },
+  "restoreMs": 1042.858083,
+  "content": {
+    "tables": [
+      {
+        "name": "brsteel_import.runs",
+        "rows": 1,
+        "sha256": "39b2ff61a835bcee38608fa37017d9a73bf22a541b9bb8b38781d2128d115a21"
+      },
+      {
+        "name": "brsteel_import.state",
+        "rows": 1,
+        "sha256": "d8195bf81456355a30c2f37d1b61714f4f9f50b69ea55395dbe4cfd150f996c3"
+      },
+      {
+        "name": "brsteel_ops.inventory_movements",
+        "rows": 1,
+        "sha256": "c96866161b7f215523d5ee2d4df44bbdfa2f1b001858f5a28ffbb389b277653e"
+      },
+      {
+        "name": "brsteel_ops.production_columns",
+        "rows": 3,
+        "sha256": "4761d3e32c284906951073edcc772435e6f3b7d557c0ab9080b4430e5b5f8488"
+      },
+      {
+        "name": "brsteel_ops.production_comments",
+        "rows": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "name": "brsteel_ops.production_counters",
+        "rows": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "name": "brsteel_ops.production_lot_items",
+        "rows": 7,
+        "sha256": "c209190991d278450507008f342cf841ba4ef6b51319b9842a4d0e43d0fff808"
+      },
+      {
+        "name": "brsteel_ops.production_lots",
+        "rows": 3,
+        "sha256": "8722445f785fee4009eaee126270eb0ea4b9f9bccd3d16950927630a0c1b7e80"
+      },
+      {
+        "name": "brsteel_ops.sales_order_items",
+        "rows": 12999,
+        "sha256": "19567602029c309d22f7d6c429bb0c3484e00ce46975a1c5ca19e1b632a52939"
+      },
+      {
+        "name": "brsteel_ops.sales_orders",
+        "rows": 12538,
+        "sha256": "a7f6224e825aed9817a7ebdff11920cdbb34794a9d967a5a2c6b17c2eba05a56"
+      },
+      {
+        "name": "brsteel_ops.stock_observations",
+        "rows": 361,
+        "sha256": "73e3b1ff878bab8337ccf14ef5d37d52052165e8c6d21ed29d04d0c4e1e8b983"
+      },
+      {
+        "name": "brsteel_ops.supplies",
+        "rows": 54,
+        "sha256": "69cc58cb3b7164cee7d8ccd177fd825d40885112af7954d859c44e462e89ce98"
+      },
+      {
+        "name": "brsteel_ops.supply_codes",
+        "rows": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    ],
+    "totalRows": 25968,
+    "catalogMatched": true,
+    "rlsTables": 13,
+    "foreignKeys": 18,
+    "indexes": 25
+  },
+  "privileges": {
+    "api_denied": true,
+    "backup_reads_runs": true,
+    "backup_write_denied": true,
+    "actualBackupWriteRejected": true
+  },
+  "recoveryDurationMs": 3325.6248750000004,
+  "archiveSha256": "9e092afeae602441fa0643e841c0889f74f42b0b02125b0eb0aec947c525ce9f",
+  "status": "complete",
+  "finishedAt": "2026-09-12T19:47:26.638Z",
+  "finalRestore": {
+    "startedAt": "2026-09-12T19:56:01.449Z",
+    "project": "mlumbvxpaqfzpdjnvzxc",
+    "sourceProject": "marketflow-9h4tg",
+    "cleanup": {
+      "containerRemoved": true
+    },
+    "docker": {
+      "endpoint": "local Unix socket",
+      "network": "none",
+      "image": "public.ecr.aws/supabase/postgres:17.6.1.167"
+    },
+    "tamper": {
+      "rejected": true,
+      "partialSchemas": 0
+    },
+    "restoreMs": 1013.3211249999999,
+    "content": {
+      "tables": [
+        {
+          "name": "brsteel_import.runs",
+          "rows": 1,
+          "sha256": "39b2ff61a835bcee38608fa37017d9a73bf22a541b9bb8b38781d2128d115a21"
+        },
+        {
+          "name": "brsteel_import.state",
+          "rows": 1,
+          "sha256": "d8195bf81456355a30c2f37d1b61714f4f9f50b69ea55395dbe4cfd150f996c3"
+        },
+        {
+          "name": "brsteel_ops.inventory_movements",
+          "rows": 1,
+          "sha256": "c96866161b7f215523d5ee2d4df44bbdfa2f1b001858f5a28ffbb389b277653e"
+        },
+        {
+          "name": "brsteel_ops.production_columns",
+          "rows": 3,
+          "sha256": "4761d3e32c284906951073edcc772435e6f3b7d557c0ab9080b4430e5b5f8488"
+        },
+        {
+          "name": "brsteel_ops.production_comments",
+          "rows": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "name": "brsteel_ops.production_counters",
+          "rows": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "name": "brsteel_ops.production_lot_items",
+          "rows": 7,
+          "sha256": "c209190991d278450507008f342cf841ba4ef6b51319b9842a4d0e43d0fff808"
+        },
+        {
+          "name": "brsteel_ops.production_lots",
+          "rows": 3,
+          "sha256": "8722445f785fee4009eaee126270eb0ea4b9f9bccd3d16950927630a0c1b7e80"
+        },
+        {
+          "name": "brsteel_ops.sales_order_items",
+          "rows": 12999,
+          "sha256": "19567602029c309d22f7d6c429bb0c3484e00ce46975a1c5ca19e1b632a52939"
+        },
+        {
+          "name": "brsteel_ops.sales_orders",
+          "rows": 12538,
+          "sha256": "a7f6224e825aed9817a7ebdff11920cdbb34794a9d967a5a2c6b17c2eba05a56"
+        },
+        {
+          "name": "brsteel_ops.stock_observations",
+          "rows": 361,
+          "sha256": "73e3b1ff878bab8337ccf14ef5d37d52052165e8c6d21ed29d04d0c4e1e8b983"
+        },
+        {
+          "name": "brsteel_ops.supplies",
+          "rows": 54,
+          "sha256": "69cc58cb3b7164cee7d8ccd177fd825d40885112af7954d859c44e462e89ce98"
+        },
+        {
+          "name": "brsteel_ops.supply_codes",
+          "rows": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      ],
+      "totalRows": 25968,
+      "catalogMatched": true,
+      "rlsTables": 13,
+      "foreignKeys": 18,
+      "indexes": 25
+    },
+    "privileges": {
+      "api_denied": true,
+      "backup_reads_runs": true,
+      "backup_write_denied": true,
+      "actualBackupWriteRejected": true
+    },
+    "recoveryDurationMs": 3415.2101669999997,
+    "archiveSha256": "9e092afeae602441fa0643e841c0889f74f42b0b02125b0eb0aec947c525ce9f",
+    "status": "complete",
+    "finishedAt": "2026-09-12T19:56:05.131Z"
+  },
+  "interruption": {
+    "signalDeliveredAfterContainerCreation": true,
+    "exitCode": 1,
+    "remainingContainers": 0
+  },
+  "sourceFinal": {
+    "checkedAt": "2026-09-12T19:50:29.717Z",
+    "manifestUnchanged": true,
+    "tables": 13
+  },
+  "databaseCleanup": {
+    "backupRoleLogin": false,
+    "backupPasswordCleared": true,
+    "backupMemberships": 0,
+    "pilotSessions": 0,
+    "privateCredentialFileRemoved": true,
+    "checkedOn": "2026-09-12"
+  },
+  "migration": {
+    "local": "20260912193921_operational_backup_role.sql",
+    "hostedVersion": "20260912194556"
+  },
+  "projection": {
+    "assumptions": "30 downloads per cycle, unchanged current data volume; 11 retained encrypted archives; weekly copy reuses daily archive",
+    "thirtyDumpsTcpReceivedBytes": 1049915070,
+    "elevenEncryptedArchivesBytes": 48799740,
+    "supabaseBilledEgress": false
+  },
+  "verification": {
+    "existingVitestTestsPassed": 226,
+    "backupGuardTestsPassed": 5,
+    "postgresIntegrationPassed": 19,
+    "typecheckPreexistingDiagnostics": 25,
+    "typecheckNewDiagnostics": 0,
+    "securityAdvisorNewFindings": 0,
+    "securityAdvisorExistingFinding": "auth_leaked_password_protection"
+  },
+  "limits": [
+    "Only operational schemas; no Auth/Storage/OAuth/deployments recovery",
+    "Restored in disposable local PostgreSQL17; not a managed Supabase restore",
+    "Copy captured 2026-09-12T17:41:15.802Z; Firestore remains authoritative",
+    "One encrypted archive and its key retained in separate private directories on this computer; no off-site custody or schedule configured",
+    "TCP counters include TLS framing, exclude packet headers and preflight queries; not Supabase billing measurement"
+  ]
+}

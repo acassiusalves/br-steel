@@ -56,7 +56,9 @@ describe('production operations', () => {
     expect(lot.createdBy).toEqual({ userId: 'operator', userName: 'Actual Operator' });
     const item = (await adminDb.collection('productionLotItems').where('lotId', '==', created[0].data.id).get()).docs[0].data();
     expect(item).toMatchObject({ productName: 'Steel', unit: 'KG', sourceOrderNumber: '456', customerName: '' });
-  });
+    // Two concurrent creations contend on the counter document and the emulator retries the loser.
+    // Under full-suite load that can exceed the 5s default; the contention is expected, the timeout is not.
+  }, 30000);
   it('rejects seller mutations and inactive production module', async () => {
     await expect(production.createLot({ ...ctx, actor: { ...ctx.actor, role: 'Vendedor' } }, input)).rejects.toThrow();
     await expect(production.listProduction({ ...ctx, inactivePages: ['/producao/kanban'] }, { view: 'lots' })).rejects.toThrow();

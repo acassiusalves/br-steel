@@ -1,0 +1,161 @@
+{
+  "recorded_at": "2026-09-12T16:21:35.345560+00:00",
+  "branch": "codex/operational-postgres-phase2",
+  "base_commit": "15ee2d106ffa8306d5acd1a143b873e9e13cb39c",
+  "scope": "local schema, resumable import, reconciliation and candidate sales reader",
+  "roadmap_phase_2_complete": false,
+  "active_backend": "firestore",
+  "production_changed": false,
+  "production_data_used": false,
+  "hosted_migration_applied": false,
+  "push_performed": false,
+  "merge_performed": false,
+  "billing_plan_changed": false,
+  "checks": {
+    "vitest": {
+      "exit_code": 0,
+      "files": 31,
+      "passed": 175,
+      "failed": 0
+    },
+    "postgres_integration": {
+      "exit_code": 0,
+      "passed": 8,
+      "failed": 0,
+      "baseline_synthetic_documents": 12,
+      "rollover_timestamp_regression": true,
+      "product_prefix_tie_regression": true,
+      "firestore_parity": [
+        "summary",
+        "list filters",
+        "pagination and cursor",
+        "detail",
+        "period reads",
+        "empty period and warnings"
+      ],
+      "import_recovery": [
+        "atomic batch rollback",
+        "committed checkpoint resume",
+        "idempotent duplicate",
+        "source version conflict",
+        "source identity conflict",
+        "newer version",
+        "source deletion",
+        "concurrent import lock",
+        "independent payload corruption detection"
+      ]
+    },
+    "schema": {
+      "tables": 13,
+      "rls_tables": 13,
+      "foreign_keys": 18,
+      "indexes": 22,
+      "anon_denied": true,
+      "authenticated_denied": true,
+      "reader_write_denied": true
+    },
+    "advisors": {
+      "tool": "Supabase CLI 2.114.0",
+      "target": "loopback disposable PostgreSQL",
+      "type": "all",
+      "minimum_level": "warn",
+      "exit_code": 0,
+      "findings": []
+    },
+    "typecheck": {
+      "exit_code": 2,
+      "diagnostics": 25,
+      "identical_to_phase1_baseline": true,
+      "new_diagnostics": 0
+    },
+    "build": {
+      "exit_code": 0,
+      "demo_environment": true,
+      "types_and_lint_skipped_by_existing_config": true
+    },
+    "review": {
+      "findings_resolved": [
+        "timestamp precision",
+        "timestamp rounding rollover",
+        "release after failed unlock",
+        "product tie ordering"
+      ],
+      "remaining_findings": 0
+    },
+    "cleanup": {
+      "owned_containers_remaining": 0,
+      "owned_volumes_removed_by_harness": true,
+      "temporary_advisor_config_removed": true
+    }
+  },
+  "pending": [
+    "stock and production read adapters",
+    "SQL demand aggregation",
+    "legacy validation and controlled real-data reconciliation",
+    "storage/egress/latency measurements for this schema",
+    "hosted pilot and endpoint permission tests",
+    "business writes and coordinated cutover"
+  ],
+  "limitations": [
+    "paginated source export is not transactionally consistent",
+    "order payload and item projection duplicate storage",
+    "backend roles do not implement per-user authorization",
+    "synthetic tests do not establish hosted performance or Free plan sufficiency"
+  ],
+  "commands": {
+    "integration": "BRSTEEL_PG_ADVISORS=1 npm run test:postgres",
+    "full_suite": "firebase emulators:exec --only firestore --project demo-brsteel-auth --config firebase.test.json 'npx --no-install vitest run'",
+    "typecheck": "npm run typecheck",
+    "build": "npm run build (demo Firebase/emulator environment and dummy session secret)"
+  },
+  "logs": {
+    "full_suite": {
+      "local_path": "/private/tmp/brsteel-pg-phase2-full-tests-final.log",
+      "sha256": "ed9b12f6d9e5690db780c3d650bde25f8a995d67fac5ee90d68e972b3cd64980"
+    },
+    "integration": {
+      "local_path": "/private/tmp/brsteel-pg-phase2-integration-final.log",
+      "sha256": "0107fee7e9eebdb8d4cbe0a9f3ed529746ce2fa888b613f5c3c1793bafcde6dc"
+    },
+    "typecheck": {
+      "local_path": "/private/tmp/brsteel-pg-phase2-typecheck-final.log",
+      "sha256": "36dd43b235944205e5b2dea5cbf00d3da75ee95739f6d7ace9e0c48f5783f8d2"
+    },
+    "build": {
+      "local_path": "/private/tmp/brsteel-pg-phase2-build-final.log",
+      "sha256": "1156ee711c11bb42bddd910ae6fba19d166334f4eef0e9c4de2badc05143eff6"
+    },
+    "cleanup_red": {
+      "local_path": "/private/tmp/brsteel-pg-phase2-cleanup-red.log",
+      "sha256": "ad2b80464609117d284b11bb1b27993e653c5562fb07cd1bdc54b892e7e09f2d"
+    },
+    "review_red": {
+      "local_path": "/private/tmp/brsteel-pg-phase2-review-red.log",
+      "sha256": "1af23ce2329b6567c08363ed8950e9ca5c2eadf51cd6a793b92002e92d599c58"
+    },
+    "rollover_red": {
+      "local_path": "/private/tmp/brsteel-pg-phase2-rollover-red.log",
+      "sha256": "19760f3941704d41646b7d8f6ea5e0cce2595016e8cd425cbaa2633c1bca0d56"
+    },
+    "typecheck_baseline": {
+      "local_path": "/private/tmp/brsteel-pg-phase1-baseline-typecheck.log",
+      "sha256": "36dd43b235944205e5b2dea5cbf00d3da75ee95739f6d7ace9e0c48f5783f8d2"
+    }
+  },
+  "file_sha256": {
+    "package-lock.json": "d929cefd36f666a01aa4fc51e779615c2d74d3fd5ef1262e2d477c83dd9b281b",
+    "package.json": "f9e4d70da7391ffb1f45219e01fd44be4e9eaae8ce366c97b305ded2e1677d9e",
+    "scripts/operational-import.ts": "9e94fbfa38fa1e344a90aae27dea968c1a20e4405960c021b3c26eaad0ba8a83",
+    "scripts/operational-postgres-local.mjs": "b59de9e34b02a8fd0db42fbba259dce1a3ead2ec4fb4290b6ac114d8d25ea8ce",
+    "src/server/migration/operational-export.ts": "eea61828f7a7a7eab3a4b655bf1f6517d612542d96e6c1dd1f4e24e3387498dc",
+    "src/server/migration/operational-import.ts": "7f9506e6fde65f1fc6fd9c3fa8ab2696e3b5e56dccf821759a772117b8c6fd9b",
+    "src/server/migration/operational-snapshot.ts": "b54c079c7bba5bca46a68083d76dd0501a5006adec7d2bae51c8a410644a94b1",
+    "src/server/persistence/postgres-read.ts": "d47142f9faf998d08d639ec511e57048796451b3c0853ee10f2acc1c6c509478",
+    "src/server/persistence/postgres-sales.ts": "6630bf8cc0de08d3d6d918e801c88c3d2d26a35f5ebc457e05a01533af15a2f8",
+    "src/types/operations.ts": "e3b9f4bd302b839a01007cb43f0c31f0331b2225ffffb5a0ee5b053181ab3c03",
+    "supabase/operational/migrations/20260912154522_operational_core.sql": "b301d459974f0e6de24b08221e842d0ccfb3e725de0d760c3c2bbc6ff0d8bae8",
+    "tests/operations/operational-import-cleanup.test.ts": "109fd9d928a11b492097f2e125878e1ed12adaf33cd17d5dad487b5dfe75f6a2",
+    "tests/operations/operational-snapshot.test.ts": "62fb2f903dbeddd27e20a399227e1b00004603c44946b973875ef3d95a7085d1",
+    "tests/postgres/operational.integration.ts": "5eb79399f42b91eaccabd578a155b31676c1a9f9f464acd172c3f98654ae02b9"
+  }
+}

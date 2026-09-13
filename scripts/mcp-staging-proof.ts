@@ -11,6 +11,9 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { discoverOAuthProtectedResourceMetadata, discoverAuthorizationServerMetadata } from '@modelcontextprotocol/sdk/client/auth.js';
 import { STAGING, stagingProofGuard, verifyStagingProofJwt } from './lib/mcp-staging-proof-guard';
+import { assertLiveAccessResult, assertPostgresBusinessResult, assertProductionProjection, fetchWithToolCallMeasurement,
+  firstRowFromPagedRead, parseProofConsentRedirect, postgresPilotProofGuard, stockSkuFromProofResult,
+  summarizeToolHttpSamples } from './lib/mcp-postgres-proof';
 
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const sha = (value: string) => createHash('sha256').update(value).digest('hex');
@@ -23,12 +26,16 @@ async function main() {
   assert.ok(args.length === 0 || (args.length === 1 && args[0] === '--preflight-only'));
   const config = JSON.parse(readFileSync(new URL('../config/vercel.mcp-staging.json', import.meta.url), 'utf8'));
   const guard = stagingProofGuard(process.env, config);
-  if (guard.errors.length) {
-    console.error(JSON.stringify({ proof: 'refused', guardErrors: guard.errors, hostedClaude: false }, null, 2));
+  const pilot = postgresPilotProofGuard(process.env, guard.userId);
+  const guardErrors = [...guard.errors, ...pilot.errors];
+  if (guardErrors.length) {
+    console.error(JSON.stringify({ proof: 'refused', guardErrors, network: false, hostedClaude: false }, null, 2));
     process.exitCode = 1; return;
   }
   if (args[0] === '--preflight-only') {
-    console.log(JSON.stringify({ proof: 'offline-preflight-only', targets: STAGING, network: false, hostedClaude: false }, null, 2));
+    console.log(JSON.stringify({ proof: 'offline-preflight-only', targets: STAGING, network: false, hostedClaude: false,
+      ...(pilot.enabled ? { postgresPilot: { enabled: true, sourceProject: 'marketflow-9h4tg',
+        snapshotHash: pilot.snapshotHash, expiresAt: pilot.expiresAt } } : {}) }, null, 2));
     return;
   }
   const startedAt = Date.now(), runId = randomUUID(), userId = guard.userId;
@@ -45,12 +52,17 @@ async function main() {
   const cookies = new Map<string, string>();
   const pendingOwned = new Set<string>();
   const cleanupIssues = new Set<string>();
-  const evidence: Record<string, unknown> = { checkedAt: new Date(startedAt).toISOString(), targets: STAGING, userId, syntheticRunId: runId,
-    hostedClaude: false, writesEnabled: false };
+  const evidence: Record<string, unknown> = { checkedAt: new Date(startedAt).toISOString(), targets: STAGING,
+    ...(!pilot.enabled ? { userId, syntheticRunId: runId } : {}), hostedClaude: false, writesEnabled: false,
+    ...(pilot.enabled ? { postgresPilot: { enabled: true, sourceProject: 'marketflow-9h4tg', dataPeriod: { from: '2026-09-01', to: '2026-09-12' } } } : {}) };
   let stage = 'staging-read-only-preflight', failedStage: string | undefined, userCreated = false;
   let clientId: string | undefined, registrationAttempted = false, ambiguousRequest = false;
   let cleaning = false, lastHttpStatus: number | undefined;
   let mcpClient: Client | undefined;
+  let lastToolName: string | undefined;
+  let sharedProviderProductionRedirect = false;
+  const toolHttpSamples: Array<{ startedAt: number; elapsedMs: number; decodedResponseBytes: number }> = [];
+  let activeToolMeasurement: { startedAt: number; elapsedMs: number; decodedResponseBytes: number; responseCount: number } | undefined;
   function progress(next: string) {
     stage = next;
     console.log(JSON.stringify({ proofStage: next, hostedClaude: false }));
@@ -77,7 +89,8 @@ async function main() {
     const inheritedSignal = init.signal ?? (input instanceof Request ? input.signal : undefined);
     const signal = AbortSignal.any([AbortSignal.timeout(REQUEST_MS), ...(inheritedSignal ? [inheritedSignal] : [])]);
     try {
-      const response = await fetch(input, { ...init, signal, redirect: 'manual' });
+      const response = await fetchWithToolCallMeasurement(input, { ...init, signal, redirect: 'manual' },
+        STAGING.resource, activeToolMeasurement, fetch);
       lastHttpStatus = response.status;
       return response;
     } catch {
@@ -128,6 +141,13 @@ async function main() {
       tx.update(ref, { role });
     });
   }
+  async function setActive(active: boolean) {
+    await db.runTransaction(async tx => {
+      const ref = db.collection('users').doc(userId), snap = await tx.get(ref);
+      assert.equal(snap.data()?.stagingProofRunId, runId);
+      tx.update(ref, { active });
+    });
+  }
   function tokens(data: any) {
     assert.ok(typeof data?.access_token === 'string' && typeof data?.refresh_token === 'string');
     assert.equal(String(data.token_type).toLowerCase(), 'bearer');
@@ -171,11 +191,11 @@ async function main() {
         code_challenge: createHash('sha256').update(verifier).digest('base64url'), code_challenge_method: 'S256' });
       const result = await http(`${metadata!.authorization_endpoint}?${query}`);
       assert.equal(result.response.status, 302);
-      const location = new URL(result.response.headers.get('location')!);
-      assert.equal(location.origin, STAGING.origin); assert.equal(location.pathname, '/oauth/consent');
-      const id = location.searchParams.get('authorization_id')!;
-      assert.match(id, /^[A-Za-z0-9_-]{16,128}$/); intentIds.add(id);
-      return { id, verifier, state, path: `${location.pathname}${location.search}` };
+      const routing = parseProofConsentRedirect(result.response.headers.get('location')!, pilot.enabled);
+      const id = routing.authorizationId;
+      sharedProviderProductionRedirect ||= routing.sharedProviderProductionRedirect;
+      intentIds.add(id);
+      return { id, verifier, state, path: routing.stagingPath };
     }
     async function prepare(request: Awaited<ReturnType<typeof begin>>) {
       const session = await app('/api/mcp-auth/session', 'POST', { authorization_id: request.id,
@@ -192,7 +212,7 @@ async function main() {
     }
     async function decide(request: Awaited<ReturnType<typeof begin>>, decision = 'approve') {
       const result = await app('/api/mcp-auth/decision', 'POST', { authorization_id: request.id, decision,
-        capabilities: decision === 'approve' ? ['vendas:read', 'estoque:read', 'producao:read'] : [] });
+        capabilities: decision === 'approve' ? ['vendas:read', 'estoque:read', 'insumos:read', 'producao:read'] : [] });
       assert.equal(result.response.status, 200);
       const url = new URL(result.data.redirectUrl);
       assert.equal(`${url.origin}${url.pathname}`, callback); assert.equal(url.searchParams.get('state'), request.state);
@@ -259,64 +279,158 @@ async function main() {
     const codeJwt = await verifyStagingProofJwt(issued.access_token, jwks, { sub, clientId });
     evidence.oauth = { realHttps: true, discoveryDcrLoginConsentCode: true, pkceS256: true,
       firstAccessAndSafeReturn: true, normalProviderSessionRejected: true,
+      ...(pilot.enabled ? { sharedProviderRouting: { productionConsentRedirectRecognized: sharedProviderProductionRedirect,
+        authorizationSubmittedToDedicatedStagingSession: true, fullBrowserRedirectUxVerified: false } } : {}),
       independentJwt: { jwksPinnedToDedicatedProject: true, normalSession: normalJwt, authorizationCode: codeJwt } };
 
     progress('official-mcp-sdk-three-role-read-proof');
     const saleId = Number.parseInt(randomBytes(6).toString('hex'), 16), sku = `MCP-STAGING-${runId}`;
-    for (const [offset, data, total, quantidade] of [[0, '2071-09-01', 100, 2], [1, '2071-09-02', 200, 4], [2, '2071-08-31', 150, 3]] as const) {
-      await createOwned('salesOrders', `staging-proof-${runId}-sale-${offset}`, { id: saleId + offset, numero: saleId + offset, data, total,
-        contato: { id: saleId, nome: 'PRIVATE-STAGING-CUSTOMER', numeroDocumento: 'PRIVATE-STAGING-DOCUMENT' },
-        notaFiscal: { id: saleId + offset, xml: 'PRIVATE-STAGING-XML' },
-        itens: [{ id: saleId + offset, codigo: sku, descricao: 'Chapa sintética staging', quantidade, valor: 50, unidade: 'UN' }] });
+    if (!pilot.enabled) {
+      for (const [offset, data, total, quantidade] of [[0, '2071-09-01', 100, 2], [1, '2071-09-02', 200, 4], [2, '2071-08-31', 150, 3]] as const) {
+        await createOwned('salesOrders', `staging-proof-${runId}-sale-${offset}`, { id: saleId + offset, numero: saleId + offset, data, total,
+          contato: { id: saleId, nome: 'PRIVATE-STAGING-CUSTOMER', numeroDocumento: 'PRIVATE-STAGING-DOCUMENT' },
+          notaFiscal: { id: saleId + offset, xml: 'PRIVATE-STAGING-XML' },
+          itens: [{ id: saleId + offset, codigo: sku, descricao: 'Chapa sintética staging', quantidade, valor: 50, unidade: 'UN' }] });
+      }
+      await createOwned('stockUpdates', sku, { sku, nome: 'Chapa sintética staging', estoqueAtual: 0, webhookReceivedAt: new Date().toISOString() });
     }
-    await createOwned('stockUpdates', sku, { sku, nome: 'Chapa sintética staging', estoqueAtual: 0, webhookReceivedAt: new Date().toISOString() });
     mcpClient = new Client({ name: `br-steel-staging-proof-${runId}`, version: '1.0.0' });
     await mcpClient.connect(new StreamableHTTPClientTransport(new URL(STAGING.resource), {
       fetch: guardedFetch, requestInit: { headers: { authorization: `Bearer ${issued.access_token}` } } }));
     const roles: Record<string, string[]> = {};
     const sales = ['listar_pedidos', 'consultar_pedido', 'resumir_vendas'];
+    const supplies = ['listar_insumos', 'listar_movimentacoes_insumo'];
     const production = ['consultar_demanda_producao', 'listar_pedidos_para_producao', 'listar_colunas_producao', 'listar_lotes_producao', 'consultar_lote_producao'];
+    const allToolNames = new Set(['consultar_meu_acesso', 'consultar_estoque_produtos', ...sales, ...supplies, ...production]);
+    const productionTools = new Set(production);
+    let copyMetadata: ReturnType<typeof assertPostgresBusinessResult> | undefined;
+    async function invoke(name: string, args: Record<string, unknown> = {}) {
+      assert.ok(allToolNames.has(name)); lastToolName = name;
+      assert.equal(activeToolMeasurement, undefined);
+      activeToolMeasurement = { startedAt: Date.now(), elapsedMs: 0, decodedResponseBytes: 0, responseCount: 0 };
+      try { return await mcpClient!.callTool({ name, arguments: args }, undefined, { timeout: REQUEST_MS }); }
+      finally {
+        const measurement = activeToolMeasurement;
+        activeToolMeasurement = undefined;
+        assert.ok(measurement);
+        assert.equal(measurement.responseCount, 1, 'Expected one decoded HTTPS response per tool call');
+        toolHttpSamples.push({ startedAt: measurement.startedAt, elapsedMs: measurement.elapsedMs,
+          decodedResponseBytes: measurement.decodedResponseBytes });
+        summarizeToolHttpSamples(toolHttpSamples);
+      }
+    }
     async function call(name: string, args: Record<string, unknown> = {}) {
-      const result = await mcpClient!.callTool({ name, arguments: args }, undefined, { timeout: REQUEST_MS });
+      const result = await invoke(name, args);
       assert.ok(!result.isError); assert.ok(result.structuredContent);
-      return result.structuredContent as { data: any; source: string; asOf: string; warnings: string[]; nextCursor: string | null };
+      assert.ok(Array.isArray(result.content));
+      const text = result.content.filter((item: any): item is { type: 'text'; text: string } => item?.type === 'text' && typeof item.text === 'string');
+      assert.equal(text.length, 1); assert.deepEqual(JSON.parse(text[0].text), result.structuredContent);
+      const output = result.structuredContent as { data: any; source: string; asOf: string; warnings: string[];
+        nextCursor: string | null; readCopy?: unknown };
+      if (name === 'consultar_meu_acesso') assertLiveAccessResult(output);
+      else if (pilot.enabled) {
+        const metadata = assertPostgresBusinessResult(output, pilot.snapshotHash!);
+        if (copyMetadata) assert.deepEqual(metadata, copyMetadata); else copyMetadata = metadata;
+        if (productionTools.has(name)) assertProductionProjection(output.data);
+      }
+      return output;
+    }
+    async function deniedTool(name: string, args: Record<string, unknown> = {}) {
+      assert.equal((await invoke(name, args)).isError, true);
+    }
+    async function paged(name: string, args: Record<string, unknown>) {
+      const first = await call(name, args);
+      if (first.nextCursor) await call(name, { ...args, cursor: first.nextCursor });
+      return first;
     }
     for (const role of ['Administrador', 'Vendedor', 'Operador']) {
+      lastToolName = undefined;
       await setRole(role);
       const tools = (await mcpClient.listTools()).tools;
       assert.ok(tools.every(tool => tool.annotations?.readOnlyHint === true && tool.annotations?.destructiveHint === false));
       roles[role] = tools.map(tool => tool.name).sort();
-      const expected = ['consultar_meu_acesso', 'consultar_estoque_produtos', ...(role === 'Operador' ? [] : sales), ...(role === 'Vendedor' ? [] : production)].sort();
+      const expected = ['consultar_meu_acesso', 'consultar_estoque_produtos', ...(role === 'Operador' ? [] : sales),
+        ...(role === 'Vendedor' ? [] : supplies), ...(role === 'Vendedor' ? [] : production)].sort();
       assert.deepEqual(roles[role], expected);
       assert.equal((await call('consultar_meu_acesso')).data.role, role);
-      if (role !== 'Operador') {
+      if (!pilot.enabled && role !== 'Operador') {
         const summary = await call('resumir_vendas', { from: '2071-09-01', to: '2071-09-02' });
         assert.equal(summary.data.totalRevenue, 300); assert.equal(summary.data.stats.totalRevenue.change, 100);
       }
-      const stock = await call('consultar_estoque_produtos', { sku }); assert.equal(stock.data.length, 1);
-      assert.equal(stock.source, 'firestore');
-      assert.equal(stock.data[0].saldoVirtualTotal, 0); assert.equal(stock.data[0].saldoFisicoTotal, null); assert.equal(stock.data[0].source, 'firestore');
-      assert.ok(!stock.warnings.some(warning => warning.includes('Bling indisponível')));
-      if (role === 'Operador') {
-        assert.equal((await mcpClient.callTool({ name: 'listar_pedidos', arguments: {} })).isError, true);
-        const demand = await call('consultar_demanda_producao', { from: '2071-09-01', to: '2071-09-02' });
-        assert.ok(!JSON.stringify(demand).includes('PRIVATE-STAGING-'));
-        const row = demand.data.find((item: any) => item.sku === sku); assert.ok(row);
-        assert.equal(demand.source, 'firestore'); assert.equal(row.stockSource, 'firestore');
-        assert.equal(row.stockLevel, 0); assert.equal(row.totalQuantitySold, 6); assert.equal(row.orderCount, 2);
-        assert.ok(!['total', 'valor', 'contato', 'notaFiscal'].some(key => Object.hasOwn(row, key)));
+      const stock = await call('consultar_estoque_produtos', pilot.enabled ? { limit: 1 } : { sku });
+      if (!pilot.enabled) {
+        assert.equal(stock.data.length, 1); assert.equal(stock.source, 'firestore');
+        assert.equal(stock.data[0].saldoVirtualTotal, 0); assert.equal(stock.data[0].saldoFisicoTotal, null); assert.equal(stock.data[0].source, 'firestore');
+        assert.ok(!stock.warnings.some(warning => warning.includes('Bling indisponível')));
       }
-      if (role === 'Vendedor') assert.equal((await mcpClient.callTool({ name: 'listar_lotes_producao', arguments: {} })).isError, true);
+      if (role === 'Operador') {
+        await deniedTool('listar_pedidos');
+        const demand = await call('consultar_demanda_producao', pilot.enabled
+          ? { from: '2026-09-01', to: '2026-09-12', limit: 1 }
+          : { from: '2071-09-01', to: '2071-09-02' });
+        if (!pilot.enabled) {
+          assert.ok(!JSON.stringify(demand).includes('PRIVATE-STAGING-'));
+          const row = demand.data.find((item: any) => item.sku === sku); assert.ok(row);
+          assert.equal(demand.source, 'firestore'); assert.equal(row.stockSource, 'firestore');
+          assert.equal(row.stockLevel, 0); assert.equal(row.totalQuantitySold, 6); assert.equal(row.orderCount, 2);
+          assert.ok(!['total', 'valor', 'contato', 'notaFiscal'].some(key => Object.hasOwn(row, key)));
+        }
+      }
+      if (role === 'Vendedor') {
+        await deniedTool('listar_lotes_producao');
+        if (pilot.enabled) await call('resumir_vendas', { from: '2026-09-01', to: '2026-09-12' });
+      }
+      if (pilot.enabled && role === 'Administrador') await call('listar_insumos', { limit: 1 });
     }
-    await mcpClient.close(); mcpClient = undefined;
     await setRole('Administrador');
+    if (pilot.enabled) {
+      lastToolName = undefined;
+      progress('postgres-real-copy-all-read-tools-and-pagination');
+      const period = { from: '2026-09-01', to: '2026-09-12' };
+      const orders = await paged('listar_pedidos', { ...period, limit: 1 });
+      assert.ok(Array.isArray(orders.data) && orders.data.length > 0);
+      const orderId = String(orders.data[0].id);
+      const order = await call('consultar_pedido', { id: orderId, limit: 1 });
+      if (order.nextCursor) await call('consultar_pedido', { id: orderId, limit: 1, cursor: order.nextCursor });
+      await call('resumir_vendas', period);
+      const stocks = await paged('consultar_estoque_produtos', { limit: 1 });
+      assert.ok(Array.isArray(stocks.data) && stocks.data.length > 0);
+      await call('consultar_estoque_produtos', { sku: stockSkuFromProofResult(stocks.data[0]), limit: 1 });
+      const supply = await firstRowFromPagedRead(async (cursor, pageSize) => {
+        const page = await call('listar_insumos', { limit: pageSize, ...(cursor ? { cursor } : {}) });
+        return { data: page.data as Array<Record<string, unknown>>, nextCursor: page.nextCursor };
+      }, 10, 10);
+      assert.ok(typeof supply.id === 'string' && supply.id.length >= 1 && supply.id.length <= 200
+        && !supply.id.includes('/') && !['.', '..'].includes(supply.id));
+      await paged('listar_movimentacoes_insumo', { supplyId: supply.id, ...period, limit: 1 });
+      await paged('consultar_demanda_producao', { ...period, limit: 1 });
+      const productionOrders = await paged('listar_pedidos_para_producao', { limit: 1 });
+      assert.ok(Array.isArray(productionOrders.data) && productionOrders.data.length > 0);
+      const productionOrderId = String(productionOrders.data[0].id);
+      const productionOrder = await call('listar_pedidos_para_producao', { orderId: productionOrderId, limit: 1 });
+      if (productionOrder.nextCursor) await call('listar_pedidos_para_producao', { orderId: productionOrderId, limit: 1, cursor: productionOrder.nextCursor });
+      await paged('listar_colunas_producao', { limit: 1 });
+      const lots = await paged('listar_lotes_producao', { limit: 1 });
+      assert.ok(Array.isArray(lots.data) && lots.data.length > 0);
+      const lotId = String(lots.data[0].id);
+      const lot = await call('consultar_lote_producao', { lotId, limit: 1 });
+      if (lot.nextCursor) await call('consultar_lote_producao', { lotId, limit: 1, cursor: lot.nextCursor });
+      assert.ok(copyMetadata);
+    }
+    await setActive(false); assert.equal((await mcpStatus(issued.access_token)).status, 401); await setActive(true);
+    lastToolName = undefined;
+    await mcpClient.close(); mcpClient = undefined;
     const audit = await scoped('mcpAuditLogs');
     assert.ok(audit.length >= 11 && audit.some(doc => doc.data().result === 'error'));
     for (const doc of audit) { assert.equal(doc.data().clientId, clientId); own(doc.ref.path); }
     const auditText = JSON.stringify(audit.map(doc => doc.data()));
     assert.ok(!auditText.includes('PRIVATE-STAGING-') && ![...secrets].some(secret => auditText.includes(secret)));
-    evidence.mcp = { officialSdk: true, realHttps: true, salesTotal: 300, revenueChangePercent: 100, zeroStock: true,
-      restrictedProductionProjection: true, directForbiddenToolCallsRejected: true, currentRoleEnforced: true,
+    evidence.mcp = { officialSdk: true, realHttps: true,
+      ...(!pilot.enabled ? { salesTotal: 300, revenueChangePercent: 100, zeroStock: true } : {
+        source: 'postgres', copy: copyMetadata, realBusinessPayloadRecorded: false,
+        allApplicableReadToolsAndPagination: true, inactiveUserRejected: true,
+        httpMeasurements: summarizeToolHttpSamples(toolHttpSamples),
+      }), restrictedProductionProjection: true, directForbiddenToolCallsRejected: true, currentRoleEnforced: true,
       auditRedaction: true, auditCount: audit.length, roles, hostedClaude: false };
 
     progress('https-refresh-revoke-401-and-reconnect');
@@ -354,7 +468,7 @@ async function main() {
     // Never render remote bodies, exceptions, cookies, passwords, URLs with codes, or Bearers.
     failedStage = stage;
     const scalar = (value: unknown) => typeof value === 'number' || typeof value === 'boolean' || value === null ? value : undefined;
-    evidence.failure = { stage: failedStage, lastHttpStatus,
+    evidence.failure = { stage: failedStage, lastHttpStatus, ...(lastToolName ? { lastToolName } : {}),
       ...(error instanceof assert.AssertionError ? { assertion: { operator: error.operator,
         expected: scalar(error.expected), actual: scalar(error.actual) } } : {}) };
     process.exitCode = 1;
@@ -450,8 +564,9 @@ async function main() {
     });
     await attempt('firestore-terminate', () => db.terminate());
     const complete = cleanupIssues.size === 0 && pendingOwned.size === 0 && !ambiguousRequest;
-    evidence.cleanup = { complete, ambiguousHttpRequest: ambiguousRequest, issues: [...cleanupIssues], remainingOwnedIds: [...pendingOwned].sort(),
-      ...(!complete && registrationAttempted ? { oauthClientRecoveryName: clientName } : {}) };
+    evidence.cleanup = { complete, ambiguousHttpRequest: ambiguousRequest, issues: [...cleanupIssues],
+      ...(pilot.enabled ? { remainingOwnedCount: pendingOwned.size } : { remainingOwnedIds: [...pendingOwned].sort(),
+        ...(!complete && registrationAttempted ? { oauthClientRecoveryName: clientName } : {}) }) };
     evidence.elapsedSeconds = Math.round((Date.now() - startedAt) / 1000);
     evidence.proof = !failedStage && complete ? 'passed' : 'failed';
     if (!complete) process.exitCode = 1;

@@ -1,0 +1,790 @@
+{
+  "checkedAt": "2026-09-12T18:00:03.705564+00:00",
+  "scope": "Hosted copy and serial PostgreSQL reader benchmark. Application and MCP still use Firestore.",
+  "sourceProject": "marketflow-9h4tg",
+  "targetProject": "mlumbvxpaqfzpdjnvzxc",
+  "appRuntimeChanged": false,
+  "sourceBusinessDataChanged": false,
+  "hostedOperationalSchemaAndCopyCreated": true,
+  "planChanged": false,
+  "snapshot": {
+    "capturedAt": "2026-09-12T17:41:15.802Z",
+    "exportDurationMs": 34918,
+    "jsonBytes": 26080327,
+    "fileSha256": "6cc1586f71cffe9c3c6e71bfc423fbc07c27069061b85d41945fa980cbb5daa1",
+    "hash": "8a783d1454afcb13a045545de0dbdf7d2d4af000998c05bae5d09fe4f9faeae9",
+    "records": 12967,
+    "counts": {
+      "salesOrders": 12538,
+      "stockUpdates": 361,
+      "supplies": 54,
+      "productionColumns": 3,
+      "operationsMetadata": 0,
+      "supplyCodes": 0,
+      "inventoryMovements": 1,
+      "productionLots": 3,
+      "productionLotItems": 7,
+      "productionComments": 0
+    },
+    "transactionallyConsistentExport": false,
+    "legacyTypeValidation": "New export used requireReadCompatibleTypes before JSON conversion"
+  },
+  "import": {
+    "status": "complete",
+    "command": "import",
+    "project": "mlumbvxpaqfzpdjnvzxc",
+    "sourceProject": "marketflow-9h4tg",
+    "snapshotHash": "8a783d1454afcb13a045545de0dbdf7d2d4af000998c05bae5d09fe4f9faeae9",
+    "capturedAt": "2026-09-12T17:41:15.802Z",
+    "startedAt": "2026-09-12T17:49:06.878Z",
+    "finishedAt": "2026-09-12T17:54:52.131Z",
+    "durationMs": 345252.230292,
+    "protocol": {
+      "received": 34841289,
+      "sent": 41328516
+    },
+    "result": {
+      "records": 12967,
+      "items": 12999,
+      "hash": "8a783d1454afcb13a045545de0dbdf7d2d4af000998c05bae5d09fe4f9faeae9",
+      "alreadyComplete": false
+    }
+  },
+  "verification": {
+    "status": "complete",
+    "command": "verify",
+    "project": "mlumbvxpaqfzpdjnvzxc",
+    "sourceProject": "marketflow-9h4tg",
+    "snapshotHash": "8a783d1454afcb13a045545de0dbdf7d2d4af000998c05bae5d09fe4f9faeae9",
+    "capturedAt": "2026-09-12T17:41:15.802Z",
+    "startedAt": "2026-09-12T17:55:18.113Z",
+    "finishedAt": "2026-09-12T17:55:20.965Z",
+    "durationMs": 2852.2646250000003,
+    "protocol": {
+      "received": 33431044,
+      "sent": 2375
+    },
+    "result": {
+      "records": 12967,
+      "items": 12999,
+      "hash": "8a783d1454afcb13a045545de0dbdf7d2d4af000998c05bae5d09fe4f9faeae9"
+    }
+  },
+  "measurement": {
+    "status": "complete",
+    "command": "measure",
+    "project": "mlumbvxpaqfzpdjnvzxc",
+    "sourceProject": "marketflow-9h4tg",
+    "snapshotHash": "8a783d1454afcb13a045545de0dbdf7d2d4af000998c05bae5d09fe4f9faeae9",
+    "capturedAt": "2026-09-12T17:41:15.802Z",
+    "startedAt": "2026-09-12T17:55:35.457Z",
+    "finishedAt": "2026-09-12T17:55:39.207Z",
+    "durationMs": 3750.6404999999995,
+    "protocol": {
+      "received": 893719,
+      "sent": 67931
+    },
+    "result": {
+      "range": {
+        "from": "2026-09-01",
+        "to": "2026-09-12"
+      },
+      "samples": [
+        {
+          "name": "sales_summary",
+          "iteration": 0,
+          "durationMs": 64.02433300000007,
+          "protocolReceivedBytes": 2324,
+          "protocolSentBytes": 2346,
+          "responseJsonBytes": 2230
+        },
+        {
+          "name": "sales_summary",
+          "iteration": 1,
+          "durationMs": 56.672665999999936,
+          "protocolReceivedBytes": 2324,
+          "protocolSentBytes": 2346,
+          "responseJsonBytes": 2230
+        },
+        {
+          "name": "sales_summary",
+          "iteration": 2,
+          "durationMs": 143.21875,
+          "protocolReceivedBytes": 2324,
+          "protocolSentBytes": 2346,
+          "responseJsonBytes": 2230
+        },
+        {
+          "name": "sales_summary",
+          "iteration": 3,
+          "durationMs": 62.06687499999998,
+          "protocolReceivedBytes": 2324,
+          "protocolSentBytes": 2346,
+          "responseJsonBytes": 2230
+        },
+        {
+          "name": "sales_summary",
+          "iteration": 4,
+          "durationMs": 60.01908400000002,
+          "protocolReceivedBytes": 2324,
+          "protocolSentBytes": 2346,
+          "responseJsonBytes": 2230
+        },
+        {
+          "name": "sales_page",
+          "iteration": 0,
+          "durationMs": 83.56912499999999,
+          "protocolReceivedBytes": 115515,
+          "protocolSentBytes": 425,
+          "responseJsonBytes": 102295
+        },
+        {
+          "name": "sales_page",
+          "iteration": 1,
+          "durationMs": 61.7610830000001,
+          "protocolReceivedBytes": 115515,
+          "protocolSentBytes": 425,
+          "responseJsonBytes": 102295
+        },
+        {
+          "name": "sales_page",
+          "iteration": 2,
+          "durationMs": 50.11758299999997,
+          "protocolReceivedBytes": 115515,
+          "protocolSentBytes": 425,
+          "responseJsonBytes": 102295
+        },
+        {
+          "name": "sales_page",
+          "iteration": 3,
+          "durationMs": 50.612333000000035,
+          "protocolReceivedBytes": 115515,
+          "protocolSentBytes": 425,
+          "responseJsonBytes": 102295
+        },
+        {
+          "name": "sales_page",
+          "iteration": 4,
+          "durationMs": 190.71425,
+          "protocolReceivedBytes": 115515,
+          "protocolSentBytes": 425,
+          "responseJsonBytes": 102295
+        },
+        {
+          "name": "stock_page",
+          "iteration": 0,
+          "durationMs": 65.15599999999995,
+          "protocolReceivedBytes": 19320,
+          "protocolSentBytes": 803,
+          "responseJsonBytes": 17091
+        },
+        {
+          "name": "stock_page",
+          "iteration": 1,
+          "durationMs": 56.71458299999995,
+          "protocolReceivedBytes": 19320,
+          "protocolSentBytes": 803,
+          "responseJsonBytes": 17091
+        },
+        {
+          "name": "stock_page",
+          "iteration": 2,
+          "durationMs": 54.81595800000014,
+          "protocolReceivedBytes": 19320,
+          "protocolSentBytes": 803,
+          "responseJsonBytes": 17091
+        },
+        {
+          "name": "stock_page",
+          "iteration": 3,
+          "durationMs": 73.65691599999991,
+          "protocolReceivedBytes": 19320,
+          "protocolSentBytes": 803,
+          "responseJsonBytes": 17091
+        },
+        {
+          "name": "stock_page",
+          "iteration": 4,
+          "durationMs": 53.707374999999956,
+          "protocolReceivedBytes": 19320,
+          "protocolSentBytes": 803,
+          "responseJsonBytes": 17091
+        },
+        {
+          "name": "production_demand",
+          "iteration": 0,
+          "durationMs": 150.1378340000001,
+          "protocolReceivedBytes": 24757,
+          "protocolSentBytes": 2446,
+          "responseJsonBytes": 16954
+        },
+        {
+          "name": "production_demand",
+          "iteration": 1,
+          "durationMs": 80.13308299999971,
+          "protocolReceivedBytes": 24757,
+          "protocolSentBytes": 2446,
+          "responseJsonBytes": 16954
+        },
+        {
+          "name": "production_demand",
+          "iteration": 2,
+          "durationMs": 79.60045899999977,
+          "protocolReceivedBytes": 24757,
+          "protocolSentBytes": 2446,
+          "responseJsonBytes": 16954
+        },
+        {
+          "name": "production_demand",
+          "iteration": 3,
+          "durationMs": 154.59166700000014,
+          "protocolReceivedBytes": 24757,
+          "protocolSentBytes": 2446,
+          "responseJsonBytes": 16954
+        },
+        {
+          "name": "production_demand",
+          "iteration": 4,
+          "durationMs": 78.82083299999977,
+          "protocolReceivedBytes": 24757,
+          "protocolSentBytes": 2446,
+          "responseJsonBytes": 16954
+        },
+        {
+          "name": "production_lots",
+          "iteration": 0,
+          "durationMs": 123.18670800000018,
+          "protocolReceivedBytes": 1688,
+          "protocolSentBytes": 1663,
+          "responseJsonBytes": 1396
+        },
+        {
+          "name": "production_lots",
+          "iteration": 1,
+          "durationMs": 42.93437500000027,
+          "protocolReceivedBytes": 1688,
+          "protocolSentBytes": 1663,
+          "responseJsonBytes": 1396
+        },
+        {
+          "name": "production_lots",
+          "iteration": 2,
+          "durationMs": 45.697291999999834,
+          "protocolReceivedBytes": 1688,
+          "protocolSentBytes": 1663,
+          "responseJsonBytes": 1396
+        },
+        {
+          "name": "production_lots",
+          "iteration": 3,
+          "durationMs": 46.84079100000008,
+          "protocolReceivedBytes": 1688,
+          "protocolSentBytes": 1663,
+          "responseJsonBytes": 1396
+        },
+        {
+          "name": "production_lots",
+          "iteration": 4,
+          "durationMs": 47.86041599999999,
+          "protocolReceivedBytes": 1688,
+          "protocolSentBytes": 1663,
+          "responseJsonBytes": 1396
+        },
+        {
+          "name": "production_orders",
+          "iteration": 0,
+          "durationMs": 46.313040999999885,
+          "protocolReceivedBytes": 11022,
+          "protocolSentBytes": 1183,
+          "responseJsonBytes": 8765
+        },
+        {
+          "name": "production_orders",
+          "iteration": 1,
+          "durationMs": 48.23329199999989,
+          "protocolReceivedBytes": 11022,
+          "protocolSentBytes": 1183,
+          "responseJsonBytes": 8765
+        },
+        {
+          "name": "production_orders",
+          "iteration": 2,
+          "durationMs": 46.23433399999976,
+          "protocolReceivedBytes": 11022,
+          "protocolSentBytes": 1183,
+          "responseJsonBytes": 8765
+        },
+        {
+          "name": "production_orders",
+          "iteration": 3,
+          "durationMs": 72.78200000000015,
+          "protocolReceivedBytes": 11022,
+          "protocolSentBytes": 1183,
+          "responseJsonBytes": 8765
+        },
+        {
+          "name": "production_orders",
+          "iteration": 4,
+          "durationMs": 127.57362499999999,
+          "protocolReceivedBytes": 11022,
+          "protocolSentBytes": 1183,
+          "responseJsonBytes": 8765
+        },
+        {
+          "name": "supplies_page",
+          "iteration": 0,
+          "durationMs": 45.6279999999997,
+          "protocolReceivedBytes": 1521,
+          "protocolSentBytes": 659,
+          "responseJsonBytes": 218
+        },
+        {
+          "name": "supplies_page",
+          "iteration": 1,
+          "durationMs": 43.10149999999976,
+          "protocolReceivedBytes": 1521,
+          "protocolSentBytes": 659,
+          "responseJsonBytes": 218
+        },
+        {
+          "name": "supplies_page",
+          "iteration": 2,
+          "durationMs": 48.337375000000065,
+          "protocolReceivedBytes": 1521,
+          "protocolSentBytes": 659,
+          "responseJsonBytes": 218
+        },
+        {
+          "name": "supplies_page",
+          "iteration": 3,
+          "durationMs": 43.599334,
+          "protocolReceivedBytes": 1521,
+          "protocolSentBytes": 659,
+          "responseJsonBytes": 218
+        },
+        {
+          "name": "supplies_page",
+          "iteration": 4,
+          "durationMs": 44.41516700000011,
+          "protocolReceivedBytes": 1521,
+          "protocolSentBytes": 659,
+          "responseJsonBytes": 218
+        },
+        {
+          "name": "production_order",
+          "iteration": 0,
+          "durationMs": 98.02749999999969,
+          "protocolReceivedBytes": 385,
+          "protocolSentBytes": 1211,
+          "responseJsonBytes": 239
+        },
+        {
+          "name": "production_order",
+          "iteration": 1,
+          "durationMs": 74.179709,
+          "protocolReceivedBytes": 385,
+          "protocolSentBytes": 1211,
+          "responseJsonBytes": 239
+        },
+        {
+          "name": "production_order",
+          "iteration": 2,
+          "durationMs": 149.8456659999997,
+          "protocolReceivedBytes": 385,
+          "protocolSentBytes": 1211,
+          "responseJsonBytes": 239
+        },
+        {
+          "name": "production_order",
+          "iteration": 3,
+          "durationMs": 53.22441600000002,
+          "protocolReceivedBytes": 385,
+          "protocolSentBytes": 1211,
+          "responseJsonBytes": 239
+        },
+        {
+          "name": "production_order",
+          "iteration": 4,
+          "durationMs": 52.85987499999965,
+          "protocolReceivedBytes": 385,
+          "protocolSentBytes": 1211,
+          "responseJsonBytes": 239
+        },
+        {
+          "name": "production_lot",
+          "iteration": 0,
+          "durationMs": 55.881624999999985,
+          "protocolReceivedBytes": 1792,
+          "protocolSentBytes": 2282,
+          "responseJsonBytes": 1455
+        },
+        {
+          "name": "production_lot",
+          "iteration": 1,
+          "durationMs": 56.90779100000054,
+          "protocolReceivedBytes": 1792,
+          "protocolSentBytes": 2282,
+          "responseJsonBytes": 1455
+        },
+        {
+          "name": "production_lot",
+          "iteration": 2,
+          "durationMs": 53.66399999999976,
+          "protocolReceivedBytes": 1792,
+          "protocolSentBytes": 2282,
+          "responseJsonBytes": 1455
+        },
+        {
+          "name": "production_lot",
+          "iteration": 3,
+          "durationMs": 53.3324590000002,
+          "protocolReceivedBytes": 1792,
+          "protocolSentBytes": 2282,
+          "responseJsonBytes": 1455
+        },
+        {
+          "name": "production_lot",
+          "iteration": 4,
+          "durationMs": 54.11670799999956,
+          "protocolReceivedBytes": 1792,
+          "protocolSentBytes": 2282,
+          "responseJsonBytes": 1455
+        },
+        {
+          "name": "supply_movements",
+          "iteration": 0,
+          "durationMs": 130.34695899999952,
+          "protocolReceivedBytes": 186,
+          "protocolSentBytes": 435,
+          "responseJsonBytes": 97
+        },
+        {
+          "name": "supply_movements",
+          "iteration": 1,
+          "durationMs": 41.82329100000061,
+          "protocolReceivedBytes": 186,
+          "protocolSentBytes": 435,
+          "responseJsonBytes": 97
+        },
+        {
+          "name": "supply_movements",
+          "iteration": 2,
+          "durationMs": 49.542333000000326,
+          "protocolReceivedBytes": 186,
+          "protocolSentBytes": 435,
+          "responseJsonBytes": 97
+        },
+        {
+          "name": "supply_movements",
+          "iteration": 3,
+          "durationMs": 42.025916999999936,
+          "protocolReceivedBytes": 186,
+          "protocolSentBytes": 435,
+          "responseJsonBytes": 97
+        },
+        {
+          "name": "supply_movements",
+          "iteration": 4,
+          "durationMs": 40.05866699999933,
+          "protocolReceivedBytes": 186,
+          "protocolSentBytes": 435,
+          "responseJsonBytes": 97
+        }
+      ]
+    }
+  },
+  "measurementSummary": [
+    {
+      "name": "sales_summary",
+      "samples": 5,
+      "medianMs": 62.06687499999998,
+      "maxMs": 143.21875,
+      "protocolReceivedBytesMax": 2324,
+      "responseJsonBytesMax": 2230
+    },
+    {
+      "name": "sales_page",
+      "samples": 5,
+      "medianMs": 61.7610830000001,
+      "maxMs": 190.71425,
+      "protocolReceivedBytesMax": 115515,
+      "responseJsonBytesMax": 102295
+    },
+    {
+      "name": "stock_page",
+      "samples": 5,
+      "medianMs": 56.71458299999995,
+      "maxMs": 73.65691599999991,
+      "protocolReceivedBytesMax": 19320,
+      "responseJsonBytesMax": 17091
+    },
+    {
+      "name": "production_demand",
+      "samples": 5,
+      "medianMs": 80.13308299999971,
+      "maxMs": 154.59166700000014,
+      "protocolReceivedBytesMax": 24757,
+      "responseJsonBytesMax": 16954
+    },
+    {
+      "name": "production_lots",
+      "samples": 5,
+      "medianMs": 46.84079100000008,
+      "maxMs": 123.18670800000018,
+      "protocolReceivedBytesMax": 1688,
+      "responseJsonBytesMax": 1396
+    },
+    {
+      "name": "production_orders",
+      "samples": 5,
+      "medianMs": 48.23329199999989,
+      "maxMs": 127.57362499999999,
+      "protocolReceivedBytesMax": 11022,
+      "responseJsonBytesMax": 8765
+    },
+    {
+      "name": "supplies_page",
+      "samples": 5,
+      "medianMs": 44.41516700000011,
+      "maxMs": 48.337375000000065,
+      "protocolReceivedBytesMax": 1521,
+      "responseJsonBytesMax": 218
+    },
+    {
+      "name": "production_order",
+      "samples": 5,
+      "medianMs": 74.179709,
+      "maxMs": 149.8456659999997,
+      "protocolReceivedBytesMax": 385,
+      "responseJsonBytesMax": 239
+    },
+    {
+      "name": "production_lot",
+      "samples": 5,
+      "medianMs": 54.11670799999956,
+      "maxMs": 56.90779100000054,
+      "protocolReceivedBytesMax": 1792,
+      "responseJsonBytesMax": 1455
+    },
+    {
+      "name": "supply_movements",
+      "samples": 5,
+      "medianMs": 42.025916999999936,
+      "maxMs": 130.34695899999952,
+      "protocolReceivedBytesMax": 186,
+      "responseJsonBytesMax": 97
+    }
+  ],
+  "storage": {
+    "checkedAt": "2026-09-12T17:56:32.795139+00:00",
+    "databaseBytes": 50384019,
+    "tables": [
+      {
+        "schema": "brsteel_import",
+        "table": "runs",
+        "bytes": 32768
+      },
+      {
+        "schema": "brsteel_import",
+        "table": "state",
+        "bytes": 32768
+      },
+      {
+        "schema": "brsteel_ops",
+        "table": "inventory_movements",
+        "bytes": 49152
+      },
+      {
+        "schema": "brsteel_ops",
+        "table": "production_columns",
+        "bytes": 32768
+      },
+      {
+        "schema": "brsteel_ops",
+        "table": "production_comments",
+        "bytes": 24576
+      },
+      {
+        "schema": "brsteel_ops",
+        "table": "production_counters",
+        "bytes": 16384
+      },
+      {
+        "schema": "brsteel_ops",
+        "table": "production_lot_items",
+        "bytes": 65536
+      },
+      {
+        "schema": "brsteel_ops",
+        "table": "production_lots",
+        "bytes": 49152
+      },
+      {
+        "schema": "brsteel_ops",
+        "table": "sales_order_items",
+        "bytes": 7127040
+      },
+      {
+        "schema": "brsteel_ops",
+        "table": "sales_orders",
+        "bytes": 30507008
+      },
+      {
+        "schema": "brsteel_ops",
+        "table": "stock_observations",
+        "bytes": 761856
+      },
+      {
+        "schema": "brsteel_ops",
+        "table": "supplies",
+        "bytes": 131072
+      },
+      {
+        "schema": "brsteel_ops",
+        "table": "supply_codes",
+        "bytes": 16384
+      }
+    ],
+    "state": {
+      "singleton": true,
+      "source_project": "marketflow-9h4tg",
+      "active_run": "8a783d1454afcb13a045545de0dbdf7d2d4af000998c05bae5d09fe4f9faeae9",
+      "ready": true
+    },
+    "run": {
+      "id": "8a783d1454afcb13a045545de0dbdf7d2d4af000998c05bae5d09fe4f9faeae9",
+      "source_project": "marketflow-9h4tg",
+      "captured_at": "2026-09-12T17:41:15.802+00:00",
+      "status": "complete",
+      "next_index": 12967,
+      "total_records": 12967,
+      "completed_at": "2026-09-12T17:54:50.432273+00:00"
+    },
+    "authUsers": 1,
+    "oauthClients": 8
+  },
+  "operationalBytes": 38846464,
+  "accessDuringPilot": {
+    "checkedAt": "2026-09-12T17:50:30.806Z",
+    "endpoint": "transaction-pooler",
+    "checks": [
+      {
+        "name": "verified_tls_and_reader_identity",
+        "passed": true
+      },
+      {
+        "name": "internal_runs_denied",
+        "passed": true,
+        "code": "42501"
+      },
+      {
+        "name": "auth_users_denied",
+        "passed": true,
+        "code": "42501"
+      },
+      {
+        "name": "importer_role_denied",
+        "passed": true,
+        "code": "42501"
+      },
+      {
+        "name": "reader_write_denied",
+        "passed": true,
+        "code": "42501"
+      }
+    ]
+  },
+  "accessAfterPilot": {
+    "checkedAt": "2026-09-12T17:58:09.591308+00:00",
+    "roles": [
+      {
+        "role": "brsteel_pilot_reader",
+        "login": false,
+        "superuser": false,
+        "bypassRls": false,
+        "readerMember": false,
+        "importerMember": false
+      },
+      {
+        "role": "brsteel_pilot_importer",
+        "login": false,
+        "superuser": false,
+        "bypassRls": false,
+        "readerMember": false,
+        "importerMember": false
+      }
+    ],
+    "activePilotSessions": 0,
+    "anonUsage": false,
+    "authenticatedUsage": false
+  },
+  "organizationUsage": {
+    "checkedAt": "2026-09-12T17:51:54.482728+00:00",
+    "source": "https://supabase.com/dashboard/org/xhdvfwtxqlllntebykda/usage",
+    "organization": "xhdvfwtxqlllntebykda",
+    "plan": "free",
+    "billingPeriod": {
+      "from": "2026-09-07",
+      "to": "2026-10-07"
+    },
+    "uncachedEgressGB": 2.222,
+    "uncachedEgressQuotaGB": 5,
+    "cachedEgressGB": 0.662,
+    "cachedEgressQuotaGB": 5,
+    "dbQuotaGBPerProject": 0.5,
+    "refreshDelayUpToHours": 1,
+    "note": "Organization-wide dashboard observation during import. Not an attributable incremental pilot charge."
+  },
+  "securityAdvisors": [
+    {
+      "name": "auth_leaked_password_protection",
+      "level": "WARN",
+      "count": 1,
+      "remediation": "https://supabase.com/docs/guides/auth/password-security#password-strength-and-leaked-password-protection"
+    }
+  ],
+  "performanceAdvisors": [
+    {
+      "name": "unindexed_foreign_keys",
+      "level": "INFO",
+      "count": 12,
+      "remediation": "https://supabase.com/docs/guides/database/database-linter?lint=0001_unindexed_foreign_keys"
+    },
+    {
+      "name": "unused_index",
+      "level": "INFO",
+      "count": 5,
+      "remediation": "https://supabase.com/docs/guides/database/database-linter?lint=0005_unused_index"
+    }
+  ],
+  "totalMeasuredProtocolReceivedBytes": 69166052,
+  "tests": {
+    "vitest": 194,
+    "vitestFiles": 36,
+    "postgresIntegration": 17,
+    "typecheckExistingDiagnostics": 25,
+    "typecheckNewDiagnostics": 0
+  },
+  "sourceHashesAtCompletion": {
+    "src/server/migration/operational-import.ts": "ef31dc2c437532c1989bced3af828d5d2769aa0ae9bae001f58c0458cc0d4d63",
+    "src/server/migration/operational-hosted.ts": "cc12a60fdf41b5e021a455b5aff9a48e01939a52e8216e04360ef30ef7b7171c",
+    "src/server/migration/operational-pilot-evidence.ts": "41126f1e4bd0d01e5273b25e10113af9ad19f482622bba573a2d444651b4cc6c",
+    "scripts/operational-hosted-pilot.ts": "a9710f2bf5dbecf1d78793b000f0c6c526099d69b6de05fb9376ab0092dc1d97",
+    "supabase/operational/migrations/20260912154522_operational_core.sql": "b301d459974f0e6de24b08221e842d0ccfb3e725de0d760c3c2bbc6ff0d8bae8",
+    "supabase/operational/migrations/20260912170838_operational_read_models.sql": "cbc59da96d56f4ca9de3f6599eeba60adeec74d5b0c67ca7834d2c59cfb137bb",
+    "supabase/operational/migrations/20260912174653_operational_pilot_roles.sql": "37fe26441d579a0ad721032de308c0627cf55ff5e7088b7d43cbafec39860dc5"
+  },
+  "hostedMigrationVersions": {
+    "operational_core": "20260912174636",
+    "operational_read_models": "20260912174651",
+    "operational_pilot_roles": "20260912174831"
+  },
+  "limitations": [
+    "No Vercel endpoint latency, real user authorization E2E or concurrent load validation in this delivery.",
+    "TLSSocket counters measure decrypted PostgreSQL protocol, not billed egress or physical network bytes.",
+    "Five sequential samples per case; maxima are not a production p95/p99.",
+    "No continuous synchronization. Snapshot reflects a paginated read of a changing source.",
+    "Current organizational usage is shared and delayed; cannot attribute its change to this pilot.",
+    "Backup transfer and recovery for this final schema remain unmeasured."
+  ]
+}

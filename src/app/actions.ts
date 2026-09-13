@@ -707,10 +707,10 @@ export async function clearStockUpdates(): Promise<{ deleted: number }> {
   for (let i = 0; i < rows.size; i += 400) {
     const batch = adminDb.batch(); rows.docs.slice(i, i + 400).forEach(doc => batch.delete(doc.ref)); await batch.commit();
   }
-  invalidateProductStockCache(); return { deleted: rows.size };
+  await invalidateProductStockCache(); return { deleted: rows.size };
 }
 export async function invalidateStockCache(): Promise<void> {
-  requireOperation(await requireWebContext(), 'estoque:read'); invalidateProductStockCache();
+  requireOperation(await requireWebContext(), 'estoque:read'); await invalidateProductStockCache();
 }
 export async function getProductsStock() {
   requireOperation(await requireWebContext(), 'estoque:read'); return readStockSnapshot();

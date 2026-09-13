@@ -1,0 +1,178 @@
+{
+  "recorded_at": "2026-09-12T17:30:46.665658+00:00",
+  "branch": "codex/operational-postgres-readers",
+  "base_commit": "4ac90623c3d2442a0b771dd0cff3eb06ae27fd7d",
+  "scope": "local candidate stock, supplies, movement, production and demand readers; verified import projections",
+  "local_read_adapters_complete": true,
+  "active_backend": "firestore",
+  "production_changed": false,
+  "production_data_used": false,
+  "hosted_migration_applied": false,
+  "push_performed": false,
+  "merge_performed": false,
+  "billing_plan_changed": false,
+  "checks": {
+    "vitest": {
+      "exit_code": 0,
+      "files": 34,
+      "passed": 189,
+      "failed": 0
+    },
+    "postgres_integration": {
+      "exit_code": 0,
+      "passed": 16,
+      "failed": 0,
+      "new_reader_fixture_documents": 31,
+      "prior_import_fixture_documents": 12,
+      "parity": [
+        "stock eligibility/zero/null/date ties/locale order",
+        "stock SKU filters/offset cursors/warnings/observation time",
+        "demand billed orders/distinct business IDs/first description/ties/inclusive weeks/limits",
+        "production views/order continuation/lot detail/private fields",
+        "supplies scanned-row pagination",
+        "movement missing dates/ties/São Paulo day boundaries"
+      ],
+      "recovery": [
+        "partial copy rejected by every new reader",
+        "source stock updated and deleted",
+        "read model corruption detected",
+        "pre-projection copy invalidated and checkpoint reset"
+      ]
+    },
+    "schema": {
+      "tables": 13,
+      "rls_tables": 13,
+      "foreign_keys": 18,
+      "indexes": 25,
+      "advisors_minimum_level": "warn",
+      "advisors_type": "all",
+      "advisors_findings": []
+    },
+    "typecheck": {
+      "exit_code": 2,
+      "diagnostics": 25,
+      "identical_to_baseline": true,
+      "new_diagnostics": 0
+    },
+    "build": {
+      "exit_code": 0,
+      "demo_configuration": true,
+      "typecheck_and_lint_skipped_by_existing_configuration": true
+    },
+    "authorization": {
+      "production_only_user_can_read_minimal_sql_production": true,
+      "stock_and_supplies_denied_without_capability": true,
+      "inactive_user_denied": true,
+      "disabled_page_denied": true
+    },
+    "review": {
+      "finding": "native Timestamp type loss changed read eligibility/precision",
+      "resolution": "reject affected native types before export normalization",
+      "red_test_failures": 5,
+      "pure_type_tests_passing": 6,
+      "emulator_source_behavior_checked": true,
+      "remaining_findings": 0
+    },
+    "production_and_supplies_write_implementations_byte_identical_to_base": true,
+    "cleanup": {
+      "owned_containers_remaining": 0,
+      "owned_volumes_removed_by_harness": true,
+      "temporary_advisor_configuration_removed": true
+    }
+  },
+  "limitations": [
+    "old JSON snapshots cannot establish original timestamp types; re-export required before hosted pilot",
+    "legacy native date types in read fields require explicit source normalization",
+    "tests use synthetic data and do not establish hosted performance or Free plan adequacy",
+    "backend RLS does not replace per-user operation authorization",
+    "projection columns add storage; prior prototype size cannot be reused as measurement",
+    "paginated export is not a consistent snapshot of concurrent source writes"
+  ],
+  "pending": [
+    "controlled hosted read pilot",
+    "fresh source validation and reconciliation",
+    "hosted endpoint permission tests",
+    "real storage/egress/latency measurements",
+    "business writes, integrations, backups and coordinated cutover"
+  ],
+  "commands": {
+    "integration": "BRSTEEL_PG_ADVISORS=1 npm run test:postgres",
+    "full_suite": "firebase emulators:exec --only firestore --project demo-brsteel-auth --config firebase.test.json 'npx --no-install vitest run'",
+    "typecheck": "npm run typecheck",
+    "build": "npm run build with demo/emulator environment"
+  },
+  "logs": {
+    "full_suite": {
+      "local_path": "/private/tmp/brsteel-pg-readers-full-tests-final.log",
+      "sha256": "8082b965750c11b34e7c274fbf4df9ee946904c0da6a02b9e27d9d96b9596819"
+    },
+    "integration": {
+      "local_path": "/private/tmp/brsteel-pg-readers-integration-final.log",
+      "sha256": "10944029b7504fe65282a4b877a5cbf598125588d3fb0dedf02dc6626ba27e6b"
+    },
+    "build": {
+      "local_path": "/private/tmp/brsteel-pg-readers-build.log",
+      "sha256": "c6d245d6c0d95245ae8b0425ae1382ff1fcdfdd604a8f8f885e4b55f159ef1d5"
+    },
+    "typecheck": {
+      "local_path": "/private/tmp/brsteel-pg-readers-typecheck-final.log",
+      "sha256": "36dd43b235944205e5b2dea5cbf00d3da75ee95739f6d7ace9e0c48f5783f8d2"
+    },
+    "baseline_typecheck": {
+      "local_path": "/private/tmp/brsteel-pg-phase2-typecheck-final.log",
+      "sha256": "36dd43b235944205e5b2dea5cbf00d3da75ee95739f6d7ace9e0c48f5783f8d2"
+    },
+    "stock_model_red": {
+      "local_path": "/private/tmp/brsteel-pg-readers-model-red.log",
+      "sha256": "6b9f8483d8df5820d0128c4103c38eab1726275c0afd07c8d4c2c3b8dd246768"
+    },
+    "stock_model_green": {
+      "local_path": "/private/tmp/brsteel-pg-readers-model-green.log",
+      "sha256": "4838b5919e2010193bd97a699271e094bfcece7426788a1606612875dcc2f38a"
+    },
+    "native_timestamp_red": {
+      "local_path": "/private/tmp/brsteel-pg-readers-types-red.log",
+      "sha256": "c1db3d50391fc89128818d60b842a6804b6f24fe0de8d4f59a1058b1a7026d6a"
+    },
+    "native_timestamp_green": {
+      "local_path": "/private/tmp/brsteel-pg-readers-types-green.log",
+      "sha256": "27fc5df9678c712b6d0a2abe2ce412a45eb464258ce317a6e7673f1cc0c0fa01"
+    }
+  },
+  "file_sha256": {
+    "scripts/operational-postgres-local.mjs": "1972dba48ba03b6bfb782e58f81a96da89acb0694a2b5fd55daf4fe1cfdf58cf",
+    "src/server/migration/operational-export.ts": "6b8aba03d1bcdde1bdb88703d52ce93020563ea05d2c50e8a4e8f6f686d0da31",
+    "src/server/migration/operational-import.ts": "ca096a9d501cad55fc4f5c87e934052642e31e01f443b4a51bbe8e931ae9b10c",
+    "src/server/operations/production-demand.ts": "6644a672660ba0bdb260f4cce9b10db52327bb42ecbaf7eb8ecae89f64e1b33a",
+    "src/server/operations/production.ts": "6ec766e6f299e4e4dcc2f4e8a47272693ce5bb6d7f84d67f650bf54079c75a0b",
+    "src/server/operations/stock.ts": "195c67cbf0a20ec17443254e3319d578fda732e75acf2a7968924d5cce84a54b",
+    "src/server/operations/supplies.ts": "fecdd44c10772d8a0f4cb7c75d91285f135b95a08b8e683a5f5083be36ace55a",
+    "src/server/persistence/firestore-production-demand.ts": "f5a06e46b118c18daa47adb611275f29be983c128f6717dd24fe6384355dcc90",
+    "src/server/persistence/firestore-production.ts": "50223a6ac95ffe4f8786c6da1c8137c3b53cafa065a25c618d694b90bc474434",
+    "src/server/persistence/firestore-stock.ts": "32bb68a7281a7dba659b75b009e8bd870f5bc996556147cccbc407718db032c0",
+    "src/server/persistence/firestore-supplies.ts": "43f1b5da49dc310fe96e069beaeaf25a3ca0e6ecc60c6a62105ccaa23601eb52",
+    "src/server/persistence/postgres-production-demand.ts": "b7c58181d1bdd14b457f7b2a996db2ddaf5d9799dc8addaf78805a5f438ba04b",
+    "src/server/persistence/postgres-production.ts": "fe707c90f180ed854bd994f4da96c3e11ff14878abc0a50e810b3acf0f9f6ca7",
+    "src/server/persistence/postgres-stock.ts": "810aa7bb01eeb5688b35232a94f60cf0af6473cc47fb9658bc9d99b79ed9f17a",
+    "src/server/persistence/postgres-supplies.ts": "ab46c0e08fcbccf0940f565b86c0098d12d87051fee75d0c73a776e4a472c876",
+    "src/server/persistence/production-contract.ts": "8d86d9d20883c681f300222b6b37598f51806a4eff64050c3816cd1938943a35",
+    "src/server/persistence/production-demand-contract.ts": "b26b3420dbff722f79abf11420cadc4331cc5508c61e459a4b7ba978d1230ab5",
+    "src/server/persistence/production-demand.ts": "432f207399b959df53463100bc4d20b478f4139c3176113c952e5bf1e0a5ac57",
+    "src/server/persistence/production-read-pagination.ts": "e85d6386636aed800fa1ab24882d7159a4a1424de981383290e609d3f5d27d12",
+    "src/server/persistence/production-read-projection.ts": "2b5f4d0d17fff6ea760697c69e508dbf38bbac13777323c954a97c7e063450e7",
+    "src/server/persistence/production.ts": "2583c37f99e0b00810caa16a5196386aa727c8576bd4fb5cd26832f6b22389e4",
+    "src/server/persistence/stock-contract.ts": "10f4b077ad53ecb0b7c04e34ed6951a16a3d0880610d3bd37b1eee2485f40c69",
+    "src/server/persistence/stock-pagination.ts": "29f771e02a4e6cf1f48ec8ce424e7d29048341afa983084f6a5b4b39ed3a0060",
+    "src/server/persistence/stock.ts": "ae5ac4d08ab9a0746b783aabd17d93de115d6a7e2181375668abc8674730858e",
+    "src/server/persistence/stored-stock-model.ts": "3d813cb8c17beb6afdf41816e1c53386bd57226905530ba12ea4473414e7b561",
+    "src/server/persistence/supplies-contract.ts": "5078f17525c35dffe9a57c838d94663606a33f4082327232afacb07b2a506388",
+    "src/server/persistence/supplies-read-projection.ts": "bb060093bb31e2b077aa99bc30764f2d57e07e631e44129ca5061458287e08fc",
+    "src/server/persistence/supplies.ts": "e3a91e5510d65eb34aaad156259eb5ead8a63b8facd68765c0177fde0d3b96b1",
+    "supabase/operational/migrations/20260912170838_operational_read_models.sql": "cbc59da96d56f4ca9de3f6599eeba60adeec74d5b0c67ca7834d2c59cfb137bb",
+    "tests/operations/operational-export-types.test.ts": "297f713fb9d1752aa0fa83ae635058653d8dcb7ac82da4b94f05242c1a27e527",
+    "tests/operations/production-read-projection.test.ts": "fd01c0ef42a82c534d9413116e2409e800403a5ef49352f034d5ceb5fd09e693",
+    "tests/operations/stored-stock-model.test.ts": "1c44e5f4452a7fadc921ef7e866f7f33abc8bc602531006c0f0310d8a3456223",
+    "tests/postgres/operational-readers.integration.ts": "666e30f1e387468b0d9dd3d8684510978f6c5ca6d22052e9d991e8bc1b4b8df9",
+    "tests/postgres/operational.integration.ts": "0fa0e02121330bad99d1ba72645a0b3648b4c590bbe880ec9cc4d95e056fd7ac"
+  }
+}
