@@ -6,6 +6,7 @@ import type { ProductionDemand, ProductionDemandReadRepository } from './product
 import { dateRangeSchema, result } from '@/server/operations/common';
 import { readOrdersForPeriod } from '@/server/operations/sales';
 import { readStockSnapshot, readStoredStockSnapshot } from '@/server/operations/stock';
+import { countsAsConsumption } from './demand-eligibility';
 export async function readFirestoreProductionDemand(raw: SalesRange, databaseOnly = true) {
   const input = dateRangeSchema.parse(raw);
   const [orders, stock, supplies] = await Promise.all([readOrdersForPeriod(input), databaseOnly ? readStoredStockSnapshot() : readStockSnapshot(), adminDb.collection('supplies').get()]);
@@ -14,7 +15,7 @@ export async function readFirestoreProductionDemand(raw: SalesRange, databaseOnl
   const weeks = Math.max(1, (Date.parse(input.to) - Date.parse(input.from) + 86400000) / 86400000 / 7);
   const demand = new Map<string, { description: string; orders: Set<number>; quantity: number }>();
   for (const order of orders) {
-    if (!order.notaFiscal?.id) continue;
+    if (!countsAsConsumption(order)) continue;
     for (const item of order.itens ?? []) {
       if (!item.codigo || !Number.isFinite(item.quantidade) || item.quantidade <= 0) continue;
       const row = demand.get(item.codigo) ?? { description: item.descricao, orders: new Set<number>(), quantity: 0 };

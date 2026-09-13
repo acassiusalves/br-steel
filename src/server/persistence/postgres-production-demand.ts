@@ -18,6 +18,7 @@ const demandSql = `with valid_items as (
   from brsteel_ops.sales_orders o join brsteel_ops.sales_order_items i on i.order_id=o.source_id
   where not o.source_deleted and o.order_date between $1 and $2
     and coalesce(o.payload#>'{notaFiscal,id}','null'::jsonb) not in ('null'::jsonb,'false'::jsonb,'0'::jsonb,'""'::jsonb)
+    and coalesce(o.payload#>'{situacao,id}','null'::jsonb) not in ('12'::jsonb)
     and coalesce(i.payload->'codigo','null'::jsonb) not in ('null'::jsonb,'false'::jsonb,'0'::jsonb,'""'::jsonb)
     and i.quantity>0
 ), aggregated as (
