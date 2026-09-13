@@ -36,8 +36,46 @@ async function upsertOrders(orders: SourceOrder[]): Promise<IngestCounts> {
   return { count: orders.length, created, updated };
 }
 
+/** 24 meses, casando com a janela de 104 semanas do rollup de demanda. */
+const OBSERVATION_TTL_MS = 730 * 86_400_000;
+
+/**
+ * Grava o saldo observado em dois lugares com propósitos diferentes.
+ *
+ * `stockUpdates/{sku}` continua sendo a projeção "último valor" — é o que readStockSnapshot,
+ * readStoredStockSnapshot, a projeção Postgres e o MCP consomem, e seu formato não muda.
+ * `stockObservations` é o log append-only, que antes não existia: até aqui cada webhook sobrescrevia
+ * a leitura anterior e o histórico de saldo era perdido de forma irrecuperável.
+ *
+ * Só registra quando o saldo muda. Um webhook que repete o mesmo número não é observação nova, e o
+ * Bling reentrega com frequência.
+ */
 async function applyStockObservation(sku: string, observation: Record<string, unknown>) {
-  await adminDb.collection('stockUpdates').doc(documentIdSchema.parse(sku)).set(observation, { merge: true });
+  const id = documentIdSchema.parse(sku);
+  const latest = adminDb.collection('stockUpdates').doc(id);
+  try {
+    await adminDb.runTransaction(async tx => {
+      const previous = (await tx.get(latest)).data();
+      tx.set(latest, observation, { merge: true });
+      const balance = observation.estoqueAtual;
+      if (typeof balance !== 'number' || !Number.isFinite(balance)) return;
+      if (previous && previous.estoqueAtual === balance) return;
+      const observedAt = String(observation.webhookReceivedAt ?? '');
+      const at = Date.parse(observedAt);
+      if (!Number.isFinite(at)) return;
+      tx.create(adminDb.collection('stockObservations').doc(), {
+        sku: id, estoqueAtual: balance, observedAt,
+        event: String(observation.lastEvent ?? ''), source: 'webhook',
+        expiresAt: new Date(at + OBSERVATION_TTL_MS),
+      });
+    });
+  } catch (error) {
+    // O log é acessório; o último saldo não é. Uma falha ao registrar a observação não pode impedir
+    // a atualização que o webhook já confirmou ao Bling — mesmo princípio de
+    // invalidateProductStockCache().catch(() => undefined) em src/app/api/webhook/bling/route.ts.
+    console.error('[STOCK-OBSERVATION]', error);
+    await latest.set(observation, { merge: true });
+  }
 }
 
 async function markOrderDeleted(orderId: string, at: string) {
