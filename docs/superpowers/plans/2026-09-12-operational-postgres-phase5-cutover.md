@@ -78,10 +78,10 @@ export function readCoreWriteMode(): Promise<CoreWriteMode>;   // sem cache acim
 export function requireCoreWritesEnabled(): Promise<void>;      // lança MAINTENANCE 503
 ```
 
-- [ ] **Passo 1 — Teste vermelho.** Em `tests/operations/maintenance.test.ts`: com modo `blocked`, cada uma das 17 operações de escrita de insumos e produção recusa com `MAINTENANCE` 503 **antes** de tocar a persistência; a sincronização manual recusa ao iniciar; o webhook continua respondendo 200 e enfileirando; as leituras continuam funcionando normalmente. Rodar e confirmar falha.
-- [ ] **Passo 2 — Implementar.** O modo vive num registro compartilhado lido em runtime, com cache de no máximo 5 segundos. `draining` recusa novas mutações mas não interrompe as já iniciadas. A mensagem ao usuário explica manutenção em andamento, não erro.
-- [ ] **Passo 3 — Ligar nas fronteiras.** Inserir `await requireCoreWritesEnabled()` no início de cada operação de escrita, depois da autorização e antes da validação. Em `webhook-queue.ts`, o dreno verifica o modo e não processa enquanto `blocked`.
-- [ ] **Passo 4 — Verificar e commitar.** Suíte completa, typecheck, build. Commit `feat(ops): add core write maintenance switch`.
+- [x] **Passo 1 — Teste vermelho.** Em `tests/operations/maintenance.test.ts`: com modo `blocked`, cada uma das 17 operações de escrita de insumos e produção recusa com `MAINTENANCE` 503 **antes** de tocar a persistência; a sincronização manual recusa ao iniciar; o webhook continua respondendo 200 e enfileirando; as leituras continuam funcionando normalmente. Rodar e confirmar falha.
+- [x] **Passo 2 — Implementar.** O modo vive num registro compartilhado lido em runtime, com cache de no máximo 5 segundos. `draining` recusa novas mutações mas não interrompe as já iniciadas. A mensagem ao usuário explica manutenção em andamento, não erro.
+- [x] **Passo 3 — Ligar nas fronteiras.** Inserir `await requireCoreWritesEnabled()` no início de cada operação de escrita, depois da autorização e antes da validação. Em `webhook-queue.ts`, o dreno verifica o modo e não processa enquanto `blocked`.
+- [x] **Passo 4 — Verificar e commitar.** Suíte completa, typecheck, build. Commit `feat(ops): add core write maintenance switch`.
 
 ---
 
@@ -99,16 +99,54 @@ export function reconcileFromFirestore(opts: { since: string }): Promise<{ appli
 export function compareSources(): Promise<{ divergences: Divergence[]; counts: Record<string, [number, number]> }>;
 ```
 
-- [ ] **Passo 1 — Teste vermelho do comparador.** Em ambiente descartável, semear divergências deliberadas: documento presente só no Firestore; só no PostgreSQL; conteúdo diferente; exclusão lógica em um lado; contador de lotes defasado; ordem de itens alterada. O comparador precisa apontar cada uma com coleção e ID. **Um comparador que devolve zero divergências num cenário semeado é uma falha da tarefa, não um sucesso.**
-- [ ] **Passo 2 — Implementar a reconciliação.** Reaproveitar `exportOperationalSnapshot` e `importSnapshot` das etapas 2–3. A reconciliação aplica criações, atualizações e exclusões posteriores à carga anterior, de forma idempotente e versionada. Rejeitar execução se o modo não estiver `blocked`.
-- [ ] **Passo 3 — Implementar o comparador.** Comparar conteúdo normalizado, referências, contagens e agregados por período, mantendo a distinção entre campo ausente, nulo e zero. Cobrir as 13 tabelas e as dez coleções.
-- [ ] **Passo 4 — Verificar e commitar.** `npm run test:postgres`, typecheck. Commit `feat(postgres): add cutover reconciliation and comparator`.
+- [x] **Passo 1 — Teste vermelho do comparador.** Em ambiente descartável, semear divergências deliberadas: documento presente só no Firestore; só no PostgreSQL; conteúdo diferente; exclusão lógica em um lado; contador de lotes defasado; ordem de itens alterada. O comparador precisa apontar cada uma com coleção e ID. **Um comparador que devolve zero divergências num cenário semeado é uma falha da tarefa, não um sucesso.**
+- [x] **Passo 2 — Implementar a reconciliação.** Reaproveitar `exportOperationalSnapshot` e `importSnapshot` das etapas 2–3. A reconciliação aplica criações, atualizações e exclusões posteriores à carga anterior, de forma idempotente e versionada. Rejeitar execução se o modo não estiver `blocked`.
+- [x] **Passo 3 — Implementar o comparador.** Comparar conteúdo normalizado, referências, contagens e agregados por período, mantendo a distinção entre campo ausente, nulo e zero. Cobrir as 13 tabelas e as dez coleções.
+- [x] **Passo 4 — Verificar e commitar.** `npm run test:postgres`, typecheck. Commit `feat(postgres): add cutover reconciliation and comparator`.
+
+### Resultado das Tasks 1 e 2
+
+Executadas e verificadas em 13/09/2026. Vitest **274 testes em 46 arquivos**; integração PostgreSQL **42**; typecheck nos 25 preexistentes; build compilou.
+
+**Task 1 — interruptor.** `requireCoreWritesEnabled()` recusa com `MAINTENANCE` 503 em `draining` e `blocked`, depois da autorização e antes da validação: um chamador sem permissão continua sabendo que não tem permissão, em vez de descobrir uma janela de manutenção que não lhe diz respeito. O modo é cacheado por no máximo 5 s — uma janela é aberta e fechada por uma pessoa, então segundos de defasagem são aceitáveis; uma leitura por mutação não é.
+
+As 17 operações estão cobertas por dois pontos (`guard` em insumos, `write` em produção), mais as duas entradas de sincronização em `actions.ts` — `fullSyncOrders` e `getBlingOrderDetails`, que lê do Bling mas persiste, então é escritora para efeito do corte. O teste enumera as 17 e falha se alguém acrescentar uma sem cobrir; e prova que **nenhuma coleção operacional é tocada** durante a recusa, nem a consulta de identidade que precede uma escrita de produção.
+
+**Task 2 — comparador e reconciliação.** `compareSources` compara a cópia contra uma **exportação nova**, não contra a escrituração do próprio importador: os digests que ele gravou não são evidência de que os payloads ainda concordam. Linhas nativas são contadas e nunca reportadas — sem isso, divergência zero seria inalcançável depois da primeira gravação nativa, exatamente o ponto resolvido nos pré-requisitos.
+
+`reconcileFromFirestore` recusa a menos que o núcleo esteja `blocked`, e o teste prova a recusa em `open` e em `draining` **e** que a recusa não altera nada. O comparador foi validado por mutação: parar de reportar linhas que sumiram da origem quebra o teste das divergências semeadas.
+
+A CLI `npm run cutover -- <reconcile|compare|report>` imprime apenas contagens, divergências e o modo. Nunca payloads ou credenciais: o relatório circula, o conteúdo não.
+
+**Uma pendência conhecida:** numa de oito execuções da suíte completa houve uma falha que não consegui caracterizar. As sete restantes e o CI passaram. Se reaparecer, o suspeito é a concorrência do emulador Firestore.
+
+---
+
+## Task 2.5: Seletor trocável em runtime
+
+**Falha deste plano, corrigida.** As Tasks 3 e 4 mandavam "trocar o seletor", mas **nenhuma tarefa construía essa capacidade**: os oito seletores eram `export` fixos resolvidos no carregamento do módulo. Não era possível ensaiar a troca de algo que não era trocável. Esta tarefa foi acrescentada e executada em 13/09/2026.
+
+- [x] `appConfig/operationalSource` guarda `firestore` ou `postgres`, lido em runtime com cache de no máximo 5 s. Ausente ou irreconhecível significa `firestore`: a fonte muda de propósito, nunca por acidente nem por erro de digitação na configuração.
+- [x] `selectRepository` resolve a implementação **por chamada**, não no carregamento. Um repositório ligado no import congelaria a fonte pela vida da instância, e o corte precisa valer sem redeploy. Todo método de todo contrato é assíncrono, que é o que torna isso viável.
+- [x] Selecionar PostgreSQL sem conexão configurada é **indisponibilidade 503, nunca recuo silencioso** para o Firestore: durante um corte, recuar mandaria leituras — e depois gravações — para a fonte que todos acreditam aposentada.
+- [x] `operationalPoolConfig` recusa superusuário, ausência de senha, parâmetros extras na URL e TLS não verificado fora de loopback. O nome do login não é fixado, porque é escolha de quem provisiona; `postgres` é recusado explicitamente.
+- [x] Teste prova que a mesma ligação de módulo passa a responder pelo outro banco sem reimportar nada, comparando valores deliberadamente diferentes nos dois lados (999 no Firestore, 700 no PostgreSQL).
+
+Um defeito encontrado no caminho: o proxy cacheava o repositório construído e não acompanhava o descarte do pool, então continuava respondendo por uma conexão encerrada. Resolvido com contador de geração — importa em produção, não só no teste.
+
+**O seletor nasce em `firestore` e assim permanece.** Esta tarefa constrói a capacidade de trocar; trocar é a Task 4.
 
 ---
 
 ## Task 3: Ensaio completo em homologação
 
 **Requer autorização explícita do usuário.** Nenhum passo toca produção.
+
+**Bloqueado por provisionamento, não por código.** A capacidade de troca existe desde a Task 2.5. Falta o que só o controlador pode fazer:
+
+1. **Um login de escrita no Supabase hospedado.** A migration cria `brsteel_ops_writer` como `NOLOGIN`, por desenho; um login temporário precisa ser provisionado e associado a esse papel.
+2. **Uma cópia recente dos dados reais** no destino — a do piloto da etapa 3 foi encerrada junto com os acessos temporários.
+3. **As variáveis no projeto de homologação:** `BRSTEEL_OPERATIONAL_DATABASE_URL` e `BRSTEEL_OPERATIONAL_CA`.
 
 - [ ] **Passo 1 — Preparar.** Publicar o candidato em `br-steel-mcp-staging.vercel.app` (projeto `prj_YD3ATzBPFQo4bD1ZlojrDTigUZp8`), com cópia recente dos dados reais e credencial de runtime restrita a `brsteel_ops_writer`. Registrar o deployment de rollback.
 - [ ] **Passo 2 — Ensaiar o corte inteiro.** Executar, cronometrando cada fase: `draining` → esperar as chamadas em trânsito → `blocked` → confirmar dreno da fila suspenso → reconciliação final → comparação → exigir **divergência zero** → trocar o seletor → retomar a fila → `open`.

@@ -58,11 +58,18 @@ async function createLot(input: LotInput, identities: { author: WriteIdentity; a
   // Highest number already minted this year, read outside the transaction so migrated lots cannot
   // collide with the counter without enlarging the contended read set.
   const pattern = new RegExp(`^LOT-${year}-(\\d+)$`);
-  const bootstrapSeed = (await adminDb.collection('productionLots').get()).docs
-    .reduce((highest, doc) => {
-      const match = String(doc.data().lotNumber || '').match(pattern);
-      return match ? Math.max(highest, Number(match[1])) : highest;
-    }, 0);
+  const allLots = (await adminDb.collection('productionLots').get()).docs.map(doc => doc.data());
+  const bootstrapSeed = allLots.reduce((highest, lot) => {
+    const match = String(lot.lotNumber || '').match(pattern);
+    return match ? Math.max(highest, Number(match[1])) : highest;
+  }, 0);
+  // Read here rather than inside the transaction on purpose. Querying this column's lots while also
+  // creating one makes two concurrent transactions invalidate each other's read set on every attempt,
+  // which is what exhausted the retries. The cost is that two simultaneous creations can land on the
+  // same columnOrder: a display tie any reorder fixes, unlike a duplicate lot number, which is why the
+  // counter stays inside the transaction.
+  const seedOrder = allLots.reduce((highest, lot) =>
+    lot.columnId === input.columnId ? Math.max(highest, Number(lot.columnOrder || 0)) : highest, -1);
   // The annual counter is a single hot document and the bootstrap path scans every lot, so two people
   // creating a lot at the same time genuinely contend. Five attempts — the default — is thin for that:
   // the loser exhausts them and surfaces "Transaction is invalid or closed" as if it were a real error.
@@ -85,11 +92,8 @@ async function createLot(input: LotInput, identities: { author: WriteIdentity; a
     // live here too, and reading the whole collection while also writing to it made two concurrent
     // creations invalidate each other's read set on every attempt. It is computed before the
     // transaction now and folded in with Math.max, so a stale seed can never lower the sequence.
-    const existingLots = await tx.get(adminDb.collection('productionLots').where('columnId', '==', column.id));
-    let sequence = Math.max(Number(counterDoc.data()?.sequence || 0), bootstrapSeed);
-    let maxOrder = -1;
-    existingLots.docs.forEach(d => { const l = d.data(); maxOrder = Math.max(maxOrder, Number(l.columnOrder || 0)); });
-    sequence++; const lotNumber = `LOT-${year}-${String(sequence).padStart(4, '0')}`; const at = now();
+    const sequence = Math.max(Number(counterDoc.data()?.sequence || 0), bootstrapSeed) + 1;
+    const maxOrder = seedOrder; const lotNumber = `LOT-${year}-${String(sequence).padStart(4, '0')}`; const at = now();
     tx.set(counter, { sequence });
     // Touch the column so create/delete and concurrent appends serialize on its document.
     tx.update(column, { updatedAt: at });

@@ -5,6 +5,7 @@ import { getFullBlingCredentials, blingFetchWithRefresh, blingGetPaged } from '@
 import { beginBlingConnection } from '@/server/integrations/bling-oauth';
 import { requireWebContext } from '@/server/operations/context';
 import { requireOperation, documentIdSchema, dateRangeSchema } from '@/server/operations/common';
+import { requireCoreWritesEnabled } from '@/server/operations/maintenance';
 import { summarizeSales } from '@/server/operations/sales';
 import { readStockSnapshot, invalidateProductStockCache, refreshProductionSku } from '@/server/operations/stock';
 import { productionDemand } from '@/server/operations/production-demand';
@@ -577,6 +578,9 @@ export async function smartSyncOrders(from?: Date, to?: Date, options: OrderSync
 
 export async function fullSyncOrders(from?: Date, to?: Date, options: OrderSyncOptions = {}) {
     requireOperation(await requireWebContext(), 'vendas:sync');
+    // Refused at the start rather than mid-run: a sync that begins during the window would still be
+    // writing orders while the cutover reconciliation believes the writers are stopped.
+    await requireCoreWritesEnabled();
     if (from || to) civilRange(from, to);
     z.object({ includeInvoiceDetails: z.boolean().optional(), fetchInvoiceXml: z.boolean().optional() }).strict().parse(options);
     console.log('🔄 Iniciando sincronização completa...');
@@ -594,6 +598,8 @@ export async function fullSyncOrders(from?: Date, to?: Date, options: OrderSyncO
 
 export async function getBlingOrderDetails(orderId: string): Promise<any> {
     requireOperation(await requireWebContext(), 'vendas:sync');
+    // Reads from Bling but persists the enriched order, so it is a writer for the cutover's purposes.
+    await requireCoreWritesEnabled();
     z.string().regex(/^\d+$/).max(30).parse(orderId);
     if (!orderId) {
         throw new Error('O ID do pedido é obrigatório.');

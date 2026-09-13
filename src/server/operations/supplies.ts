@@ -8,6 +8,7 @@ import { validateLimits } from '@/server/persistence/supplies-write-contract';
 import { suppliesWriteRepository } from '@/server/persistence/supplies-write';
 import type { WriteActor } from '@/server/persistence/write-audit';
 import { dateSchema, documentIdSchema, pageInputSchema, requireOperation, OperationError } from './common';
+import { requireCoreWritesEnabled } from './maintenance';
 
 const finite = z.number().finite().min(0).max(1e12);
 const fields = z.object({ nome: z.string().trim().min(1).max(200), codigo: documentIdSchema.transform(v => v.trim()).refine(Boolean), gtin: z.string().max(50).default(''), unidade: z.string().trim().min(1).max(20),
@@ -39,8 +40,13 @@ export function createSuppliesReadOperations(repository: SuppliesReadRepository)
 export const { listSupplies, listMovements } = createSuppliesReadOperations(suppliesReadRepository);
 
 export function createSuppliesWriteOperations(repository: SuppliesWriteRepository) {
-  async function updateSupplyRecord(context: AccessContext, id: string, raw: unknown) {
+  /** Authorize first, then refuse during maintenance, then validate. */
+  const guard = async (context: AccessContext) => {
     requireOperation(context, 'insumos:write');
+    await requireCoreWritesEnabled();
+  };
+  async function updateSupplyRecord(context: AccessContext, id: string, raw: unknown) {
+    await guard(context);
     documentIdSchema.parse(id);
     const input = fields.partial().strict().parse(raw);
     return repository.update(id, input, writeActor(context));
@@ -48,14 +54,14 @@ export function createSuppliesWriteOperations(repository: SuppliesWriteRepositor
   return {
     updateSupplyRecord,
     async createSupply(context: AccessContext, raw: unknown) {
-      requireOperation(context, 'insumos:write');
+      await guard(context);
       const input = fields.parse(raw);
       validateLimits(input);
       return repository.create(input, writeActor(context));
     },
     /** Duplicate SKUs are an operation-level rule: persistence only resolves the identifier. */
     async updateSupplyLimits(context: AccessContext, raw: unknown) {
-      requireOperation(context, 'insumos:write');
+      await guard(context);
       const input = limitsSchema.parse(raw);
       const matches = await repository.findBySku(input.sku);
       if (!matches.length) throw notFound();
@@ -64,12 +70,12 @@ export function createSuppliesWriteOperations(repository: SuppliesWriteRepositor
       return updateSupplyRecord(context, matches[0], data);
     },
     async deleteSupplyRecord(context: AccessContext, id: string) {
-      requireOperation(context, 'insumos:write');
+      await guard(context);
       documentIdSchema.parse(id);
       return repository.remove(id, writeActor(context));
     },
     async recordMovement(context: AccessContext, raw: unknown) {
-      requireOperation(context, 'insumos:write');
+      await guard(context);
       return repository.recordMovement(movementSchema.parse(raw), writeActor(context));
     },
   };
