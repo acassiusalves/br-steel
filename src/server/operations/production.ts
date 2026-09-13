@@ -8,6 +8,7 @@ import type { ProductionWriteRepository, WriteIdentity } from '@/server/persiste
 import { productionWriteRepository } from '@/server/persistence/production-write';
 import type { WriteActor } from '@/server/persistence/write-audit';
 import { documentIdSchema, pageInputSchema, requireOperation, OperationError } from './common';
+import { requireCoreWritesEnabled } from './maintenance';
 
 const page = '/producao/kanban';
 const text = z.string().trim().min(1).max(200);
@@ -68,30 +69,34 @@ export function createProductionReadOperations(repository: ProductionReadReposit
 export const { listProduction, getProductionOrder, getProductionLot } = createProductionReadOperations(productionReadRepository);
 
 export function createProductionWriteOperations(repository: ProductionWriteRepository) {
-  const write = (ctx: AccessContext) => requireOperation(ctx, 'producao:write', page);
+  /** Authorize first, then refuse during maintenance, then validate. */
+  const write = async (ctx: AccessContext) => {
+    requireOperation(ctx, 'producao:write', page);
+    await requireCoreWritesEnabled();
+  };
   const change = async (ctx: AccessContext, id: unknown, content?: string) => {
-    write(ctx);
+    await write(ctx);
     return repository.changeComment(documentIdSchema.parse(id), content,
       { isAdmin: ctx.actor.role === 'Administrador' }, writeActor(ctx));
   };
   return {
     async createColumn(ctx: AccessContext, input: unknown) {
-      write(ctx); return repository.createColumn(columnSchema.parse(input), writeActor(ctx));
+      await write(ctx); return repository.createColumn(columnSchema.parse(input), writeActor(ctx));
     },
     async updateColumn(ctx: AccessContext, id: unknown, input: unknown) {
-      write(ctx); return repository.updateColumn(documentIdSchema.parse(id), columnSchema.partial().parse(input), writeActor(ctx));
+      await write(ctx); return repository.updateColumn(documentIdSchema.parse(id), columnSchema.partial().parse(input), writeActor(ctx));
     },
     async deleteColumn(ctx: AccessContext, id: unknown) {
-      write(ctx); return repository.deleteColumn(documentIdSchema.parse(id), writeActor(ctx));
+      await write(ctx); return repository.deleteColumn(documentIdSchema.parse(id), writeActor(ctx));
     },
     async reorderColumns(ctx: AccessContext, input: unknown) {
-      write(ctx); return repository.reorderColumns(ordersSchema.parse(input), writeActor(ctx));
+      await write(ctx); return repository.reorderColumns(ordersSchema.parse(input), writeActor(ctx));
     },
     async seedDefaultColumns(ctx: AccessContext) {
-      write(ctx); return repository.seedDefaultColumns(writeActor(ctx));
+      await write(ctx); return repository.seedDefaultColumns(writeActor(ctx));
     },
     async createLot(ctx: AccessContext, input: unknown) {
-      write(ctx);
+      await write(ctx);
       const parsed = createSchema.safeParse(input);
       if (!parsed.success) {
         if (parsed.error.issues.some(issue => issue.code === 'too_big' && issue.path[0] === 'items')) throw new OperationError('TOO_LARGE', 'O lote permite no máximo 400 itens.', 413);
@@ -106,19 +111,19 @@ export function createProductionWriteOperations(repository: ProductionWriteRepos
       }, { author, assignedTo }, writeActor(ctx));
     },
     async updateLot(ctx: AccessContext, id: unknown, input: unknown) {
-      write(ctx);
+      await write(ctx);
       const { assignedTo, ...rest } = updateSchema.parse(input);
       const resolved = assignedTo ? await resolveWriteIdentity(assignedTo.userId) : assignedTo;
       return repository.updateLot(documentIdSchema.parse(id), rest, resolved, writeActor(ctx));
     },
     async reorderLotsInColumn(ctx: AccessContext, columnId: unknown, input: unknown) {
-      write(ctx); return repository.reorderLotsInColumn(documentIdSchema.parse(columnId), ordersSchema.parse(input), writeActor(ctx));
+      await write(ctx); return repository.reorderLotsInColumn(documentIdSchema.parse(columnId), ordersSchema.parse(input), writeActor(ctx));
     },
     async deleteLot(ctx: AccessContext, id: unknown) {
-      write(ctx); return repository.deleteLot(documentIdSchema.parse(id), writeActor(ctx));
+      await write(ctx); return repository.deleteLot(documentIdSchema.parse(id), writeActor(ctx));
     },
     async createComment(ctx: AccessContext, input: unknown) {
-      write(ctx);
+      await write(ctx);
       const data = commentSchema.parse(input);
       const author = await resolveWriteIdentity(ctx.actor.userId);
       return repository.createComment({ lotId: data.lotId, content: data.content }, author, writeActor(ctx));
