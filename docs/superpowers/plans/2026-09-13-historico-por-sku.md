@@ -1116,11 +1116,16 @@ const order = (id: number, data: string, quantidade: number) =>
 const rowFor = async (from: string, to: string) =>
   (await readFirestoreProductionDemand({ from, to })).data.find(row => row.sku === 'CBA600');
 
+// Congela só o relógio, nunca os timers: este arquivo fala com o emulador por gRPC, e falsear
+// setTimeout trava o cliente. `fileParallelism: false` no vitest.config torna obrigatório restaurar
+// no afterEach, senão o relógio congelado vaza para o próximo arquivo.
 beforeEach(async () => {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(new Date('2026-09-16T12:00:00Z')); // quarta de W38
   await seedOperations();
   resetWeeklyHistoryCache();
-  vi.setSystemTime(new Date('2026-09-16T12:00:00Z')); // quarta de W38
 });
+afterEach(() => { vi.useRealTimers(); });
 
 it('attaches the closed weeks from the rollup', async () => {
   await order(301, '2026-09-01', 6); // W36
