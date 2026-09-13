@@ -2,6 +2,8 @@
 import 'server-only';
 
 import { adminDb } from '@/lib/firebase-admin';
+import { salesIngestRepository } from '@/server/persistence/sales-ingest';
+import type { SourceOrder } from '@/server/persistence/sales-ingest-contract';
 import { documentIdSchema, serialize } from '@/server/operations/common';
 
 
@@ -150,69 +152,7 @@ export async function filterNewOrders(orders: any[], options: {
  * @returns Resultado da operação
  */
 export async function saveSalesOrdersOptimized(orders: any[]): Promise<{ count: number, updated: number, created: number }> {
-    if (!orders || orders.length === 0) {
-        return { count: 0, updated: 0, created: 0 };
-    }
-
-    const ordersCollection = adminDb.collection('salesOrders');
-
-    let totalUpdated = 0;
-    let totalCreated = 0;
-
-    const orderIds = orders.map(order => String(order.id));
-    const existingIds = await getExistingOrderIds(orderIds);
-
-    // Firebase tem limite de ~500 operações por batch e ~10MB por transação
-    // Usamos lotes de 100 para ter margem de segurança com pedidos grandes
-    const BATCH_SIZE = 100;
-    const totalBatches = Math.ceil(orders.length / BATCH_SIZE);
-
-    console.log(`💾 Salvando ${orders.length} pedidos em ${totalBatches} lotes de até ${BATCH_SIZE}...`);
-
-    for (let batchIndex = 0; batchIndex < totalBatches; batchIndex++) {
-        const start = batchIndex * BATCH_SIZE;
-        const end = Math.min(start + BATCH_SIZE, orders.length);
-        const ordersBatch = orders.slice(start, end);
-
-        const batch = adminDb.batch();
-        let batchUpdated = 0;
-        let batchCreated = 0;
-
-        ordersBatch.forEach(order => {
-            const docRef = ordersCollection.doc(documentIdSchema.parse(String(order.id)));
-            const isUpdate = existingIds.has(String(order.id));
-
-            const orderWithMetadata = {
-                ...order,
-                importedAt: new Date().toISOString(),
-                lastUpdated: new Date().toISOString(),
-                isImported: true
-            };
-
-            batch.set(docRef, serialize(orderWithMetadata), { merge: true });
-
-            if (isUpdate) {
-                batchUpdated++;
-            } else {
-                batchCreated++;
-            }
-        });
-
-        await batch.commit();
-
-        totalUpdated += batchUpdated;
-        totalCreated += batchCreated;
-
-        console.log(`   📦 Lote ${batchIndex + 1}/${totalBatches}: ${ordersBatch.length} pedidos (${batchCreated} novos, ${batchUpdated} atualizados)`);
-    }
-
-    console.log(`✅ ${orders.length} pedidos processados: ${totalCreated} criados, ${totalUpdated} atualizados`);
-
-    return {
-        count: orders.length,
-        updated: totalUpdated,
-        created: totalCreated
-    };
+    return salesIngestRepository.upsertOrders(orders as SourceOrder[]);
 }
 
 /**

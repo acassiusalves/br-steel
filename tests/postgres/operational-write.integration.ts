@@ -14,6 +14,9 @@ import { createProductionWriteOperations } from '@/server/operations/production'
 import { firestoreProductionWriteRepository } from '@/server/persistence/firestore-production-write';
 import type { ProductionWriteRepository } from '@/server/persistence/production-write-contract';
 import { initializeApp, getApps } from 'firebase-admin/app';
+import { createPostgresSalesIngestRepository } from '@/server/persistence/postgres-sales-ingest';
+import { firestoreSalesIngestRepository } from '@/server/persistence/firestore-sales-ingest';
+import type { SalesIngestRepository } from '@/server/persistence/sales-ingest-contract';
 import { createPostgresProductionWriteRepository } from '@/server/persistence/postgres-production-write';
 import type { WriteIdentity } from '@/server/persistence/production-write-contract';
 import { pagePermissions } from '@/lib/permissions';
@@ -551,4 +554,86 @@ test('production lot items never carry commercial data from the order', async ()
   for (const leak of ['secret', 'Private', 'cpf', 'xml', '999', '100']) {
     assert.ok(!serialized.includes(leak), `production items leaked ${leak}: ${serialized}`);
   }
+});
+
+const ingest = createPostgresSalesIngestRepository(writerPool);
+const order = (id: number, total: number, itens: unknown[] = [{ codigo: 'A', quantidade: 1, valor: total }]) =>
+  ({ id, numero: id, data: '2026-09-01', total, contato: { id }, itens });
+
+test('SQL ingest is idempotent, preserves item order and distinguishes deleted from absent', async () => {
+  await seedReadyCopy();
+
+  const first = await ingest.upsertOrders([order(1, 100), order(2, 200)]);
+  assert.deepEqual(first, { count: 2, created: 2, updated: 0 });
+  const again = await ingest.upsertOrders([order(1, 100)]);
+  assert.deepEqual(again, { count: 1, created: 0, updated: 1 }, 'reprocessing the same order is an update, not a duplicate');
+  assert.equal((await pool.query('select count(*)::int as count from brsteel_ops.sales_orders')).rows[0].count, 2);
+
+  // The item array order is part of the contract; the projection is rebuilt, never appended to.
+  await ingest.upsertOrders([order(1, 100, [{ codigo: 'B', quantidade: 2 }, { codigo: 'C', quantidade: 3 }])]);
+  const items = (await pool.query(
+    `select position, payload->>'codigo' as codigo from brsteel_ops.sales_order_items
+     where order_id = '1' order by position`)).rows;
+  assert.deepEqual(items, [{ position: 0, codigo: 'B' }, { position: 1, codigo: 'C' }]);
+
+  await ingest.markOrderDeleted('1', '2026-09-12T00:00:00.000Z');
+  const deleted = (await pool.query(
+    `select payload->>'deleted' as deleted, payload->>'deletedAt' as at from brsteel_ops.sales_orders where source_id = '1'`)).rows[0];
+  assert.deepEqual(deleted, { deleted: 'true', at: '2026-09-12T00:00:00.000Z' });
+  // An event for an order that was never stored must not conjure a row.
+  await ingest.markOrderDeleted('999', '2026-09-12T00:00:00.000Z');
+  assert.equal((await pool.query(`select count(*)::int as count from brsteel_ops.sales_orders where source_id = '999'`)).rows[0].count, 0);
+});
+
+test('SQL stock observations rebuild the read projection instead of drifting', async () => {
+  await seedReadyCopy();
+  await ingest.applyStockObservation('B', { sku: 'B', estoqueAtual: 5, webhookReceivedAt: '2026-09-01T00:00:00Z' });
+  await ingest.applyStockObservation('A', { sku: 'A', estoqueAtual: 0, webhookReceivedAt: '2026-09-02T00:00:00Z' });
+
+  const rows = (await pool.query(
+    `select source_id, sku_order, stock_read->>'saldoVirtualTotal' as virtual, stock_read->>'saldoFisicoTotal' as physical
+     from brsteel_ops.stock_observations order by sku_order`)).rows;
+  // Inserting A after B must renumber both, not append A at the end.
+  assert.deepEqual(rows.map(row => row.source_id), ['A', 'B']);
+  assert.deepEqual(rows.map(row => row.sku_order), [0, 1]);
+  // A real zero stays zero; an unknown physical balance stays null.
+  assert.equal(rows[0].virtual, '0');
+  assert.equal(rows[0].physical, null);
+
+  await ingest.applyStockObservation('A', { estoqueAtual: 9, webhookReceivedAt: '2026-09-03T00:00:00Z' });
+  const merged = (await pool.query(
+    `select payload->>'sku' as sku, stock_read->>'saldoVirtualTotal' as virtual from brsteel_ops.stock_observations where source_id = 'A'`)).rows[0];
+  assert.deepEqual(merged, { sku: 'A', virtual: '9' }, 'a partial observation merges instead of dropping known fields');
+});
+
+async function ingestTrace(repository: SalesIngestRepository) {
+  const steps: unknown[] = [];
+  steps.push(await repository.upsertOrders([order(1, 100), order(2, 200)]));
+  steps.push(await repository.upsertOrders([order(1, 150)]));
+  steps.push(await repository.upsertOrders([]));
+  await repository.markOrderDeleted('2', '2026-09-12T00:00:00.000Z');
+  await repository.markOrderDeleted('404', '2026-09-12T00:00:00.000Z');
+  await repository.applyStockObservation('A', { sku: 'A', estoqueAtual: 0, webhookReceivedAt: '2026-09-02T00:00:00Z' });
+  return steps;
+}
+
+test('Firestore and PostgreSQL ingest adapters agree on counts and final state', async () => {
+  await seedReadyCopy();
+  const sqlSteps = await ingestTrace(ingest);
+  const sqlOrders = (await pool.query(
+    `select source_id, payload->>'total' as total, coalesce(payload->>'deleted','false') as deleted
+     from brsteel_ops.sales_orders order by source_id`)).rows;
+
+  await resetFirestore();
+  const firestoreSteps = await ingestTrace(firestoreSalesIngestRepository);
+  const { getFirestore } = await import('firebase-admin/firestore');
+  if (!getApps().length) initializeApp({ projectId: 'demo-brsteel-auth' });
+  const snapshot = await getFirestore().collection('salesOrders').orderBy('__name__').get();
+  const firestoreOrders = snapshot.docs.map(doc => ({ source_id: doc.id, total: String(doc.data().total),
+    deleted: String(doc.data().deleted ?? false) }));
+
+  assert.deepEqual(sqlSteps, firestoreSteps, 'created/updated counts must agree');
+  assert.deepEqual(sqlOrders, firestoreOrders, 'final stored state must agree');
+  assert.deepEqual(sqlSteps[0], { count: 2, created: 2, updated: 0 });
+  assert.deepEqual(sqlSteps[1], { count: 1, created: 0, updated: 1 });
 });

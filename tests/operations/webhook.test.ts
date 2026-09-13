@@ -2,6 +2,7 @@ import { beforeEach, expect, it, vi } from 'vitest';
 import { createHmac } from 'node:crypto';
 import { seedOperations } from './fixtures';
 import { adminDb } from '../helpers/firestore';
+import { WEBHOOK_EVENTS } from '@/server/ingest/webhook-queue';
 const provider = vi.hoisted(() => ({ fetch: vi.fn(), pages: vi.fn() }));
 vi.mock('@/server/integrations/bling', () => ({ blingFetchWithRefresh: provider.fetch, blingGetPaged: provider.pages }));
 import { POST, GET } from '@/app/api/webhook/bling/route';
@@ -28,4 +29,34 @@ it('preserves signed total zero, and never substitutes a deposit balance for an 
   expect((await adminDb.collection('stockUpdates').doc('ZERO').get()).data()?.estoqueAtual).toBe(0);
   await POST(request('estoque.updated', { produto: { id: 20 }, deposito: { saldoVirtual: 100 } }));
   expect((await adminDb.collection('stockUpdates').doc('ZERO').get()).data()?.estoqueAtual).toBe(0);
+});
+
+it('persists the delivery before processing it and keeps a failure retryable', async () => {
+  expect((await POST(request('pedido_venda.deleted', { id: 1 }))).status).toBe(200);
+  const queued = (await adminDb.collection(WEBHOOK_EVENTS).get()).docs;
+  expect(queued).toHaveLength(1);
+  expect(queued[0].data()).toMatchObject({ topic: 'order', status: 'processed' });
+
+  // An order the Bling API cannot return must not vanish: it stays queued as failed.
+  provider.fetch.mockResolvedValue(null);
+  const response = await POST(request('pedido_venda.updated', { id: 77 }));
+  expect(response.status).toBe(200);
+  const failed = (await adminDb.collection(WEBHOOK_EVENTS).where('status', '==', 'failed').get()).docs;
+  expect(failed).toHaveLength(1);
+  expect(failed[0].data().payload).toMatchObject({ data: { id: 77 } });
+});
+
+it('ignores a repeated delivery instead of processing it twice', async () => {
+  await POST(request('pedido_venda.deleted', { id: 1 }));
+  await adminDb.collection('salesOrders').doc('1').set({ deleted: false }, { merge: true });
+  const repeated = await POST(request('pedido_venda.deleted', { id: 1 }));
+  expect((await repeated.json()).message).toContain('repetida');
+  // The second delivery did nothing, so the field we flipped by hand is untouched.
+  expect((await adminDb.collection('salesOrders').doc('1').get()).data()?.deleted).toBe(false);
+  expect((await adminDb.collection(WEBHOOK_EVENTS).get()).size).toBe(1);
+});
+
+it('does not queue anything when the signature fails', async () => {
+  expect((await POST(request('pedido_venda.deleted', { id: 1 }, false))).status).toBe(401);
+  expect((await adminDb.collection(WEBHOOK_EVENTS).get()).size).toBe(0);
 });

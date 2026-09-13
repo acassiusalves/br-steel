@@ -6,6 +6,7 @@ import { z } from 'zod';
 import { documentIdSchema } from '@/server/operations/common';
 import { blingFetchWithRefresh as blingFetch } from '@/server/integrations/bling';
 import { saveSalesOrders } from '@/services/order-service';
+import { enqueueWebhookEvent, markWebhookEvent, webhookEventId } from '@/server/ingest/webhook-queue';
 import { invalidateProductStockCache } from '@/server/operations/stock';
 import { enrichOrderWithInvoice } from '@/services/bling-invoice-service';
 
@@ -298,6 +299,7 @@ async function handleOrderDeleted(orderId: number): Promise<void> {
 // POST - Receive webhook events from Bling
 export async function POST(request: Request) {
   const startTime = Date.now();
+  let queuedEventId: string | null = null;
 
   try {
     const secret = process.env.BLING_WEBHOOK_SECRET;
@@ -326,6 +328,19 @@ export async function POST(request: Request) {
     }
 
     const { event, data } = z.object({ event: z.string().min(1).max(100), data: z.record(z.unknown()) }).parse(payload);
+
+    // Durable first: the delivery is on disk before any Bling call, enrichment or write runs, so a crash
+    // mid-processing leaves a retryable event instead of a silently lost order. Processing stays inline
+    // to preserve today's latency and response bodies; scheduling the retry drain belongs to the cutover,
+    // where the maintenance switch can suspend it.
+    const topic = isOrderEvent(event) ? 'order' : isStockEvent(event) ? 'stock' : 'other';
+    const eventId = webhookEventId(topic, rawBody);
+    queuedEventId = eventId;
+    const { created } = await enqueueWebhookEvent({ topic, id: eventId, payload, receivedAt: new Date().toISOString() });
+    if (!created) {
+      return NextResponse.json({ success: true, message: 'Entrega repetida ignorada.', event,
+        processedIn: `${Date.now() - startTime}ms` });
+    }
     await logWebhookDebug({ source: 'bling-webhook', event, hasSignature: true });
     console.log(`📋 [WEBHOOK] Evento: ${event}`);
     console.log(`📋 [WEBHOOK] Dados: ${JSON.stringify(data).substring(0, 200)}...`);
@@ -350,6 +365,7 @@ export async function POST(request: Request) {
       if (action === 'deleted') {
         await handleOrderDeleted(orderId);
         await updateWebhookStatus(orderId, event);
+        await markWebhookEvent(eventId, 'processed');
 
         return NextResponse.json({
           success: true,
@@ -363,7 +379,8 @@ export async function POST(request: Request) {
       let orderDetails = await fetchOrderDetails(orderId);
 
       if (!orderDetails) {
-        console.warn(`⚠️ [WEBHOOK] Pedido ${orderId} não encontrado na API`);
+        await markWebhookEvent(eventId, 'failed', 'Pedido não encontrado na API do Bling.');
+      console.warn(`⚠️ [WEBHOOK] Pedido ${orderId} não encontrado na API`);
         return NextResponse.json({
           success: false,
           message: 'Pedido não encontrado na API',
@@ -410,6 +427,7 @@ export async function POST(request: Request) {
       // Invalida o cache de estoque para garantir dados atualizados na próxima requisição
       invalidateProductStockCache();
 
+      await markWebhookEvent(eventId, 'processed');
       console.log(`✅ [WEBHOOK] Pedido ${orderDetails.numero || orderId} salvo com sucesso`);
       console.log(`⏱️ [WEBHOOK] Processado em ${Date.now() - startTime}ms`);
 
@@ -428,6 +446,7 @@ export async function POST(request: Request) {
 
       const result = await handleStockWebhook(payload, event);
 
+      await markWebhookEvent(eventId, 'processed');
       console.log(`✅ [WEBHOOK] Estoque processado: ${result.processed} item(s)`);
       console.log(`⏱️ [WEBHOOK] Processado em ${Date.now() - startTime}ms`);
 
@@ -441,6 +460,7 @@ export async function POST(request: Request) {
     }
 
     // Event not supported
+    await markWebhookEvent(eventId, 'ignored');
     console.log(`ℹ️ [WEBHOOK] Evento ${event} não suportado, ignorando`);
     return NextResponse.json({
       success: true,
@@ -450,6 +470,8 @@ export async function POST(request: Request) {
     });
 
   } catch (error: any) {
+    // The event stays queued as failed, so a later drain can retry it. Never depend on Bling redelivering.
+    if (queuedEventId) await markWebhookEvent(queuedEventId, 'failed', String(error?.message ?? 'Falha ao processar evento.')).catch(() => undefined);
     console.error('═══════════════════════════════════════════════════════════');
     console.error('❌ [WEBHOOK] ERRO AO PROCESSAR EVENTO');
     console.error(`❌ [WEBHOOK] Mensagem: ${error.message}`);
