@@ -852,6 +852,14 @@ per week. Closed weeks only; the current week stays live."
 
 ---
 
+> **Nota pós-execução (Task 4).** A revisão encontrou dois defeitos na implementação de referência
+> acima e eles foram corrigidos no código: fechar a semana passou a ser autoritativo (um SKU que
+> deixou de ter demanda tem seu bucket removido, não congelado) e os batches passaram a ser
+> divididos em blocos de 450 por causa do limite de 500 do Firestore, com exclusão do documento
+> quando o mapa `weeks` esvazia. O código em `src/server/persistence/firestore-sku-weekly-demand.ts`
+> é a fonte de verdade; as assinaturas exportadas não mudaram, então as tarefas seguintes valem
+> como escritas.
+
 ### Task 5: Cron do rollup
 
 **Files:**

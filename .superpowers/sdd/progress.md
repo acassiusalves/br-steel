@@ -31,3 +31,23 @@ Task 1: complete (commits b0ca914..c3121b3, review clean após 1 rodada de corre
   Minor para o review final triar:
    - isoWeekRange valida semana 1..53 genericamente, não por ano: isoWeekRange('2025-W53') não
      lança, embora 2025 tenha 52 semanas. Só morde em corrupção externa; nenhum consumidor hoje.
+
+Task 3: complete (commits 7ca3860..1b2b16e, review clean após 2 rodadas de correção)
+  R1: `12` duplicado entre constante TS e literal SQL → SQL passou a derivar da constante.
+  R2: o teste de guarda era tautológico (provado: Set{12,99} + SQL hardcoded continuava verde)
+      → teste agora lê o `demandSql` real que o client.query executa.
+  Minors para o review final triar:
+   - regex do teste acoplada à forma textual da cláusula; reformatação inócua exigiria atualizar
+   - match sem flag global: só a 1ª ocorrência do padrão seria checada (hoje existe exatamente 1)
+
+Task 4: complete (commits 1b2b16e..a238d29, review clean após 1 rodada de correção)
+  R1 achou 2 defeitos reais na implementação de referência do plano, reproduzidos no emulador:
+   - CRÍTICO: SKU com pedidos cancelados depois mantinha o bucket antigo para sempre. Fechar a
+     semana agora é autoritativo: pruneBefore virou closeWeek e remove weeks[w] de quem saiu.
+   - IMPORTANTE: batches sem chunking (limite 500 do Firestore, que o emulador não aplica) e docs
+     esvaziados nunca apagados. Agora BATCH_CHUNK_SIZE=450 e doc sem semanas é deletado.
+  Interfaces públicas não mudaram — briefs das Tasks 5-10 seguem válidos.
+  Minors para o review final triar:
+   - lastClosedWeek por documento é metadado morto (ninguém lê)
+   - sem lock entre invocações concorrentes de rollUpWeek para a mesma semana (hoje inalcançável)
+   - readWeeklyHistory(0) devolveria a série inteira (slice(-0)); callers validam min(1)
