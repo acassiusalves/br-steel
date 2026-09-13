@@ -33,6 +33,39 @@ node --import tsx scripts/operational-import.ts verify-local /absolute/snapshot.
 
 A URL da CLI local deve apontar explicitamente para `127.0.0.1` ou `::1`, ter porta e usar o banco `brsteel_ops_local`, sem parâmetros extras. Essa CLI continua exclusiva do emulador/banco local. O arquivo exportado nasce com permissão `0600` e não substitui arquivo existente. A entrada de importação é limitada a 128 MiB; erros da CLI não imprimem documentos nem detalhes de conexão.
 
+## Esta cadeia é aplicada à mão
+
+**O registro de migrations do Supabase não é fonte de verdade para estes arquivos.** Eles são aplicados pelo SQL Editor do painel, e o painel não escreve em `supabase_migrations.schema_migrations` — só o CLI escreve. Conferido em 13/09/2026 no projeto `mlumbvxpaqfzpdjnvzxc`:
+
+- O registro tem seis entradas; **duas migrations aplicadas não constam** (`operational_writer_role` e `operational_native_run`), embora seus objetos existam.
+- As versões registradas **não coincidem** com os nomes dos arquivos: `operational_core` aparece como `20260912174636`, mas o arquivo é `20260912154522_operational_core.sql`. A divergência é anterior a essas duas.
+
+Consequências:
+
+- **Não rodar `supabase db push` nem `supabase db diff` contra esta cadeia.** O push acharia migrations pendentes e reaplicar `operational_writer_role` falha, porque o schema já existe.
+- **Não tentar reconciliar o registro por número de versão.** Ele já divergiu; alinhar agora consolidaria uma correspondência inventada.
+- Registrar entradas no livro-caixa à mão resolveria o sintoma e esconderia o fato. O fato é que a cadeia é manual, e este documento é onde isso fica dito.
+
+A cadeia fica fora de `supabase/migrations` de propósito: aquela pertence ao provedor de identidade OAuth, e as operacionais não devem ser aplicadas junto com ela.
+
+### Como saber o que está aplicado
+
+Pelos objetos, não pelo registro. Cada consulta devolve o valor esperado quando a migration correspondente está aplicada:
+
+| Migration | Consulta | Esperado |
+| --- | --- | ---: |
+| `operational_core` | `select count(*) from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='brsteel_ops' and c.relkind='r'` | 11 |
+| `operational_read_models` | `select count(*) from information_schema.columns where table_schema='brsteel_ops' and table_name='stock_observations' and column_name in ('stock_read','observed_at_ms','sku_order')` | 3 |
+| `operational_pilot_roles` | `select count(*) from pg_roles where rolname in ('brsteel_pilot_reader','brsteel_pilot_importer')` | 2 |
+| `operational_copy_metadata` | `select count(*) from pg_constraint where conname='ready_copy_metadata'` | 1 |
+| `operational_backup_role` | `select count(*) from pg_roles where rolname='brsteel_ops_backup'` | 1 |
+| `operational_writer_role` | `select count(*) from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='brsteel_write' and c.relkind='r'` | 2 |
+| `operational_native_run` | `select count(*) from brsteel_import.runs where id = repeat('0', 64)` | 1 |
+
+Em 13/09/2026 as sete devolviam o valor esperado: a cadeia está inteira no destino.
+
+Ao acrescentar uma migration nova, acrescente também a linha correspondente nesta tabela. Uma verificação que não cobre o arquivo novo não é verificação.
+
 ## Provisionamento do ensaio do corte
 
 O [roteiro de provisionamento](cutover-rehearsal.md) lista, passo a passo, o que precisa ser provisionado antes do ensaio da etapa 5: as duas migrations posteriores ao piloto, o login temporário de runtime, a cópia nova dos dados reais e as variáveis de homologação. O código do corte já existe e está testado; o que falta é credencial.
