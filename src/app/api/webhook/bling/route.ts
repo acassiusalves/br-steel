@@ -272,7 +272,7 @@ async function handleStockWebhook(payload: any, event: string): Promise<{ proces
   });
 
   // Invalidar cache de estoque
-  invalidateProductStockCache();
+  await invalidateProductStockCache();
 
   return { processed: 1 };
 }
@@ -425,7 +425,7 @@ export async function POST(request: Request) {
       await updateWebhookStatus(orderId, event);
 
       // Invalida o cache de estoque para garantir dados atualizados na próxima requisição
-      invalidateProductStockCache();
+      await invalidateProductStockCache();
 
       await markWebhookEvent(eventId, 'processed');
       console.log(`✅ [WEBHOOK] Pedido ${orderDetails.numero || orderId} salvo com sucesso`);

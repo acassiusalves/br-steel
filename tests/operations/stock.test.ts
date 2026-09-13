@@ -6,7 +6,7 @@ vi.mock('@/server/integrations/bling', () => provider);
 import { listProductStock, invalidateProductStockCache } from '@/server/operations/stock';
 import { productionDemand } from '@/server/operations/production-demand';
 const mcpContext = (role = 'Administrador') => { const ctx = context(role); return { ...ctx, actor: { ...ctx.actor, source: 'mcp' as const, clientId: 'claude-test' } }; };
-beforeEach(async () => { await seedOperations(); invalidateProductStockCache(); provider.blingGetPaged.mockReset(); provider.blingGetPaged.mockResolvedValue([{ id: 20, codigo: 'ZERO', nome: 'Chapa', estoque: { saldoVirtualTotal: 0, saldoVirtual: 9, saldoFisicoTotal: 0, saldoFisico: 7 } }]); });
+beforeEach(async () => { await seedOperations(); await invalidateProductStockCache(); provider.blingGetPaged.mockReset(); provider.blingGetPaged.mockResolvedValue([{ id: 20, codigo: 'ZERO', nome: 'Chapa', estoque: { saldoVirtualTotal: 0, saldoVirtual: 9, saldoFisicoTotal: 0, saldoFisico: 7 } }]); });
 it('preserves a real zero and the observation time when serving cached data', async () => {
   const first = await listProductStock(context(), {});
   expect(first.data[0].saldoVirtualTotal).toBe(0); expect(first.data[0].saldoFisicoTotal).toBe(0);
@@ -27,7 +27,7 @@ it('returns explicit unavailability instead of fake balances, while retaining re
 it('rejects simulated input and unknown balances are never zero', async () => {
   provider.blingGetPaged.mockResolvedValue([{ id: 20, codigo: 'ZERO', isSimulated: true, estoque: { saldoVirtualTotal: 100 } }]);
   expect((await listProductStock(context(), {})).data).toHaveLength(0);
-  invalidateProductStockCache(); provider.blingGetPaged.mockResolvedValue([{ id: 20, codigo: 'ZERO', nome: 'Chapa' }]);
+  await invalidateProductStockCache(); provider.blingGetPaged.mockResolvedValue([{ id: 20, codigo: 'ZERO', nome: 'Chapa' }]);
   expect((await listProductStock(context(), {})).data[0].saldoVirtualTotal).toBeNull();
 });
 it('allows an operational demand projection without granting access to sales documents', async () => {

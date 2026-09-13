@@ -304,11 +304,28 @@ O cache atual de estoque é uma variável de módulo em `src/server/operations/s
 1. **Não é segmentado por identidade, permissões ou filtros** — é uma lista única de produtos compartilhada entre todos os chamadores.
 2. **É local ao processo.** Sob Fluid Compute a aplicação roda em várias instâncias; invalidar numa não invalida as outras. Uma gravação pode ser seguida de uma leitura obsoleta em outra instância por até 300 segundos.
 
-- [ ] **Passo 1 — Teste vermelho.** Em `tests/operations/cache-invalidation.test.ts`: uma leitura logo após uma gravação bem-sucedida reflete a mudança; uma gravação que falha **não** invalida o cache; uma entrada de cache nunca serve de base para uma gravação, isto é, nenhum caminho de escrita lê `cached`; com o banco indisponível a leitura devolve `source: 'unavailable'` e não uma lista vazia.
-- [ ] **Passo 2 — Segmentar.** Passar a chavear o cache por identidade efetiva e pelos filtros da consulta, preservando a data de observação (`asOf`) por entrada. Uma entrada não pode ser servida a um chamador com permissões diferentes das de quem a preencheu.
-- [ ] **Passo 3 — Invalidação entre instâncias.** Substituir a invalidação local por uma marca de versão compartilhada, lida junto com a entrada: uma gravação incrementa a versão do domínio e toda entrada mais antiga que a versão vigente é descartada na leitura. **Não** confiar em `invalidateProductStockCache()` isolado: ele só limpa a instância que executou a gravação.
-- [ ] **Passo 4 — Indisponibilidade.** Confirmar que, em erro de banco, todas as leituras do núcleo devolvem indisponibilidade explícita. Em particular, o MCP não pode cair silenciosamente para o Bling nem devolver lista vazia.
-- [ ] **Passo 5 — Verificar e commitar.** Suíte vitest sob emulador, `npm run test:postgres`, typecheck. Commit `fix(cache): scope and invalidate core read cache across instances`.
+- [x] **Passo 1 — Teste vermelho.** Em `tests/operations/cache-invalidation.test.ts`: uma leitura logo após uma gravação bem-sucedida reflete a mudança; uma gravação que falha **não** invalida o cache; uma entrada de cache nunca serve de base para uma gravação, isto é, nenhum caminho de escrita lê `cached`; com o banco indisponível a leitura devolve `source: 'unavailable'` e não uma lista vazia.
+- [x] **Passo 2 — Segmentar.** Passar a chavear o cache por identidade efetiva e pelos filtros da consulta, preservando a data de observação (`asOf`) por entrada. Uma entrada não pode ser servida a um chamador com permissões diferentes das de quem a preencheu.
+- [x] **Passo 3 — Invalidação entre instâncias.** Substituir a invalidação local por uma marca de versão compartilhada, lida junto com a entrada: uma gravação incrementa a versão do domínio e toda entrada mais antiga que a versão vigente é descartada na leitura. **Não** confiar em `invalidateProductStockCache()` isolado: ele só limpa a instância que executou a gravação.
+- [x] **Passo 4 — Indisponibilidade.** Confirmar que, em erro de banco, todas as leituras do núcleo devolvem indisponibilidade explícita. Em particular, o MCP não pode cair silenciosamente para o Bling nem devolver lista vazia.
+- [x] **Passo 5 — Verificar e commitar.** Suíte vitest sob emulador, `npm run test:postgres`, typecheck. Commit `fix(cache): scope and invalidate core read cache across instances`.
+
+---
+
+### Resultado da Task 5
+
+Executada e verificada em 12/09/2026. Vitest passou com **264 testes em 44 arquivos**; integração PostgreSQL manteve **39**; typecheck manteve os **25** diagnósticos preexistentes.
+
+**A segmentação por identidade foi recusada, e o plano estava errado ao pedi-la.** Eu tinha escrito que o cache "não é segmentado por identidade, permissões ou filtros" e tratei isso como violação. Relendo o código: o cache guarda **a lista de produtos do Bling**, idêntica para qualquer chamador; a autorização (`estoque:read`) é verificada antes de ele ser consultado; e as observações por SKU com que ele é combinado são lidas frescas a cada chamada. Não existe visão por usuário para vazar. Chavear por identidade multiplicaria memória e derrubaria a taxa de acerto sem impedir divulgação nenhuma — seria cerimônia. A razão está escrita no arquivo, para que a próxima leitura não reabra a questão.
+
+**O problema real era o outro: invalidação entre instâncias.** `invalidateProductStockCache()` limpava uma variável de módulo. Sob Fluid Compute a aplicação roda em várias instâncias, então a limpeza só alcançava quem fez a gravação: qualquer outra instância continuava servindo a lista antiga por até 300 segundos. A invalidação passou a publicar uma marca compartilhada em `appConfig/stockCacheVersion`, e cada entrada de cache registra a versão de que nasceu, sendo descartada quando a compartilhada avança. A função virou assíncrona; os cinco pontos de chamada passaram a aguardá-la.
+
+O teste decisivo simula exatamente o cenário: um processo popula o cache, **outra instância** incrementa a marca compartilhada, e a leitura seguinte precisa buscar de novo. Falhava com uma chamada ao provedor em vez de duas.
+
+**Duas guardas de regressão que já passavam** e agora estão travadas: nenhum caminho de escrita consulta o cache do provedor — uma gravação de saldo deriva do registro persistido, nunca de uma foto em cache; e uma falha do provedor sem observações devolve `source: 'unavailable'` com aviso, não uma lista vazia bem-sucedida.
+
+**Um teste instável, preexistente, observado uma vez.** `production.test.ts > derives author and item business fields and allocates distinct concurrent numbers` falhou uma vez em três execuções da suíte cheia, levando 9,4 s contra o limite padrão de 5 s; passou 3/3 isolado e 264/264 nas duas execuções seguintes. A causa é contenção real entre duas criações concorrentes no documento contador, com repetição da transação pelo emulador sob carga — não uma regressão desta etapa. Recebeu limite explícito de 30 s, com o motivo no próprio teste. A contenção é esperada; o estouro de limite é que não era.
+
 
 ---
 

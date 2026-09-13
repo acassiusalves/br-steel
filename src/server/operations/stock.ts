@@ -1,5 +1,6 @@
 import 'server-only';
 import { z } from 'zod';
+import { FieldValue } from 'firebase-admin/firestore';
 import { adminDb } from '@/lib/firebase-admin';
 import { blingGetPaged, blingFetchWithRefresh } from '@/server/integrations/bling';
 import type { ProductStock } from '@/types/product-stock';
@@ -7,9 +8,32 @@ import type { AccessContext } from '@/server/access/types';
 import { stockReadRepository } from '@/server/persistence/stock';
 import type { StockReadRepository } from '@/server/persistence/stock-contract';
 import { documentIdSchema, pageInputSchema, requireOperation, result, OperationError } from './common';
-let cached: { data: ProductStock[]; asOf: string; expiresAt: number } | null = null;
+let cached: { data: ProductStock[]; asOf: string; expiresAt: number; version: number } | null = null;
 let loading: Promise<void> | null = null;
-export function invalidateProductStockCache() { cached = null; }
+
+/**
+ * The provider snapshot is cached per process. Under Fluid Compute the application runs on several
+ * instances, so clearing the local copy only reaches the instance that did the write: every other one
+ * would keep serving a stale snapshot for the rest of its 300s window. A shared marker is what actually
+ * crosses instances — each cached entry records the version it was built from and is discarded when the
+ * shared value moves on.
+ *
+ * The cache is deliberately NOT segmented by identity. It holds provider data that is identical for
+ * every caller, authorization is checked before it is ever consulted, and the per-SKU observations it is
+ * merged with are read fresh on each call. Keying it per user would multiply memory and cut the hit rate
+ * without preventing any disclosure.
+ */
+const stockCacheVersionRef = () => adminDb.collection('appConfig').doc('stockCacheVersion');
+
+async function readSharedCacheVersion() {
+  return Number((await stockCacheVersionRef().get()).data()?.version ?? 0);
+}
+
+export async function invalidateProductStockCache() {
+  cached = null;
+  await stockCacheVersionRef().set(
+    { version: FieldValue.increment(1), updatedAt: new Date().toISOString() }, { merge: true });
+}
 const number = (value: unknown): number | null => typeof value === 'number' && Number.isFinite(value) ? value : null;
 function normalize(item: any, asOf: string): ProductStock | null {
   if (item?.isSimulated || item?.source === 'simulated' || !item?.codigo) return null;
@@ -33,6 +57,8 @@ export function createStoredStockOperations(repository: StockReadRepository) {
 const storedOperations = createStoredStockOperations(stockReadRepository);
 /** Live ERP/cache source for the web application; MCP uses readStoredStockSnapshot. */
 export async function readStockSnapshot() {
+  const version = await readSharedCacheVersion();
+  if (cached && cached.version !== version) cached = null;
   let failed = false, fromCache = Boolean(cached && cached.expiresAt > Date.now());
   if (!fromCache) {
     try {
@@ -41,7 +67,7 @@ export async function readStockSnapshot() {
         if (!Array.isArray(raw)) throw new Error('Invalid provider data');
         const asOf = new Date().toISOString(); const data = raw.map(item => normalize(item, asOf)).filter((item): item is ProductStock => item !== null);
         if (raw.length && !data.length) throw new Error('Simulated provider data rejected');
-        cached = { data, asOf, expiresAt: Date.now() + 300000 };
+        cached = { data, asOf, expiresAt: Date.now() + 300000, version };
       })();
       await loading;
     } catch { failed = true; } finally { loading = null; }
@@ -82,6 +108,6 @@ export async function refreshProductionSku(context: AccessContext, sku: string) 
   const detail = await blingFetchWithRefresh(`https://api.bling.com.br/Api/v3/produtos/${encodeURIComponent(String(product.id))}`);
   const normalized = normalize(detail?.data, new Date().toISOString());
   if (!normalized || normalized.produto.codigo !== sku) throw new OperationError('UNAVAILABLE', 'Saldo indisponível.', 503);
-  invalidateProductStockCache();
+  await invalidateProductStockCache();
   return result({ stockLevel: normalized.saldoVirtualTotal, stockMin: normalized.stockMin, stockMax: normalized.stockMax }, 'bling');
 }
