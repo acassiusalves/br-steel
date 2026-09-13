@@ -1,4 +1,4 @@
-import { beforeEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { seedOperations } from './fixtures';
 import { adminDb } from '../helpers/firestore';
 import { GET as rollup } from '@/app/api/cron/sku-weekly-rollup/route';
@@ -9,6 +9,12 @@ const call = (auth?: string) =>
   rollup(new Request('http://localhost/api/cron/sku-weekly-rollup', { headers: auth ? { authorization: auth } : {} }));
 
 beforeEach(async () => {
+  // Congela só o relógio (Date), não os timers: este teste bate no emulador do Firestore por gRPC, e
+  // fakear setTimeout/setInterval junto travaria o cliente. 2026-09-16T12:00:00Z é quarta de W38, a
+  // mesma data de referência usada em tests/operations/sku-weekly-demand.test.ts, então W37 vira uma
+  // semana fechada que o rollup pode legitimamente processar.
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(new Date('2026-09-16T12:00:00Z'));
   await seedOperations();
   resetCoreWriteModeCache();
   vi.stubEnv('CRON_SECRET', cronSecret);
@@ -17,6 +23,12 @@ beforeEach(async () => {
     notaFiscal: { id: 901 }, situacao: { id: 9, nome: 'Atendido', valor: 1 },
     itens: [{ id: 2010, codigo: 'CBA600', descricao: 'Cuba', quantidade: 4, valor: 50, unidade: 'UN' }],
   });
+});
+
+afterEach(() => {
+  // Sem isto o relógio congelado vazaria para o próximo arquivo: vitest.config.ts roda com
+  // fileParallelism: false, então um relógio fake esquecido aqui envenenaria o que rodar depois.
+  vi.useRealTimers();
 });
 
 it('refuses an unauthenticated or unconfigured run before touching the rollup', async () => {
