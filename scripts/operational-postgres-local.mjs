@@ -22,9 +22,16 @@ rm /measure/password
 printf '\\nhost all all all scram-sha-256\\n' >> /measure/data/pg_hba.conf
 exec gosu postgres postgres -D /measure/data -k /tmp -c listen_addresses='*' -c shared_buffers=32MB -c max_connections=20`;
 let created = false;
+function dockerDetail(result) {
+  // The run command carries POSTGRES_PASSWORD; redact before surfacing anything at all.
+  return `${result.stdout ?? ''}${result.stderr ?? ''}`.replaceAll(password,'[redacted]')
+    .trim().split('\n').filter(Boolean).slice(-3).join(' | ');
+}
 function docker(args) {
   const r = spawnSync('docker',args,{ encoding:'utf8' });
-  if (r.status!==0) throw new Error(`Docker operation failed (${args[0]})`);
+  // Swallowing the cause makes a transient registry hiccup indistinguishable from a broken schema,
+  // which trains people to re-run instead of reading.
+  if (r.status!==0) throw new Error(`Docker operation failed (${args[0]}): ${dockerDetail(r) || 'sem detalhe'}`);
   return r.stdout;
 }
 await new Promise((resolve,reject) => {
@@ -32,6 +39,14 @@ await new Promise((resolve,reject) => {
   server.listen(port,'127.0.0.1',() => server.close(resolve));
 });
 try {
+  // The registry is a third party. A pull that fails once must not read as a failing test suite.
+  for (let attempt=1;;attempt++) {
+    const pull = spawnSync('docker',['pull',image],{ encoding:'utf8' });
+    if (pull.status===0) break;
+    if (attempt>=3) throw new Error(`Docker image pull failed after ${attempt} attempts: ${dockerDetail(pull) || 'sem detalhe'}`);
+    console.log(`Falha ao puxar a imagem (tentativa ${attempt}); repetindo...`);
+    await new Promise(resolve => setTimeout(resolve,attempt*3000));
+  }
   docker(['run','--detach','--name',name,'--label','brsteel.purpose=operational-integration',
     '--memory','512m','--memory-swap','512m','--cpus','1','--publish',`127.0.0.1:${port}:5432`,
     '--env',`POSTGRES_PASSWORD=${password}`,'--volume','/measure','--entrypoint','bash',image,'-ec',bootstrap]);
