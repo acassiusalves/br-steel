@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# A superseded run on the same ref is wasted compute.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Typecheck e testes
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      # The Firestore emulator the suite runs against is a Java process.
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - run: npm ci
+
+      # Compares against .github/typecheck-baseline.txt: the project carries 25 pre-existing
+      # diagnostics, so a plain `tsc --noEmit` would fail every pull request.
+      - name: Typecheck
+        run: node scripts/ci/typecheck-baseline.mjs
+
+      # tests/setup.ts pins Firebase to the emulator and mocks credentials, so no real project
+      # is reachable from here. tests/postgres/*.integration.ts is not vitest and needs Docker;
+      # it runs separately via `npm run test:postgres`.
+      - name: Testes
+        run: >
+          npx --yes firebase-tools@14.11.1 emulators:exec
+          --only firestore --project demo-brsteel-auth --config firebase.test.json
+          'npx --no-install vitest run tests/access tests/oauth tests/mcp tests/operations tests/backup tests/deployment'
