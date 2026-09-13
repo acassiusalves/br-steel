@@ -2,7 +2,7 @@ import 'server-only';
 import { FieldValue } from 'firebase-admin/firestore';
 import { adminDb } from '@/lib/firebase-admin';
 import type { SaleOrder } from '@/types/sale-order';
-import { HISTORY_WEEKS, closedWeeksSince, isoWeekOf, isoWeekRange } from '@/lib/iso-week';
+import { closedWeeksSince, isoWeekRange } from '@/lib/iso-week';
 import { countsAsConsumption } from './demand-eligibility';
 import type { HistoryPoint } from './production-demand-contract';
 
@@ -14,11 +14,35 @@ export type WeekBucket = { units: number; orders: number };
 const checkpointRef = () => adminDb.collection('appConfig').doc(ROLLUP_CHECKPOINT);
 
 /**
+ * Firestore recusa um batch com mais de 500 operações. O teto aqui fica com folga abaixo disso: tanto
+ * o batch de escrita (um SKU vendido na semana por operação) quanto o de fechamento (um documento da
+ * coleção inteira por operação) crescem com o catálogo, sem limite superior conhecido no código — e o
+ * emulador local não recusa um batch grande demais, só a produção recusaria.
+ */
+const BATCH_CHUNK_SIZE = 450;
+
+/** Aplica `apply` a cada item de `items` em lotes de até `BATCH_CHUNK_SIZE`, um commit por lote. */
+async function commitInChunks<T>(
+  items: readonly T[],
+  apply: (batch: FirebaseFirestore.WriteBatch, item: T) => void,
+): Promise<void> {
+  for (let start = 0; start < items.length; start += BATCH_CHUNK_SIZE) {
+    const batch = adminDb.batch();
+    for (const item of items.slice(start, start + BATCH_CHUNK_SIZE)) apply(batch, item);
+    await batch.commit();
+  }
+}
+
+/**
  * Fecha uma semana: lê os pedidos daquele intervalo e grava um bucket por SKU.
  *
- * A escrita é por mapa aninhado com merge, então reprocessar a mesma semana é no-op — e crons repetem.
- * A poda usa a mesma passagem para descartar semanas fora da janela de retenção, evitando um segundo
- * percurso sobre a coleção.
+ * A escrita é por mapa aninhado com merge, então reprocessar com o mesmo resultado é no-op — e crons
+ * repetem. Mas o fechamento é autoritativo, não apenas aditivo: `closeWeek` varre a coleção inteira
+ * depois da escrita e remove `weeks.{week}` de qualquer SKU que tinha um bucket de uma execução
+ * anterior mas não está mais em `buckets` agora — pedidos cancelados ou editados depois do último
+ * rollup não podem deixar demanda fantasma parada até a retenção de 104 semanas expirar. A mesma
+ * passagem também descarta semanas fora da janela de retenção, evitando um segundo percurso pela
+ * coleção só para isso.
  */
 export async function rollUpWeek(week: string, now: Date = new Date()) {
   const { from, to } = isoWeekRange(week);
@@ -38,37 +62,53 @@ export async function rollUpWeek(week: string, now: Date = new Date()) {
     }
   }
 
-  const oldest = closedWeeksSince(null, now)[0] ?? week;
-  const batch = adminDb.batch();
-  for (const [sku, bucket] of buckets) {
+  // closedWeeksSince(null, now) cobre a janela de retenção inteira (HISTORY_WEEKS é uma constante
+  // positiva), então sempre devolve ao menos um elemento — ao contrário de um `?? week` aqui, que se
+  // algum dia disparasse faria a poda tratar a própria semana que acabou de fechar como a borda da
+  // retenção, descartando quase todo o histórico guardado.
+  const oldest = closedWeeksSince(null, now)[0];
+
+  await commitInChunks([...buckets], (batch, [sku, bucket]) => {
     const ref = adminDb.collection(WEEKLY_DEMAND).doc(sku);
     batch.set(ref, {
       sku, description: bucket.description,
       weeks: { [week]: { units: bucket.units, orders: bucket.orders.size } satisfies WeekBucket },
       lastClosedWeek: week, updatedAt: now.toISOString(),
     }, { merge: true });
-  }
-  await batch.commit();
-  await pruneBefore(oldest);
+  });
+  await closeWeek(week, oldest, new Set(buckets.keys()));
   // Local: a instância que acabou de escrever não pode continuar servindo a cópia antiga. As demais
   // convergem pelo TTL, que é o suficiente para um valor semanal.
   resetWeeklyHistoryCache();
   return { week, skus: buckets.size };
 }
 
-/** Remove buckets anteriores à janela de retenção. Fora dela o dado não é lido por ninguém. */
-async function pruneBefore(oldest: string) {
+/**
+ * Único percurso pela coleção inteira, cobrindo dois motivos para uma entrada de semana sair do
+ * documento de um SKU:
+ *  - está fora da janela de retenção (`key < oldest`), como antes;
+ *  - é a semana que acabou de fechar, mas este SKU não está em `freshSkus` — a consulta que acabou de
+ *    rodar não confirmou nenhuma demanda qualificada para ele, então um bucket de uma execução
+ *    anterior ficou desatualizado (pedido cancelado ou editado) e precisa sumir, não ficar parado.
+ *
+ * Um SKU cujo mapa `weeks` fica vazio depois da remoção é apagado por inteiro: sem isso a coleção só
+ * cresce, com documentos-tumba de `weeks: {}` que nunca mais aparecem em `readWeeklyHistory` mas
+ * continuam sendo lidos por toda consulta futura à coleção.
+ */
+async function closeWeek(week: string, oldest: string, freshSkus: ReadonlySet<string>): Promise<void> {
   const snapshot = await adminDb.collection(WEEKLY_DEMAND).get();
-  const batch = adminDb.batch();
-  let pending = 0;
+  const changes: Array<{ ref: FirebaseFirestore.DocumentReference; stale: string[]; remaining: number }> = [];
   for (const doc of snapshot.docs) {
     const weeks = (doc.data().weeks ?? {}) as Record<string, WeekBucket>;
-    const stale = Object.keys(weeks).filter(key => key < oldest);
+    const keys = Object.keys(weeks);
+    const stale = keys.filter(key => key < oldest || (key === week && !freshSkus.has(doc.id)));
     if (!stale.length) continue;
-    batch.update(doc.ref, Object.fromEntries(stale.map(key => [`weeks.${key}`, FieldValue.delete()])));
-    pending++;
+    changes.push({ ref: doc.ref, stale, remaining: keys.length - stale.length });
   }
-  if (pending) await batch.commit();
+  await commitInChunks(changes, (batch, { ref, stale, remaining }) => {
+    if (remaining === 0) batch.delete(ref);
+    else batch.update(ref, Object.fromEntries(stale.map(key => [`weeks.${key}`, FieldValue.delete()])));
+  });
 }
 
 /**
@@ -120,5 +160,7 @@ export async function readWeeklyHistory(weeks: number): Promise<Map<string, Hist
     // Guarda a série inteira e recorta por chamada, para que janelas diferentes dividam um cache só.
     cached = { at: Date.now(), series };
   }
-  return new Map([...cached.series].map(([sku, points]) => [sku, points.slice(-weeks)]));
+  // `Array.prototype.slice(-0)` é `slice(0)` — a série inteira, não vazia. Pedir zero semanas tem
+  // que devolver vazio, não virar sinônimo de "sem limite".
+  return new Map([...cached.series].map(([sku, points]) => [sku, weeks > 0 ? points.slice(-weeks) : []]));
 }
