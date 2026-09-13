@@ -16,6 +16,8 @@ export interface Connection {
   userId: string; sub: string; clientId: string; clientName: string; capabilities: Capability[];
   status: 'pending' | 'active' | 'revocation_pending' | 'revoked';
   authVersion: number; validAfter: number; approvedAt: number | null; revokedAt: number | null;
+  /** Stamped by the read audit on every call, so it is the only evidence a connection is in use. */
+  lastSeenAt?: number | null;
   approvalId: string;
   revocationAttempt?: string | null;
 }
@@ -159,6 +161,9 @@ export async function listOwnedConnections(userId: string) {
   const snapshot = await adminDb.collection('mcpConnections').where('userId', '==', userId).get();
   return snapshot.docs.map(doc => {
     const data = doc.data() as Connection;
-    return { id: doc.id, clientName: data.clientName, capabilities: data.capabilities, status: data.status, approvedAt: data.approvedAt, revokedAt: data.revokedAt };
+    // Deliberately omits sub and approvalId: the provider subject and the approval reference are not
+    // the user's business and would travel to the browser for nothing.
+    return { id: doc.id, clientName: data.clientName, capabilities: data.capabilities, status: data.status,
+      approvedAt: data.approvedAt, revokedAt: data.revokedAt, lastSeenAt: data.lastSeenAt ?? null };
   });
 }

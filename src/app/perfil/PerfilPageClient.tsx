@@ -13,6 +13,7 @@ import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
 import { useAuth } from '@/contexts/AuthContext';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { safeOAuthReturnPath } from '@/lib/oauth-return-path';
+import { McpConnectionCard } from '@/components/mcp-connection-card';
 
 export default function PerfilPageClient() {
     // Usa dados do AuthContext - sem fetch adicional
@@ -157,6 +158,9 @@ export default function PerfilPageClient() {
                         </CardFooter>
                     </Card>
                 </form>
+
+                {/* Outside the form on purpose: revoking must not submit the profile. */}
+                <McpConnectionCard />
             </div>
         </DashboardLayout>
     );
