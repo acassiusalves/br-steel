@@ -156,14 +156,35 @@ export type WriteActor = { userId: string; source: 'web' | 'mcp'; clientId: stri
 
 `updateSupplyLimits` continua em `operations/supplies.ts`: resolve o SKU e delega a `update`, porque a regra de duplicidade é de operação, não de persistência.
 
-- [ ] **Passo 1 — Caracterizar antes de extrair.** Criar `tests/operations/supplies-write-boundary.test.ts` provando, no comportamento atual: `createSupply` nega antes de tocar a persistência quando falta `insumos:write`; SKU duplicado devolve `DUPLICATE_SKU` 409; `estoqueMinimo > estoqueMaximo` devolve `INVALID_LIMITS`; `deleteSupplyRecord` recusa com saldo ou histórico (`SUPPLY_IN_USE` 409); `recordMovement` com saldo cadastrado não numérico devolve `INVALID_BALANCE`; saldo negativo é permitido e vem com aviso. Rodar sob emulador e confirmar que passam no código atual.
-- [ ] **Passo 2 — Extrair o contrato e o adaptador Firestore.** Mover os corpos de `createSupply`, `updateSupplyRecord`, `deleteSupplyRecord` e `recordMovement` para `firestore-supplies-write.ts`, preservando exatamente `keyRef` (SHA-256 do SKU), as mensagens, os códigos de erro e o envelope `result`. `operations/supplies.ts` mantém a autorização, o parse Zod e `validateLimits`, e passa a delegar. Criar `supplies-write.ts` exportando o Firestore como implementação ativa.
-- [ ] **Passo 3 — Rodar o teste da etapa 1 e os existentes.** Esperado: todos passam sem alteração de comportamento. Confirmar com `rg -n 'adminDb|runTransaction' src/server/operations/supplies.ts` que a persistência saiu do arquivo de operação.
-- [ ] **Passo 4 — Teste vermelho do adaptador SQL.** Em `tests/postgres/operational-write.integration.ts`, escrever os casos contra `createPostgresSuppliesWriteRepository(pool)`, ainda inexistente: saldo e movimento gravados na mesma transação; interrupção entre os dois não deixa movimento órfão; unicidade de SKU via `supply_codes`; troca de SKU remove a chave antiga e cria a nova atomicamente; exclusão recusada com histórico; `balanceAfter` coerente com o saldo final.
-- [ ] **Passo 5 — Implementar o adaptador SQL.** `postgres-supplies-write.ts` usa `withOperationalWrite`. Unicidade por `insert` em `brsteel_ops.supply_codes` com `on conflict do nothing` e verificação do número de linhas — não por leitura prévia, que não protege sob concorrência. O saldo é lido com `select ... for update` na linha do insumo. Preservar a distinção entre campo ausente, nulo e zero: saldo zero continua zero e nunca vira nulo.
-- [ ] **Passo 6 — Concorrência.** Provar que duas `recordMovement` simultâneas no mesmo insumo produzem exatamente dois movimentos e um saldo final correto, sem perda de atualização; e que duas `createSupply` simultâneas com o mesmo SKU resultam em exatamente um sucesso e um `DUPLICATE_SKU`.
-- [ ] **Passo 7 — Equivalência entre adaptadores.** Rodar a mesma bateria contra os dois adaptadores e comparar respostas, ignorando apenas `source` e `asOf`. Diferença de mensagem, código ou arredondamento é falha.
-- [ ] **Passo 8 — Verificar e commitar.** `npm run test:postgres`, suíte vitest sob emulador, typecheck. Commit `feat(postgres): add supplies write adapters`.
+- [x] **Passo 1 — Caracterizar antes de extrair.** Criar `tests/operations/supplies-write-boundary.test.ts` provando, no comportamento atual: `createSupply` nega antes de tocar a persistência quando falta `insumos:write`; SKU duplicado devolve `DUPLICATE_SKU` 409; `estoqueMinimo > estoqueMaximo` devolve `INVALID_LIMITS`; `deleteSupplyRecord` recusa com saldo ou histórico (`SUPPLY_IN_USE` 409); `recordMovement` com saldo cadastrado não numérico devolve `INVALID_BALANCE`; saldo negativo é permitido e vem com aviso. Rodar sob emulador e confirmar que passam no código atual.
+- [x] **Passo 2 — Extrair o contrato e o adaptador Firestore.** Mover os corpos de `createSupply`, `updateSupplyRecord`, `deleteSupplyRecord` e `recordMovement` para `firestore-supplies-write.ts`, preservando exatamente `keyRef` (SHA-256 do SKU), as mensagens, os códigos de erro e o envelope `result`. `operations/supplies.ts` mantém a autorização, o parse Zod e `validateLimits`, e passa a delegar. Criar `supplies-write.ts` exportando o Firestore como implementação ativa.
+- [x] **Passo 3 — Rodar o teste da etapa 1 e os existentes.** Esperado: todos passam sem alteração de comportamento. Confirmar com `rg -n 'adminDb|runTransaction' src/server/operations/supplies.ts` que a persistência saiu do arquivo de operação.
+- [x] **Passo 4 — Teste vermelho do adaptador SQL.** Em `tests/postgres/operational-write.integration.ts`, escrever os casos contra `createPostgresSuppliesWriteRepository(pool)`, ainda inexistente: saldo e movimento gravados na mesma transação; interrupção entre os dois não deixa movimento órfão; unicidade de SKU via `supply_codes`; troca de SKU remove a chave antiga e cria a nova atomicamente; exclusão recusada com histórico; `balanceAfter` coerente com o saldo final.
+- [x] **Passo 5 — Implementar o adaptador SQL.** `postgres-supplies-write.ts` usa `withOperationalWrite`. Unicidade por `insert` em `brsteel_ops.supply_codes` com `on conflict do nothing` e verificação do número de linhas — não por leitura prévia, que não protege sob concorrência. O saldo é lido com `select ... for update` na linha do insumo. Preservar a distinção entre campo ausente, nulo e zero: saldo zero continua zero e nunca vira nulo.
+- [x] **Passo 6 — Concorrência.** Provar que duas `recordMovement` simultâneas no mesmo insumo produzem exatamente dois movimentos e um saldo final correto, sem perda de atualização; e que duas `createSupply` simultâneas com o mesmo SKU resultam em exatamente um sucesso e um `DUPLICATE_SKU`.
+- [x] **Passo 7 — Equivalência entre adaptadores.** Rodar a mesma bateria contra os dois adaptadores e comparar respostas, ignorando apenas `source` e `asOf`. Diferença de mensagem, código ou arredondamento é falha.
+- [x] **Passo 8 — Verificar e commitar.** `npm run test:postgres`, suíte vitest sob emulador, typecheck. Commit `feat(postgres): add supplies write adapters`.
+
+---
+
+### Resultado da Task 2
+
+Executada e verificada em 12/09/2026. Integração PostgreSQL passou com **31 testes** (eram 27); vitest subiu para **249 testes em 41 arquivos**; typecheck voltou aos **25 diagnósticos** preexistentes.
+
+As cinco operações estão portadas atrás de `SuppliesWriteRepository`, com `createSuppliesWriteOperations(repository)` espelhando a fábrica já usada na leitura. `operations/supplies.ts` não tem mais nenhuma referência a Firestore.
+
+Três ajustes em relação ao texto do plano:
+
+1. **`validateLimits` é compartilhada, não exclusiva da operação.** O plano dizia que ela ficaria em `operations/supplies.ts`. Só funciona para a criação: na atualização parcial a regra compara o valor enviado com o **já persistido** (`validateLimits({ ...existing, ...input })`), o que exige ler o registro. Ela virou função pura em `supplies-write-contract.ts`, chamada pela operação na criação e pelos dois adaptadores na atualização.
+2. **`findBySku` entrou no contrato.** `updateSupplyLimits` resolvia o SKU com uma consulta Firestore direta dentro da operação. Sem um método de busca, a persistência não sairia do arquivo. O repositório devolve até dois ids; a operação aplica as regras de ausente e ambíguo, que continuam sendo de operação.
+3. **Ordem das escritas invertida no SQL.** `supply_codes.supply_id` e `inventory_movements.supply_id` são colunas geradas de `payload->>'supplyId'` com chave estrangeira para `supplies`. O insumo precisa existir antes da chave de unicidade, e na exclusão a chave precisa sair antes do insumo. A reivindicação de unicidade continua sendo o próprio `insert ... on conflict do nothing` — uma leitura prévia não se sustenta sob concorrência — e um duplicado desfaz a transação inteira.
+
+**Equivalência com teeth.** O teste compara o rastro das doze chamadas pela fronteira de operações contra os dois adaptadores, normalizando apenas identificadores e instantes. Para não aceitar um teste que passaria com tudo falhando, ele exige pelo menos seis passos bem-sucedidos. Validado por mutação: trocar somente o status HTTP de `DUPLICATE_SKU` de 409 para 400 no adaptador SQL quebra a comparação; reverter restaura o verde.
+
+**Concorrência comprovada:** cinco movimentações simultâneas no mesmo insumo resultam em saldo exato e cinco registros; quatro criações disputando o mesmo SKU resultam em exatamente uma vencedora.
+
+O seletor `supplies-write.ts` continua fixo em Firestore.
+
 
 ---
 

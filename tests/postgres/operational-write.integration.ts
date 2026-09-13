@@ -6,6 +6,13 @@ import { recordWriteAudit, replayIdempotent, storeIdempotent, type WriteActor } 
 import { withPilotSnapshot } from '@/server/persistence/pilot-snapshot';
 import { COLLECTIONS, NATIVE_RUN_ID } from '@/server/migration/operational-snapshot';
 import { createLocalImportPool, importSnapshot } from '@/server/migration/operational-import';
+import { createPostgresSuppliesWriteRepository } from '@/server/persistence/postgres-supplies-write';
+import type { SupplyFields, SuppliesWriteRepository } from '@/server/persistence/supplies-write-contract';
+import { firestoreSuppliesWriteRepository } from '@/server/persistence/firestore-supplies-write';
+import { createSuppliesWriteOperations } from '@/server/operations/supplies';
+import { pagePermissions } from '@/lib/permissions';
+import { mcpCapabilities } from '@/lib/mcp-capabilities';
+import type { AccessContext } from '@/server/access/types';
 
 const url = process.env.BRSTEEL_PG_LOCAL_URL;
 assert.ok(url);
@@ -228,4 +235,141 @@ test('native rows survive an import that reconciles snapshot documents', async (
   const row = (await pool.query(
     `select source_deleted from brsteel_ops.supplies where source_id = 'native-1'`)).rows[0];
   assert.equal(row?.source_deleted, false, 'a native row must not be reconciled away by a snapshot import');
+});
+
+const supplies = createPostgresSuppliesWriteRepository(writerPool);
+const fields = (overrides: Partial<SupplyFields> = {}): SupplyFields => ({
+  nome: 'Chapa', codigo: 'SKU-1', gtin: '', unidade: 'UN',
+  precoCusto: 10, estoqueMinimo: 2, estoqueMaximo: 20, tempoEntrega: 1, ...overrides,
+});
+const balanceOf = async (id: string) => Number((await pool.query(
+  `select payload->>'estoqueAtual' as balance from brsteel_ops.supplies where source_id = $1`, [id])).rows[0].balance);
+
+test('SQL supplies keep SKU uniqueness, balance and movement in one transaction', async () => {
+  await seedReadyCopy();
+
+  const created = await supplies.create(fields(), actor);
+  assert.equal(created.source, 'postgres');
+  assert.equal(await balanceOf(created.data.id), 0);
+  // The lookup key the read adapter paginates by must be populated by the write, not by an import.
+  assert.equal((await pool.query(
+    `select lookup_sku from brsteel_ops.supplies where source_id = $1`, [created.data.id])).rows[0].lookup_sku, 'SKU-1');
+  assert.equal((await pool.query('select count(*)::int as count from brsteel_ops.supply_codes')).rows[0].count, 1);
+
+  await assert.rejects(supplies.create(fields(), actor),
+    (error: unknown) => (error as { code?: string }).code === 'DUPLICATE_SKU');
+  assert.equal((await pool.query('select count(*)::int as count from brsteel_ops.supplies')).rows[0].count, 1);
+
+  const movement = await supplies.recordMovement({ supplyId: created.data.id, type: 'entrada', quantity: 7 }, actor);
+  assert.equal(movement.data.newStock, 7);
+  assert.equal(await balanceOf(created.data.id), 7);
+  const stored = (await pool.query(
+    `select payload->>'balanceAfter' as after, payload->>'createdBy' as by from brsteel_ops.inventory_movements`)).rows;
+  assert.deepEqual(stored, [{ after: '7', by: 'u1' }]);
+
+  const negative = await supplies.recordMovement({ supplyId: created.data.id, type: 'saida', quantity: 9 }, actor);
+  assert.equal(negative.data.newStock, -2);
+  assert.ok(negative.warnings.some(warning => warning.includes('negativo')));
+
+  await assert.rejects(supplies.recordMovement({ supplyId: 'missing', type: 'entrada', quantity: 1 }, actor),
+    (error: unknown) => (error as { code?: string }).code === 'NOT_FOUND');
+  // A rejected movement leaves no orphan row behind.
+  assert.equal((await pool.query('select count(*)::int as count from brsteel_ops.inventory_movements')).rows[0].count, 2);
+});
+
+test('SQL supplies move the uniqueness key atomically and protect records in use', async () => {
+  await seedReadyCopy();
+  const first = await supplies.create(fields(), actor);
+  const second = await supplies.create(fields({ codigo: 'SKU-2' }), actor);
+
+  await assert.rejects(supplies.update(first.data.id, { codigo: 'SKU-2' }, actor),
+    (error: unknown) => (error as { code?: string }).code === 'DUPLICATE_SKU');
+  await assert.rejects(supplies.update(first.data.id, { estoqueMinimo: 99 }, actor),
+    (error: unknown) => (error as { code?: string }).code === 'INVALID_LIMITS');
+
+  await supplies.update(first.data.id, { codigo: 'SKU-3' }, actor);
+  const codes = (await pool.query(
+    `select payload->>'supplyId' as supply from brsteel_ops.supply_codes order by source_id`)).rows.map(r => r.supply);
+  assert.equal(codes.length, 2, 'the old key is removed in the same transaction as the new one');
+  assert.equal((await pool.query(
+    `select lookup_sku from brsteel_ops.supplies where source_id = $1`, [first.data.id])).rows[0].lookup_sku, 'SKU-3');
+  assert.deepEqual(await supplies.findBySku('SKU-3'), [first.data.id]);
+  assert.deepEqual(await supplies.findBySku('SKU-1'), []);
+
+  await supplies.recordMovement({ supplyId: second.data.id, type: 'entrada', quantity: 1 }, actor);
+  await supplies.recordMovement({ supplyId: second.data.id, type: 'saida', quantity: 1 }, actor);
+  // Balance is zero again but history remains, so the record must stay.
+  await assert.rejects(supplies.remove(second.data.id, actor),
+    (error: unknown) => (error as { code?: string }).code === 'SUPPLY_IN_USE');
+
+  await supplies.remove(first.data.id, actor);
+  assert.equal((await pool.query(
+    'select count(*)::int as count from brsteel_ops.supplies where not source_deleted')).rows[0].count, 1);
+  assert.equal((await pool.query('select count(*)::int as count from brsteel_ops.supply_codes')).rows[0].count, 1);
+});
+
+test('concurrent SQL movements never lose an update and duplicate SKUs never both win', async () => {
+  await seedReadyCopy();
+  const supply = await supplies.create(fields(), actor);
+
+  await Promise.all(Array.from({ length: 5 }, () =>
+    supplies.recordMovement({ supplyId: supply.data.id, type: 'entrada', quantity: 2 }, actor)));
+  assert.equal(await balanceOf(supply.data.id), 10, 'every concurrent movement must be applied exactly once');
+  assert.equal((await pool.query('select count(*)::int as count from brsteel_ops.inventory_movements')).rows[0].count, 5);
+
+  const races = await Promise.allSettled(Array.from({ length: 4 }, () => supplies.create(fields({ codigo: 'RACE' }), actor)));
+  assert.equal(races.filter(r => r.status === 'fulfilled').length, 1, 'exactly one creation may win the SKU');
+  assert.equal((await pool.query(
+    `select count(*)::int as count from brsteel_ops.supplies where lookup_sku = 'RACE' and not source_deleted`)).rows[0].count, 1);
+});
+
+const admin: AccessContext = { actor: { userId: 'u1', role: 'Administrador', source: 'web' }, active: true,
+  capabilities: mcpCapabilities.map(capability => capability.key), permissions: pagePermissions, inactivePages: [] };
+
+/**
+ * Runs the same script through the operation boundary and records what a caller would observe.
+ * Identifiers and timing differ by construction, so they are normalized away; everything else must match.
+ */
+async function trace(repository: SuppliesWriteRepository) {
+  const ops = createSuppliesWriteOperations(repository);
+  const steps: unknown[] = [];
+  const ids: Record<string, string> = {};
+  const run = async (label: string, action: () => Promise<{ data: unknown; warnings: string[] }>) => {
+    try {
+      const response = await action();
+      const data = { ...(response.data as Record<string, unknown>) };
+      if (typeof data.id === 'string') { ids[label] = data.id; data.id = `<${label}>`; }
+      steps.push({ label, data, warnings: response.warnings });
+    } catch (error) {
+      steps.push({ label, error: (error as { code?: string }).code ?? String(error), status: (error as { status?: number }).status });
+    }
+  };
+
+  await run('create-a', () => ops.createSupply(admin, fields({ codigo: 'EQ-1' })));
+  await run('create-duplicate', () => ops.createSupply(admin, fields({ codigo: 'EQ-1' })));
+  await run('create-bad-limits', () => ops.createSupply(admin, fields({ codigo: 'EQ-X', estoqueMinimo: 9, estoqueMaximo: 3 })));
+  await run('create-b', () => ops.createSupply(admin, fields({ codigo: 'EQ-2' })));
+  await run('in', () => ops.recordMovement(admin, { supplyId: ids['create-a'], type: 'entrada', quantity: 7 }));
+  await run('out', () => ops.recordMovement(admin, { supplyId: ids['create-a'], type: 'saida', quantity: 9 }));
+  await run('limits-invalid', () => ops.updateSupplyLimits(admin, { sku: 'EQ-1', estoqueMinimo: 99 }));
+  await run('limits-ok', () => ops.updateSupplyLimits(admin, { sku: 'EQ-1', estoqueMinimo: 1, estoqueMaximo: 5 }));
+  await run('limits-missing', () => ops.updateSupplyLimits(admin, { sku: 'NAO-EXISTE', estoqueMinimo: 1 }));
+  await run('remove-unused', () => ops.deleteSupplyRecord(admin, ids['create-b']));
+  await run('remove-in-use', () => ops.deleteSupplyRecord(admin, ids['create-a']));
+  await run('remove-missing', () => ops.deleteSupplyRecord(admin, 'nao-existe'));
+  return steps;
+}
+
+test('Firestore and PostgreSQL supplies write adapters are observationally equivalent', async () => {
+  await seedReadyCopy();
+  const sql = await trace(supplies);
+
+  const reset = await fetch(
+    'http://127.0.0.1:8188/emulator/v1/projects/demo-brsteel-auth/databases/(default)/documents', { method: 'DELETE' });
+  assert.ok(reset.ok, 'the Firestore emulator must be reachable for the comparison to mean anything');
+  const firestore = await trace(firestoreSuppliesWriteRepository);
+
+  assert.deepEqual(sql, firestore);
+  // A trace where every step failed would compare equal and prove nothing.
+  assert.ok(sql.filter(step => !(step as { error?: string }).error).length >= 6, JSON.stringify(sql));
 });
