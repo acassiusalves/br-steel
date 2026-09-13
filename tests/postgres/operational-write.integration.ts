@@ -611,6 +611,12 @@ async function ingestTrace(repository: SalesIngestRepository) {
   steps.push(await repository.upsertOrders([order(1, 100), order(2, 200)]));
   steps.push(await repository.upsertOrders([order(1, 150)]));
   steps.push(await repository.upsertOrders([]));
+  // A sparse re-save: the detail fetch failed, so only the list-shaped order comes back. Firestore
+  // merges, keeping itens and the invoice fields; replacing the payload would destroy them.
+  steps.push(await repository.upsertOrders([{ id: 3, numero: 3, total: 300, xml: 'NF', itens: [{ codigo: 'Z', quantidade: 7 }] }]));
+  steps.push(await repository.upsertOrders([{ id: 3, total: 350 }]));
+  // An undefined field is dropped by serialize on both sides; without it the SQL hash rejects the write.
+  steps.push(await repository.upsertOrders([{ id: 4, numero: 4, total: 400, xml: undefined, itens: [] }]));
   await repository.markOrderDeleted('2', '2026-09-12T00:00:00.000Z');
   await repository.markOrderDeleted('404', '2026-09-12T00:00:00.000Z');
   await repository.applyStockObservation('A', { sku: 'A', estoqueAtual: 0, webhookReceivedAt: '2026-09-02T00:00:00Z' });
@@ -621,8 +627,12 @@ test('Firestore and PostgreSQL ingest adapters agree on counts and final state',
   await seedReadyCopy();
   const sqlSteps = await ingestTrace(ingest);
   const sqlOrders = (await pool.query(
-    `select source_id, payload->>'total' as total, coalesce(payload->>'deleted','false') as deleted
+    `select source_id, payload->>'total' as total, coalesce(payload->>'deleted','false') as deleted,
+            coalesce(payload->>'xml','') as xml,
+            coalesce(jsonb_array_length(payload->'itens')::text,'0') as itens
      from brsteel_ops.sales_orders order by source_id`)).rows;
+  const sqlItems = (await pool.query(
+    `select order_id, count(*)::int as items from brsteel_ops.sales_order_items group by order_id order by order_id`)).rows;
 
   await resetFirestore();
   const firestoreSteps = await ingestTrace(firestoreSalesIngestRepository);
@@ -630,10 +640,13 @@ test('Firestore and PostgreSQL ingest adapters agree on counts and final state',
   if (!getApps().length) initializeApp({ projectId: 'demo-brsteel-auth' });
   const snapshot = await getFirestore().collection('salesOrders').orderBy('__name__').get();
   const firestoreOrders = snapshot.docs.map(doc => ({ source_id: doc.id, total: String(doc.data().total),
-    deleted: String(doc.data().deleted ?? false) }));
+    deleted: String(doc.data().deleted ?? false), xml: String(doc.data().xml ?? ''),
+    itens: String((doc.data().itens ?? []).length) }));
 
   assert.deepEqual(sqlSteps, firestoreSteps, 'created/updated counts must agree');
   assert.deepEqual(sqlOrders, firestoreOrders, 'final stored state must agree');
   assert.deepEqual(sqlSteps[0], { count: 2, created: 2, updated: 0 });
   assert.deepEqual(sqlSteps[1], { count: 1, created: 0, updated: 1 });
+  // The sparse re-save must not have emptied the item projection.
+  assert.deepEqual(sqlItems, [{ order_id: '1', items: 1 }, { order_id: '2', items: 1 }, { order_id: '3', items: 1 }]);
 });

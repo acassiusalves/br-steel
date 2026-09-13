@@ -1,5 +1,6 @@
 import 'server-only';
 import type { Pool, PoolClient } from 'pg';
+import { serialize } from '@/server/operations/common';
 import { NATIVE_RUN_ID, contentHash } from '@/server/migration/operational-snapshot';
 import type { IngestCounts, SalesIngestRepository, SourceOrder } from './sales-ingest-contract';
 import { prepareStockReadModels } from './stored-stock-model';
@@ -8,12 +9,19 @@ import { withOperationalWrite } from './postgres-write';
 type Doc = Record<string, unknown>;
 const nativeVersion = () => String(BigInt(Date.now()) * BigInt(1000000));
 
-const writeOrder = (client: PoolClient, id: string, payload: Doc) => client.query(
+/**
+ * serialize() first: canonicalJson throws on undefined, Date and exotic prototypes, while
+ * JSON.stringify silently drops them — the two halves of this statement would disagree.
+ */
+const writeOrder = (client: PoolClient, id: string, raw: Doc) => {
+  const payload = serialize(raw);
+  return client.query(
   `insert into brsteel_ops.sales_orders (source_id, payload, source_version, source_hash, import_run_id)
    values ($1, $2, $3, $4, $5)
    on conflict (source_id) do update set payload = excluded.payload, source_version = excluded.source_version,
      source_hash = excluded.source_hash, source_deleted = false`,
   [id, JSON.stringify(payload), nativeVersion(), contentHash(payload), NATIVE_RUN_ID]);
+};
 
 /** Rebuilt from the payload so the stored projection can never drift from the document it derives from. */
 async function rebuildItems(client: PoolClient, orderId: string, payload: Doc) {
@@ -51,12 +59,16 @@ export function createPostgresSalesIngestRepository(pool: Pool): SalesIngestRepo
         let created = 0, updated = 0;
         for (const order of orders) {
           const id = String(order.id);
-          const existing = await client.query(
-            'select 1 from brsteel_ops.sales_orders where source_id = $1 and not source_deleted', [id]);
+          // Firestore merges: fields absent from an incoming order keep their stored value. A sparse
+          // re-save happens for real (an order whose detail fetch failed), so replacing the payload
+          // would drop itens, XML and invoice fields — and rebuildItems would delete the item rows.
+          const current = (await client.query(
+            'select payload from brsteel_ops.sales_orders where source_id = $1 for update', [id])).rows[0];
           const at = new Date().toISOString();
-          await writeOrder(client, id, { ...order, importedAt: at, lastUpdated: at, isImported: true });
-          await rebuildItems(client, id, order as Doc);
-          if (existing.rowCount) updated++; else created++;
+          const merged = { ...(current?.payload as Doc | undefined), ...order, importedAt: at, lastUpdated: at, isImported: true };
+          await writeOrder(client, id, merged);
+          await rebuildItems(client, id, merged);
+          if (current) updated++; else created++;
         }
         return { count: orders.length, created, updated };
       });

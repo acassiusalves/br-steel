@@ -104,7 +104,13 @@ export async function importSnapshot(pool: Pool, raw: unknown, options: {
       // Reject stale or conflicting versions before making the existing copy unavailable.
       for (const collection of COLLECTIONS) {
         const wanted = new Map(snapshot.records.filter(r => r.collection === collection).map(r => [r.id, r]));
-        const current = await client.query(`select source_id, source_version::text, source_hash from brsteel_ops.${TABLES[collection]}`);
+        // Native rows share deterministic ids with snapshot documents (the annual lot counter, the
+        // SKU key hash, the default columns). Without this filter a native write newer than the
+        // Firestore document aborts the whole import, and the opposite order silently reclaims the
+        // row for the snapshot — which would walk the lot counter backwards and mint duplicates.
+        const current = await client.query(
+          `select source_id, source_version::text, source_hash from brsteel_ops.${TABLES[collection]}
+           where import_run_id <> $1`, [NATIVE_RUN_ID]);
         for (const row of current.rows) {
           const incoming = wanted.get(row.source_id);
           if (incoming && (BigInt(incoming.version) < BigInt(row.source_version)

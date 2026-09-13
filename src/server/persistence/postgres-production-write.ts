@@ -1,7 +1,7 @@
 import 'server-only';
 import { randomUUID } from 'node:crypto';
 import type { Pool, PoolClient } from 'pg';
-import { OperationError, result } from '@/server/operations/common';
+import { OperationError, result, serialize } from '@/server/operations/common';
 import { NATIVE_RUN_ID, contentHash } from '@/server/migration/operational-snapshot';
 import type { ColumnInput, LotInput, LotUpdate, OrderInput, ProductionWriteRepository, WriteIdentity } from './production-write-contract';
 import { recordWriteAudit, type WriteActor } from './write-audit';
@@ -19,7 +19,7 @@ const writeRow = (client: PoolClient, table: Table, id: string, payload: Doc) =>
    values ($1, $2, $3, $4, $5)
    on conflict (source_id) do update set payload = excluded.payload, source_version = excluded.source_version,
      source_hash = excluded.source_hash, source_deleted = false`,
-  [id, JSON.stringify(payload), nativeVersion(), contentHash(payload), NATIVE_RUN_ID]);
+  [id, JSON.stringify(serialize(payload)), nativeVersion(), contentHash(serialize(payload)), NATIVE_RUN_ID]);
 
 async function lockRow(client: PoolClient, table: Table, id: string): Promise<Doc> {
   const row = (await client.query(

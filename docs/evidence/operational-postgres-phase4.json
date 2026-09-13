@@ -1,0 +1,49 @@
+{
+  "stage": 4,
+  "title": "Gravações do núcleo em PostgreSQL",
+  "date": "2026-09-12",
+  "status": "concluida-e-revisada",
+  "deployed": false,
+  "activeSelector": "firestore",
+  "writeEntryPointsPorted": 19,
+  "verification": {
+    "vitestTests": 264,
+    "vitestFiles": 44,
+    "postgresIntegrationTests": 39,
+    "typecheckDiagnostics": 25,
+    "typecheckBaseline": 25,
+    "build": "passed"
+  },
+  "equivalenceHarnesses": [
+    {
+      "domain": "supplies",
+      "calls": 12,
+      "mutationProof": "DUPLICATE_SKU status 409->400"
+    },
+    {
+      "domain": "production",
+      "calls": 14,
+      "mutationProof": "lot number padStart 4->3"
+    },
+    {
+      "domain": "ingest",
+      "steps": 6,
+      "mutationProof": "markOrderDeleted guard removed; upsert merge->replace"
+    }
+  ],
+  "reviewFindingsFixed": [
+    "upsertOrders replace vs merge",
+    "serialize dropped in SQL adapters",
+    "NATIVE_RUN_ID guard missing in importer version pre-check",
+    "delivery dedup swallowed Bling retry",
+    "applyStockObservation and markOrderDeleted had no caller",
+    "cache marker failure failed a persisted write",
+    "drain attempt cap"
+  ],
+  "limitations": [
+    "no hosted PostgreSQL writes",
+    "idempotency not threaded from any boundary",
+    "identity window open by design",
+    "webhook processing still synchronous"
+  ]
+}

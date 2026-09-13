@@ -28,13 +28,17 @@ export function webhookEventId(topic: WebhookTopic, rawBody: string, receivedAtM
 /** Resolves only once the event is durable. The caller must not acknowledge before it does. */
 export async function enqueueWebhookEvent(event: { id: string; topic: WebhookTopic; payload: unknown; receivedAt: string }) {
   const ref = adminDb.collection(WEBHOOK_EVENTS).doc(event.id);
-  const created = await adminDb.runTransaction(async tx => {
-    if ((await tx.get(ref)).exists) return false;
+  return adminDb.runTransaction(async tx => {
+    const existing = await tx.get(ref);
+    if (existing.exists) return { created: false, status: String(existing.data()?.status) as WebhookStatus };
     tx.create(ref, { ...event, status: 'received' satisfies WebhookStatus, attempts: 0, error: null });
-    return true;
+    return { created: true, status: 'received' as WebhookStatus };
   });
-  return { created };
 }
+
+/** Only a terminal outcome means the delivery is done with; anything else may still need work. */
+export const TERMINAL: WebhookStatus[] = ['processed', 'ignored'];
+export const MAX_ATTEMPTS = 5;
 
 export async function markWebhookEvent(id: string, status: WebhookStatus, error?: string) {
   await adminDb.collection(WEBHOOK_EVENTS).doc(id).set(
@@ -58,6 +62,11 @@ export async function drainWebhookEvents(limit: number, handle: (event: QueuedEv
       return true;
     });
     if (!claimed) continue;
+    if ((Number(event.attempts) || 0) >= MAX_ATTEMPTS) {
+      await markWebhookEvent(event.id, 'failed', 'Limite de tentativas atingido; retomada exige ação explícita.');
+      failed++;
+      continue;
+    }
     try {
       await handle(event);
       await markWebhookEvent(event.id, 'processed');

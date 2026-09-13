@@ -1,7 +1,7 @@
 import 'server-only';
 import { createHash, randomUUID } from 'node:crypto';
 import type { Pool, PoolClient } from 'pg';
-import { OperationError, result } from '@/server/operations/common';
+import { OperationError, result, serialize } from '@/server/operations/common';
 import { NATIVE_RUN_ID, contentHash } from '@/server/migration/operational-snapshot';
 import type { MovementInput, SuppliesWriteRepository, SupplyFields } from './supplies-write-contract';
 import { validateLimits } from './supplies-write-contract';
@@ -21,14 +21,14 @@ const writeSupply = (client: PoolClient, id: string, payload: Doc) => client.que
    values ($1, $2, $3, $4, $5, false, $6)
    on conflict (source_id) do update set payload = excluded.payload, source_version = excluded.source_version,
      source_hash = excluded.source_hash, lookup_sku = excluded.lookup_sku, source_deleted = false`,
-  [id, JSON.stringify(payload), nativeVersion(), contentHash(payload), NATIVE_RUN_ID, String(payload.codigo || id)]);
+  [id, JSON.stringify(serialize(payload)), nativeVersion(), contentHash(serialize(payload)), NATIVE_RUN_ID, String(payload.codigo || id)]);
 
 const writeRow = (client: PoolClient, table: 'supply_codes' | 'inventory_movements', id: string, payload: Doc) => client.query(
   `insert into brsteel_ops.${table} (source_id, payload, source_version, source_hash, import_run_id)
    values ($1, $2, $3, $4, $5)
    on conflict (source_id) do update set payload = excluded.payload, source_version = excluded.source_version,
      source_hash = excluded.source_hash, source_deleted = false`,
-  [id, JSON.stringify(payload), nativeVersion(), contentHash(payload), NATIVE_RUN_ID]);
+  [id, JSON.stringify(serialize(payload)), nativeVersion(), contentHash(serialize(payload)), NATIVE_RUN_ID]);
 
 /** Locks the row so a concurrent movement serializes instead of reading a stale balance. */
 async function lockSupply(client: PoolClient, id: string): Promise<Doc> {

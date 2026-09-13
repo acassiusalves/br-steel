@@ -335,11 +335,37 @@ O teste decisivo simula exatamente o cenário: um processo popula o cache, **out
 - Create: `docs/evidence/operational-postgres-phase4.{md,json}`
 - Modify: `docs/superpowers/specs/2026-09-12-operational-postgres-design.md`, `supabase/operational/README.md`
 
-- [ ] **Passo 1 — Bateria completa.** Rodar, com Java no PATH: `PATH="/opt/homebrew/opt/openjdk@21/bin:$PATH" firebase emulators:exec --only firestore --project demo-brsteel-auth --config firebase.test.json 'npx --no-install vitest run tests/access tests/oauth tests/mcp tests/operations tests/backup tests/deployment'` e `npm run test:postgres`. Registrar os números reais, não os esperados.
-- [ ] **Passo 2 — Conferir os seletores.** `rg -n "salesIngestRepository|suppliesWriteRepository|productionWriteRepository" src/server/persistence/*.ts` deve mostrar Firestore como implementação ativa em todos. Nenhuma variável de ambiente de produção alterada.
-- [ ] **Passo 3 — Evidência.** Registrar as 19 operações portadas, os resultados de concorrência e idempotência, e as limitações — em especial a janela de desativação concorrente de usuários da Task 3 e o fato de que nenhuma gravação real foi feita em PostgreSQL hospedado.
-- [ ] **Passo 4 — Revisão e commit.** superpowers:requesting-code-review sobre o diff completo. Commit local; sem merge e sem deploy.
+- [x] **Passo 1 — Bateria completa.** Rodar, com Java no PATH: `PATH="/opt/homebrew/opt/openjdk@21/bin:$PATH" firebase emulators:exec --only firestore --project demo-brsteel-auth --config firebase.test.json 'npx --no-install vitest run tests/access tests/oauth tests/mcp tests/operations tests/backup tests/deployment'` e `npm run test:postgres`. Registrar os números reais, não os esperados.
+- [x] **Passo 2 — Conferir os seletores.** `rg -n "salesIngestRepository|suppliesWriteRepository|productionWriteRepository" src/server/persistence/*.ts` deve mostrar Firestore como implementação ativa em todos. Nenhuma variável de ambiente de produção alterada.
+- [x] **Passo 3 — Evidência.** Registrar as 19 operações portadas, os resultados de concorrência e idempotência, e as limitações — em especial a janela de desativação concorrente de usuários da Task 3 e o fato de que nenhuma gravação real foi feita em PostgreSQL hospedado.
+- [x] **Passo 4 — Revisão e commit.** superpowers:requesting-code-review sobre o diff completo. Commit local; sem merge e sem deploy.
 
 **Critério de saída da etapa 4:** concorrência, idempotência, recuperação de eventos e todas as 19 entradas de escrita testadas, com equivalência comprovada entre adaptadores e o seletor ainda em Firestore.
 
 **Próxima entrega:** `2026-09-12-operational-postgres-phase5-cutover.md`. Ela só pode ser executada depois de os resultados desta etapa serem verificados.
+
+### Resultado da Task 6
+
+Encerrada em 12/09/2026. Vitest **264 testes em 44 arquivos**, integração PostgreSQL **39**, typecheck **25** diagnósticos preexistentes, build local compilou. Os oito seletores exportam Firestore; `vercel.json`, variáveis de ambiente e ferramentas MCP intocados. Evidência em `docs/evidence/operational-postgres-phase4.{md,json}`.
+
+**A revisão independente valeu a pena e mudou o resultado.** Apontou um problema crítico e seis importantes, entre eles dois que o harness de equivalência **estruturalmente não conseguia** detectar:
+
+- `upsertOrders` substituía o payload em SQL enquanto o Firestore mescla. Uma regravação esparsa — real, quando a busca de detalhes do pedido falha — apagaria `itens`, XML e nota fiscal, e excluiria as linhas da projeção de itens. Os dois upserts do rastro tinham o mesmo conjunto de chaves, onde mesclar e substituir coincidem.
+- `serialize()` havia sido perdido nos adaptadores SQL: `canonicalJson` lança em `undefined` e `Date` enquanto `JSON.stringify` os descarta, e as duas metades da mesma instrução discordavam.
+
+Ambos corrigidos, com passos novos de regravação esparsa e campo `undefined` no rastro de ingestão, comprovados por mutação.
+
+Também corrigidos: a guarda da sentinela faltava no pré-check de versão do importador (três coleções usam identificadores determinísticos compartilhados — sem o filtro, o contador de lotes andaria para trás e cunharia números duplicados); a dedução de entrega engolia o retry do Bling num evento não terminal, deixando a entrega **pior** que antes da fila; a falha ao publicar a marca de cache derrubava gravação já persistida; e o dreno ganhou teto de tentativas.
+
+**Uma afirmação minha estava errada e foi corrigida.** Eu declarei "19 entradas portadas" ao fechar a Task 4. `applyStockObservation` e `markOrderDeleted` tinham adaptadores e testes, mas o webhook continuava gravando direto em `stockUpdates` e `salesOrders` — 17 estavam conectadas, não 19. Agora estão as 19.
+
+Pontos menores levantados e deliberadamente **não** corrigidos estão listados na evidência, para as etapas seguintes.
+
+---
+
+## Estado da etapa 4
+
+**Concluída.** Critério de saída atendido: concorrência, idempotência, recuperação de eventos e as 19 entradas de escrita testadas, com equivalência comprovada entre adaptadores e os seletores ainda em Firestore.
+
+**Próxima entrega:** `2026-09-12-operational-postgres-phase5-cutover.md`. Antes de executá-la, incorporar ao seu roteiro os dois pontos que esta etapa levantou: a decisão explícita sobre colisão de identificadores determinísticos entre linha nativa e documento de snapshot, e o agendamento do dreno da fila de webhooks sob o interruptor de manutenção.
+
