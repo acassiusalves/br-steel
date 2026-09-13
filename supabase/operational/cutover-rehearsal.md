@@ -71,6 +71,8 @@ join pg_roles member on member.oid = m.member
 where member.rolname = 'brsteel_ops_runtime';
 ```
 
+> **Uma associação a mais é esperada no hospedado.** `postgres` é membro de `brsteel_ops_writer` com `admin_option`, porque no PostgreSQL 16+ quem cria um papel recebe administração sobre ele — e o `postgres` do Supabase, ao contrário do de um contêiner local, não é superusuário. Não é escalonamento do escritor. O teste de integração local afirma zero associações e passa, justamente porque lá o criador é superusuário e dispensa o registro: **é um comportamento que a suíte local não consegue observar.**
+
 O papel escritor já cobre leitura **e** escrita do núcleo: ele tem `SELECT` nas 13 tabelas de `brsteel_ops`, `SELECT` em `brsteel_import.state` e DML onde precisa. Não conceda nada além disso.
 
 **Nunca use o login `postgres` no runtime.** O código recusa: `operationalPoolConfig` rejeita `postgres` e `postgres.<projeto>` explicitamente.
@@ -79,7 +81,11 @@ O papel escritor já cobre leitura **e** escrita do núcleo: ele tem `SELECT` na
 
 ## Passo 3 — Copiar os dados reais para o destino
 
-A cópia do piloto foi encerrada junto com os acessos temporários. É preciso uma exportação nova — **não reaproveite um JSON antigo**, porque ele não prova compatibilidade com o schema atual.
+**A cópia do piloto ainda está no destino.** O que foi encerrado no piloto foram os *acessos*, não os dados — conferido em 13/09: 12.538 pedidos, 361 observações de estoque, 54 insumos, 3 lotes, marcada como pronta, capturada em 12/09 17:41 UTC.
+
+Mesmo assim é preciso uma exportação nova, por dois motivos: a cópia é de ontem e o schema mudou desde então. **Não reaproveite um JSON antigo** — ele não prova compatibilidade com o schema atual.
+
+A importação vai **reconciliar sobre a cópia existente**, não carregar do zero. É exatamente o caminho que a guarda de colisão entre linha nativa e documento de snapshot protege.
 
 Prepare um arquivo privado de ambiente (`0600`, fora do Git) com os logins de piloto de importação, provisionados do mesmo jeito que o do Passo 2 mas associados a `brsteel_ops_importer`:
 
