@@ -22,6 +22,10 @@
 - Testes com emulador rodam assim:
   `firebase emulators:exec --only firestore --project demo-brsteel-auth --config firebase.test.json 'npx --no-install vitest run <caminho>'`
 - Antes de cada commit: `npx tsc --noEmit` não pode introduzir diagnóstico novo (a baseline atual é de 25, verificada por `npm run typecheck:ci`).
+- **Tasks 6, 9 e 10 não têm teste automatizado, por decisão de escopo tomada antes da execução.** A
+  infra de testes é server-side (`vitest.config`: `environment: 'node'`, `include: ['tests/**/*.test.ts']`,
+  sem jsdom e sem `.tsx`), e adicioná-la seria dependência nova fora do escopo. Essas três são
+  verificadas no navegador, conforme os passos de cada uma. Não é omissão.
 
 ## File Structure
 
