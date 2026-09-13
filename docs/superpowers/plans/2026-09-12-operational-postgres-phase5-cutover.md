@@ -38,6 +38,30 @@ Inventário fechado na etapa 4. O interruptor de manutenção precisa cobrir tod
 
 **O interruptor precisa ser lido em tempo de execução a partir de um registro compartilhado, não de uma variável de ambiente do build.** Um deployment antigo com a variável antiga continuaria gravando. Este é o ponto que a spec chama de "versões antigas do aplicativo".
 
+## Pré-requisitos resolvidos antes desta etapa
+
+A etapa 4 deixou dois pontos que este roteiro precisava absorver. Ambos foram resolvidos e verificados; o que está escrito abaixo é o estado real do código, não uma intenção.
+
+### Colisão de identificadores entre linha nativa e documento de snapshot
+
+Três coleções derivam o identificador do mesmo jeito nos dois lados: o contador anual (`production-lots-AAAA`), a chave de SKU (`sha256(sku)`) e as colunas padrão (`default-N`). Um documento de snapshot podia, portanto, cair exatamente sobre uma linha que a aplicação gravou.
+
+**Decisão: recusar alto.** O importador detecta a colisão antes de qualquer mutação e aborta com `Native row collision: <coleção>/<id>`, deixando a linha nativa intacta. Deixar o snapshot vencer faria o contador de lotes andar para trás e cunhar números duplicados, e não existe regra de mesclagem obviamente certa para um contador. Resolver uma colisão é ato deliberado, não decisão de uma importação.
+
+O teste semeia um contador nativo em 42, importa um snapshot que traz o mesmo identificador com sequência 3, e exige que a importação recuse e que o 42 permaneça.
+
+**Consequência para o corte:** o comparador desta etapa distingue origem por `import_run_id = NATIVE_RUN_ID`. Uma linha nativa não tem contraparte no Firestore e **não é divergência**. Sem isso, o critério de divergência zero seria inalcançável depois da primeira gravação nativa.
+
+### Agendamento do dreno sob o interruptor
+
+O modo do núcleo vive em `appConfig/coreWriteMode`, lido em tempo de execução por `readCoreWriteMode()` em `src/server/operations/maintenance.ts` — **nunca de variável de build**, porque um deployment antigo ainda alcançável carregaria o valor velho. Ausente ou irreconhecível significa `open`: manutenção se liga de propósito.
+
+`drainWebhookEvents` consulta o modo e devolve `suspended: true` sem aplicar nada enquanto estiver `blocked`; os eventos acumulam e são retomados depois. O cron `/api/cron/bling-webhook-drain` roda a cada cinco minutos, **falha fechado** (sem `CRON_SECRET` responde 503, ao contrário dos crons mais antigos, porque este aplica gravações de negócio) e reusa `processDelivery`, o mesmo caminho do POST — um dreno que reimplementasse o processamento divergiria dele.
+
+Há teste fim a fim: uma entrega que o Bling não devolve fica em `failed`, o dreno a retoma quando a API responde, e o pedido é gravado. E outro que prova a suspensão: com o modo `blocked` nada é aplicado, e ao voltar para `open` o evento é processado.
+
+**O que a Task 1 ainda precisa fazer:** acrescentar `requireCoreWritesEnabled()` no mesmo arquivo e ligá-lo às 17 operações de escrita. O documento, os valores e o caminho de leitura já são os que este plano especifica, então é extensão, não substituição.
+
 ---
 
 ## Task 1: Interruptor de manutenção

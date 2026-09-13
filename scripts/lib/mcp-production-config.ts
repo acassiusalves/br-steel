@@ -8,6 +8,7 @@ const crons = [
  { path: '/api/cron/ml-health', schedule: '0 6 * * *' },
  { path: '/api/cron/ml-messages-drain', schedule: '* * * * *' },
  { path: '/api/cron/ml-messages-backfill', schedule: '*/5 * * * *' },
+ { path: '/api/cron/bling-webhook-drain', schedule: '*/5 * * * *' },
 ];
 // Match the raw JSON forms accepted by src/lib/firebase-admin.ts without loading the SDK or credentials.
 function parseCredential(raw: string) {
@@ -65,7 +66,7 @@ export function validateMcpProduction(env: Environment, config: { crons?: unknow
   if (!value || typeof value !== 'object') return false;
   const cron = value as Record<string, unknown>;
   return cron.path === expected.path && cron.schedule === expected.schedule;
- })), 'Preserve the three existing production cron paths and schedules.');
+ })), 'Preserve every existing production cron path and schedule.');
  return { errors, summary: errors.length ? null : { vercelProject: PRODUCTION.vercel, firebaseProject: PRODUCTION.firebase,
   supabaseProject: PRODUCTION.supabase, resource: PRODUCTION.resource, phase: env.MCP_ENABLED === 'true' ? 'read-only' : 'preparation', writes: false } };
 }

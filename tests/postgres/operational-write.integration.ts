@@ -433,6 +433,14 @@ test('SQL lots bootstrap the counter from legacy numbers instead of colliding', 
 
   const created = await production.createLot(lotInput(), { author, assignedTo: null }, actor);
   assert.equal(created.data.lotNumber, `LOT-${YEAR}-0043`, 'the counter must start above the highest legacy number');
+
+  // A number minted in another column is still a number: ignoring it would mint a duplicate.
+  const other = await production.createColumn({ name: 'Outra', order: 1, color: '#123456' }, actor);
+  await pool.query(`insert into brsteel_ops.production_lots (source_id, payload, source_version, source_hash, import_run_id)
+    values ('legacy-outra', $1, 1, $2, $3)`,
+    [JSON.stringify({ title: 'Legado', columnId: other.data.id, columnOrder: 0, lotNumber: `LOT-${YEAR}-0100` }), 'c'.repeat(64), RUN]);
+  const after = await production.createLot(lotInput(), { author, assignedTo: null }, actor);
+  assert.equal(after.data.lotNumber, `LOT-${YEAR}-0101`);
 });
 
 test('SQL production enforces item, column and comment rules', async () => {
@@ -649,4 +657,28 @@ test('Firestore and PostgreSQL ingest adapters agree on counts and final state',
   assert.deepEqual(sqlSteps[1], { count: 1, created: 0, updated: 1 });
   // The sparse re-save must not have emptied the item projection.
   assert.deepEqual(sqlItems, [{ order_id: '1', items: 1 }, { order_id: '2', items: 1 }, { order_id: '3', items: 1 }]);
+});
+
+test('an import refuses to reclaim a natively written row instead of overwriting it', async () => {
+  await seedReadyCopy();
+  // A native lot counter, the sharpest case: the id is deterministic and shared with Firestore, and
+  // letting the snapshot win would walk the sequence backwards and mint duplicate lot numbers.
+  await pool.query(`insert into brsteel_ops.production_counters (source_id, payload, source_version, source_hash, import_run_id)
+    values ($1, '{"sequence": 42}'::jsonb, 1, $2, $3)`, [`production-lots-${YEAR}`, 'a'.repeat(64), NATIVE_RUN_ID]);
+
+  const importPool = createLocalImportPool(url!);
+  try {
+    await assert.rejects(importSnapshot(importPool, { formatVersion: 1, sourceProject: 'demo-brsteel-auth',
+      capturedAt: new Date(Date.now() - 30 * 60 * 1000).toISOString(), completeCollections: [...COLLECTIONS],
+      records: [{ collection: 'operationsMetadata', id: `production-lots-${YEAR}`, version: '100', data: { sequence: 3 } }] }),
+      /collision/i);
+  } finally {
+    await importPool.end();
+  }
+
+  // The refusal must leave the native value intact, not half-applied.
+  const kept = (await pool.query(
+    `select payload->>'sequence' as sequence, import_run_id from brsteel_ops.production_counters where source_id = $1`,
+    [`production-lots-${YEAR}`])).rows[0];
+  assert.deepEqual(kept, { sequence: '42', import_run_id: NATIVE_RUN_ID });
 });

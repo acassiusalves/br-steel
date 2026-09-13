@@ -118,6 +118,20 @@ export async function importSnapshot(pool: Pool, raw: unknown, options: {
             throw new Error(`Source version conflict: ${collection}/${row.source_id}`);
           }
         }
+        // Three collections derive their ids the same way on both sides — the annual lot counter, the
+        // SKU key hash and the default column ids — so a snapshot document can land on a row this
+        // application wrote itself. Refuse loudly: letting the snapshot win would walk the lot counter
+        // backwards and mint duplicate numbers, and there is no merge rule that is obviously right.
+        // Resolving a collision is a deliberate act, not something an import should decide.
+        const collided = await client.query(
+          `select source_id from brsteel_ops.${TABLES[collection]}
+           where import_run_id = $1 and source_id = any($2) limit 1`,
+          [NATIVE_RUN_ID, [...wanted.keys()]]);
+        if (collided.rowCount) {
+          throw new Error(`Native row collision: ${collection}/${collided.rows[0].source_id}. `
+            + 'A cópia contém uma linha gravada pela aplicação com o mesmo identificador do snapshot. '
+            + 'Resolva explicitamente antes de importar.');
+        }
       }
       await client.query(`insert into brsteel_import.runs(id,source_project,captured_at,status,total_records)
         values($1,$2,$3,'loading',$4) on conflict(id) do nothing`, [snapshot.hash,snapshot.sourceProject,snapshot.capturedAt,snapshot.records.length]);

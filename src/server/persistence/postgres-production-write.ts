@@ -123,15 +123,15 @@ export function createPostgresProductionWriteRepository(pool: Pool): ProductionW
         const counterId = `production-lots-${year}`;
         const existed = (await client.query(
           `select payload from brsteel_ops.production_counters where source_id = $1 for update`, [counterId])).rows[0];
-        // Mirrors the Firestore bootstrap: without a counter every lot is scanned for a legacy number.
-        const scanned = (await client.query(existed
-          ? `select payload from brsteel_ops.production_lots where column_id = $1 and not source_deleted`
-          : `select payload from brsteel_ops.production_lots where not source_deleted`,
-          existed ? [input.columnId] : [])).rows.map(row => row.payload as Doc);
+        // Every lot is scanned for a legacy number, not only this column's: a number minted in another
+        // column can be higher than the counter, and ignoring it would mint a duplicate. Matches the
+        // Firestore adapter, which computes the same seed before its transaction.
+        const pattern = new RegExp(`^LOT-${year}-(\\d+)$`);
+        const allLots = (await client.query(
+          'select payload from brsteel_ops.production_lots where not source_deleted')).rows.map(row => row.payload as Doc);
         let sequence = Number((existed?.payload as Doc | undefined)?.sequence || 0);
         let maxOrder = -1;
-        const pattern = new RegExp(`^LOT-${year}-(\\d+)$`);
-        for (const lot of scanned) {
+        for (const lot of allLots) {
           const match = String(lot.lotNumber || '').match(pattern);
           if (match) sequence = Math.max(sequence, Number(match[1]));
           if (lot.columnId === input.columnId) maxOrder = Math.max(maxOrder, Number(lot.columnOrder || 0));
