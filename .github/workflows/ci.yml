@@ -47,3 +47,36 @@ jobs:
           npx --yes firebase-tools@14.11.1 emulators:exec
           --only firestore --project demo-brsteel-auth --config firebase.test.json
           'npx --no-install vitest run tests/access tests/oauth tests/mcp tests/operations tests/backup tests/deployment'
+
+  integration:
+    name: Integração PostgreSQL
+    runs-on: ubuntu-latest
+    # Separate from the unit job on purpose: this one needs Docker and pulls a PostgreSQL image, and a
+    # container or network failure here must not be mistaken for a failing test over there.
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      # The suite runs inside the Firestore emulator, which is a Java process.
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - run: npm ci
+
+      # scripts/operational-postgres-local.mjs spawns `firebase` directly, so it has to be on PATH —
+      # npx would not satisfy it.
+      - name: Instalar Firebase CLI
+        run: npm install --global firebase-tools@14.11.1
+
+      # Creates a disposable PostgreSQL 17 container published only on loopback, applies the
+      # operational migrations, verifies the catalog and runs the integration suite against it.
+      # Supabase advisors stay off: they are opt-in and would need another CLI on the runner.
+      - name: Integração
+        run: npm run test:postgres
