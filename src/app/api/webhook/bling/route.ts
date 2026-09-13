@@ -97,15 +97,14 @@ async function fetchOrderDetails(orderId: number): Promise<any> {
 
 // Update webhook status in Firestore
 async function updateWebhookStatus(orderId: number, event: string): Promise<void> {
-  const snap = await webhookStatusDocRef.get();
-  const current = snap.exists ? snap.data() : { totalReceived: 0 };
-
-  await webhookStatusDocRef.set( {
+  // merge matters: a set without it replaces the document, so the increment always restarts from a
+  // missing field and the counter stays at 1 forever instead of accumulating.
+  await webhookStatusDocRef.set({
     lastUpdate: new Date().toISOString(),
     lastOrderId: orderId,
     lastEvent: event,
     totalReceived: FieldValue.increment(1),
-  });
+  }, { merge: true });
 }
 
 // Firestore reference for stock updates
@@ -259,17 +258,14 @@ async function handleStockWebhook(payload: any, event: string): Promise<{ proces
   console.log(`✅ [WEBHOOK-ESTOQUE] SKU ${sku}: estoque = ${saldoVirtual}`);
 
   // Atualizar status do webhook de estoque
-  const statusSnap = await stockStatusDocRef.get();
-  const currentStatus = statusSnap.exists ? statusSnap.data() : { totalReceived: 0 };
-
-  await stockStatusDocRef.set( {
+  await stockStatusDocRef.set({
     lastUpdate: new Date().toISOString(),
     lastEvent: event,
     lastProcessed: 1,
     lastSku: sku,
     lastStock: saldoVirtual,
     totalReceived: FieldValue.increment(1),
-  });
+  }, { merge: true });
 
   // Invalidar cache de estoque
   // The local copy is already cleared; failing to publish the shared marker must not fail a write

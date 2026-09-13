@@ -60,3 +60,20 @@ it('does not queue anything when the signature fails', async () => {
   expect((await POST(request('pedido_venda.deleted', { id: 1 }, false))).status).toBe(401);
   expect((await adminDb.collection(WEBHOOK_EVENTS).get()).size).toBe(0);
 });
+
+it('accumulates the delivery counters instead of resetting them to one', async () => {
+  await POST(request('pedido_venda.deleted', { id: 1 }));
+  await POST(request('pedido_venda.deleted', { id: 2 }));
+  const orders = (await adminDb.collection('appConfig').doc('webhookStatus').get()).data();
+  // A set without merge replaces the document, so FieldValue.increment restarts from a missing
+  // field and the counter sticks at 1 no matter how many deliveries arrive.
+  expect(orders?.totalReceived).toBe(2);
+  expect(orders?.lastOrderId).toBe(2);
+
+  provider.fetch.mockResolvedValue({ data: { codigo: 'ZERO', nome: 'Chapa' } });
+  await POST(request('estoque.updated', { produto: { id: 20 }, saldoVirtualTotal: 1 }));
+  await POST(request('estoque.updated', { produto: { id: 20 }, saldoVirtualTotal: 2 }));
+  const stock = (await adminDb.collection('appConfig').doc('stockWebhookStatus').get()).data();
+  expect(stock?.totalReceived).toBe(2);
+  expect(stock?.lastStock).toBe(2);
+});
