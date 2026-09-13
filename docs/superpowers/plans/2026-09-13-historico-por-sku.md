@@ -213,11 +213,20 @@ export const HISTORY_WEEKS = 104;
  */
 export function closedWeeksSince(after: string | null, now: Date = new Date()): string[] {
   const current = isoWeekOf(now);
+  const windowEdge = isoWeekOf(new Date(now.valueOf() - HISTORY_WEEKS * 7 * DAY_MS));
+  // Uma lacuna maior que a janela de retenção recomeça na borda dela: semanas anteriores seriam
+  // podadas logo depois de escritas, e processá-las adiaria a chegada às que importam.
+  let cursor = after ? nextWeek(after) : windowEdge;
+  if (cursor < windowEdge) cursor = windowEdge;
   const weeks: string[] = [];
-  let cursor = after ? nextWeek(after) : isoWeekOf(new Date(now.valueOf() - HISTORY_WEEKS * 7 * DAY_MS));
-  for (let guard = 0; guard <= HISTORY_WEEKS + 1 && cursor !== current; guard++) {
+  for (let guard = 0; guard < HISTORY_WEEKS && cursor !== current; guard++) {
     weeks.push(cursor);
     cursor = nextWeek(cursor);
+  }
+  // Com o recorte acima o laço sempre alcança a semana corrente. Não alcançar significa checkpoint
+  // corrompido ou no futuro — falhar alto é melhor que devolver uma lista silenciosamente incompleta.
+  if (cursor !== current) {
+    throw new Error(`closedWeeksSince: checkpoint corrompido ou no futuro — depois de ${HISTORY_WEEKS} semanas a partir de ${after ?? '(sem checkpoint)'} ainda não alcançou a semana corrente ${current}.`);
   }
   return weeks;
 }
