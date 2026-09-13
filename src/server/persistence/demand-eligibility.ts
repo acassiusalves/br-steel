@@ -7,8 +7,29 @@ import type { SaleOrder } from '@/types/sale-order';
  * O id 12 ("Cancelado") foi verificado nos dados reais de produção. Para estender a lista, consulte o
  * mapa de situações que o webhook carrega em src/app/api/webhook/bling/route.ts:163 e acrescente o id
  * junto de um caso de teste — nunca por suposição sobre o significado do número.
+ *
+ * Esta constante é usada tanto aqui quanto na query SQL de demanda de produção em
+ * postgres-production-demand.ts — a query interpola o valor desta constante, portanto não há
+ * necessidade de manter o SQL sincronizado manualmente.
  */
 export const CANCELLED_ORDER_STATUS: ReadonlySet<number> = new Set([12]);
+
+/**
+ * Constrói o fragmento SQL de exclusão de situações canceladas.
+ * Interpola a constante CANCELLED_ORDER_STATUS para garantir que a query sempre reflete
+ * o predicado de cancelamento definido neste módulo.
+ *
+ * @throws Error se CANCELLED_ORDER_STATUS estiver vazio (SQL não aceita 'not in ()')
+ */
+export function buildCancelledStatusSqlFragment(): string {
+  if (CANCELLED_ORDER_STATUS.size === 0) {
+    throw new Error('CANCELLED_ORDER_STATUS não pode estar vazio para construir o fragmento SQL');
+  }
+  const statusList = Array.from(CANCELLED_ORDER_STATUS)
+    .map(id => `'${id}'::jsonb`)
+    .join(',');
+  return `not in (${statusList})`;
+}
 
 /**
  * Um pedido conta como consumo de estoque?

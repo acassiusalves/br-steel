@@ -5,8 +5,11 @@ import type { ProductionDemand, ProductionDemandReadRepository } from './product
 import { withOperationalSnapshot } from './postgres-read';
 import { latestStockSql } from './postgres-stock';
 import { storedStockWarnings } from './stored-stock-model';
+import { buildCancelledStatusSqlFragment } from './demand-eligibility';
 
-const demandSql = `with valid_items as (
+function buildDemandSql(): string {
+  const cancelledStatusFragment = buildCancelledStatusSqlFragment();
+  return `with valid_items as (
   select o.source_id,i.position,i.payload->'codigo' as sku,i.payload->'descricao' as description,
     i.payload ? 'descricao' as description_present,i.quantity,
     row_number() over(order by o.order_date,o.source_id,i.position) as item_order,
@@ -18,7 +21,7 @@ const demandSql = `with valid_items as (
   from brsteel_ops.sales_orders o join brsteel_ops.sales_order_items i on i.order_id=o.source_id
   where not o.source_deleted and o.order_date between $1 and $2
     and coalesce(o.payload#>'{notaFiscal,id}','null'::jsonb) not in ('null'::jsonb,'false'::jsonb,'0'::jsonb,'""'::jsonb)
-    and coalesce(o.payload#>'{situacao,id}','null'::jsonb) not in ('12'::jsonb)
+    and coalesce(o.payload#>'{situacao,id}','null'::jsonb) ${cancelledStatusFragment}
     and coalesce(i.payload->'codigo','null'::jsonb) not in ('null'::jsonb,'false'::jsonb,'0'::jsonb,'""'::jsonb)
     and i.quantity>0
 ), aggregated as (
@@ -33,6 +36,9 @@ from aggregated a join valid_items f on f.item_order=a.first_seen
 left join latest_stock s on to_jsonb(s.observed_sku)=f.sku
 left join limits l on to_jsonb(l.lookup_sku)=f.sku
 order by a.quantity desc,a.first_seen`;
+}
+
+const demandSql = buildDemandSql();
 
 export function createPostgresProductionDemandRepository(pool: Pool): ProductionDemandReadRepository {
   return { async read(raw) {
