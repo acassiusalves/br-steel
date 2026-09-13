@@ -10,6 +10,12 @@ import { createPostgresSuppliesWriteRepository } from '@/server/persistence/post
 import type { SupplyFields, SuppliesWriteRepository } from '@/server/persistence/supplies-write-contract';
 import { firestoreSuppliesWriteRepository } from '@/server/persistence/firestore-supplies-write';
 import { createSuppliesWriteOperations } from '@/server/operations/supplies';
+import { createProductionWriteOperations } from '@/server/operations/production';
+import { firestoreProductionWriteRepository } from '@/server/persistence/firestore-production-write';
+import type { ProductionWriteRepository } from '@/server/persistence/production-write-contract';
+import { initializeApp, getApps } from 'firebase-admin/app';
+import { createPostgresProductionWriteRepository } from '@/server/persistence/postgres-production-write';
+import type { WriteIdentity } from '@/server/persistence/production-write-contract';
 import { pagePermissions } from '@/lib/permissions';
 import { mcpCapabilities } from '@/lib/mcp-capabilities';
 import type { AccessContext } from '@/server/access/types';
@@ -226,8 +232,11 @@ test('native rows survive an import that reconciles snapshot documents', async (
   const importPool = createLocalImportPool(url!);
   try {
     // A complete but empty snapshot is the sharpest case: every snapshot document is absent.
+    // Half an hour back: newer than the seeded copy, but never ahead of the database clock that
+    // stamps completed_at, which the ready_copy_metadata constraint compares it against.
     await importSnapshot(importPool, { formatVersion: 1, sourceProject: 'demo-brsteel-auth',
-      capturedAt: new Date().toISOString(), completeCollections: [...COLLECTIONS], records: [] });
+      capturedAt: new Date(Date.now() - 30 * 60 * 1000).toISOString(),
+      completeCollections: [...COLLECTIONS], records: [] });
   } finally {
     await importPool.end();
   }
@@ -372,4 +381,174 @@ test('Firestore and PostgreSQL supplies write adapters are observationally equiv
   assert.deepEqual(sql, firestore);
   // A trace where every step failed would compare equal and prove nothing.
   assert.ok(sql.filter(step => !(step as { error?: string }).error).length >= 6, JSON.stringify(sql));
+});
+
+const production = createPostgresProductionWriteRepository(writerPool);
+const author: WriteIdentity = { userId: 'u1', userName: 'Operador' };
+const YEAR = new Date().getUTCFullYear();
+
+/** Lots reference a column and items reference both the lot and a sales order, so both must exist. */
+async function seedProductionBase() {
+  await seedReadyCopy();
+  for (const [table, id, payload] of [
+    ['production_columns', 'queue', { name: 'Fila', order: 0, color: '#000000' }],
+    ['sales_orders', '123', { id: 123, numero: 456, itens: [{ codigo: 'SKU', descricao: 'Steel', quantidade: 5, unidade: 'KG' }] }],
+  ] as const) {
+    await pool.query(`insert into brsteel_ops.${table} (source_id, payload, source_version, source_hash, import_run_id)
+      values ($1, $2, 1, $3, $4)`, [id, JSON.stringify(payload), 'a'.repeat(64), RUN]);
+  }
+}
+const lotInput = (quantity = 2) => ({ title: 'Lote', columnId: 'queue', priority: 'normal' as const,
+  items: [{ sourceOrderId: 123, sku: 'SKU', quantity }] });
+
+test('SQL lot numbers are annual, consecutive and never repeat under concurrency', async () => {
+  await seedProductionBase();
+
+  const first = await production.createLot(lotInput(), { author, assignedTo: null }, actor);
+  assert.equal(first.data.lotNumber, `LOT-${YEAR}-0001`);
+  assert.equal(first.source, 'postgres');
+
+  const concurrent = await Promise.all(Array.from({ length: 4 }, () =>
+    production.createLot(lotInput(0.5), { author, assignedTo: null }, actor)));
+  const numbers = concurrent.map(response => response.data.lotNumber);
+  assert.equal(new Set(numbers).size, 4, `concurrent lots must not repeat a number: ${numbers.join()}`);
+  assert.deepEqual([...numbers].sort(), [2, 3, 4, 5].map(n => `LOT-${YEAR}-000${n}`));
+
+  // Column order keeps appending rather than colliding on the same position.
+  const orders = (await pool.query(
+    `select payload->>'columnOrder' as position from brsteel_ops.production_lots order by (payload->>'columnOrder')::int`))
+    .rows.map(row => Number(row.position));
+  assert.deepEqual(orders, [0, 1, 2, 3, 4]);
+});
+
+test('SQL lots bootstrap the counter from legacy numbers instead of colliding', async () => {
+  await seedProductionBase();
+  // A migrated lot that already carries a number, with no counter row yet.
+  await pool.query(`insert into brsteel_ops.production_lots (source_id, payload, source_version, source_hash, import_run_id)
+    values ('legacy', $1, 1, $2, $3)`,
+    [JSON.stringify({ title: 'Legado', columnId: 'queue', columnOrder: 0, lotNumber: `LOT-${YEAR}-0042` }), 'b'.repeat(64), RUN]);
+
+  const created = await production.createLot(lotInput(), { author, assignedTo: null }, actor);
+  assert.equal(created.data.lotNumber, `LOT-${YEAR}-0043`, 'the counter must start above the highest legacy number');
+});
+
+test('SQL production enforces item, column and comment rules', async () => {
+  await seedProductionBase();
+  await assert.rejects(production.createLot({ ...lotInput(), items: [{ sourceOrderId: 123, sku: 'OUTRO', quantity: 1 }] },
+    { author, assignedTo: null }, actor), (error: unknown) => (error as { code?: string }).code === 'INVALID_ITEM');
+  await assert.rejects(production.createLot(lotInput(6), { author, assignedTo: null }, actor),
+    (error: unknown) => (error as { code?: string }).code === 'INVALID_QUANTITY');
+  await assert.rejects(production.createLot({ ...lotInput(), columnId: 'missing' }, { author, assignedTo: null }, actor),
+    (error: unknown) => (error as { code?: string }).code === 'NOT_FOUND');
+
+  const lot = await production.createLot(lotInput(), { author, assignedTo: null }, actor);
+  await assert.rejects(production.deleteColumn('queue', actor),
+    (error: unknown) => (error as { code?: string }).code === 'COLUMN_NOT_EMPTY');
+
+  const other = await production.createColumn({ name: 'Outra', order: 1, color: '#123456' }, actor);
+  await assert.rejects(production.reorderLotsInColumn(other.data.id, [{ id: lot.data.id, order: 0 }], actor),
+    (error: unknown) => (error as { code?: string }).code === 'INVALID_COLUMN');
+
+  const comment = await production.createComment({ lotId: lot.data.id, content: 'Olá' }, author, actor);
+  await assert.rejects(production.changeComment(comment.data.id, 'x', { isAdmin: false },
+    { ...actor, userId: 'outro' }), (error: unknown) => (error as { code?: string }).code === 'FORBIDDEN');
+  await production.changeComment(comment.data.id, 'pelo admin', { isAdmin: true }, { ...actor, userId: 'outro' });
+
+  // Deleting a lot removes its items and comments in the same transaction.
+  await production.deleteLot(lot.data.id, actor);
+  for (const table of ['production_lot_items', 'production_comments']) {
+    assert.equal((await pool.query(`select count(*)::int as count from brsteel_ops.${table}`)).rows[0].count, 0, table);
+  }
+});
+
+const operator: AccessContext = { ...admin, actor: { userId: 'operator', role: 'Operador', source: 'web' } };
+const outsider: AccessContext = { ...admin, actor: { userId: 'outro', role: 'Operador', source: 'web' } };
+
+const resetFirestore = async () => {
+  const response = await fetch(
+    'http://127.0.0.1:8188/emulator/v1/projects/demo-brsteel-auth/databases/(default)/documents', { method: 'DELETE' });
+  assert.ok(response.ok, 'the Firestore emulator must be reachable');
+};
+
+/** The identity store is shared by both adapters: users are not part of the operational core. */
+async function seedIdentities() {
+  if (!getApps().length) initializeApp({ projectId: 'demo-brsteel-auth' });
+  const { getFirestore } = await import('firebase-admin/firestore');
+  const db = getFirestore();
+  await db.collection('users').doc('operator').set({ role: 'Operador', name: 'Actual Operator', active: true });
+  await db.collection('users').doc('u1').set({ role: 'Administrador', name: 'Chefe', active: true });
+  await db.collection('users').doc('outro').set({ role: 'Operador', name: 'Outro', active: true });
+  return db;
+}
+
+async function productionTrace(repository: ProductionWriteRepository) {
+  const ops = createProductionWriteOperations(repository);
+  const steps: unknown[] = [];
+  const ids: Record<string, string> = {};
+  const run = async (label: string, action: () => Promise<{ data: unknown }>) => {
+    try {
+      const response = await action();
+      const data = response.data === null ? null : { ...(response.data as Record<string, unknown>) };
+      if (data && typeof data.id === 'string') { ids[label] = data.id; data.id = `<${label}>`; }
+      steps.push({ label, data });
+    } catch (error) {
+      steps.push({ label, error: (error as { code?: string }).code ?? String(error), status: (error as { status?: number }).status });
+    }
+  };
+
+  await run('column', () => ops.createColumn(operator, { name: 'Fila', order: 0, color: '#000000' }));
+  const columnId = ids.column;
+  const lotOf = (items: unknown[]) => ({ title: 'Lote', columnId, priority: 'normal', items });
+  await run('lot', () => ops.createLot(operator, lotOf([{ sourceOrderId: 123, sku: 'SKU', quantity: 2 }])));
+  await run('lot-bad-sku', () => ops.createLot(operator, lotOf([{ sourceOrderId: 123, sku: 'X', quantity: 1 }])));
+  await run('lot-excess', () => ops.createLot(operator, lotOf([{ sourceOrderId: 123, sku: 'SKU', quantity: 9 }])));
+  await run('lot-missing-column', () => ops.createLot(operator, { ...lotOf([{ sourceOrderId: 123, sku: 'SKU', quantity: 1 }]), columnId: 'nao-existe' }));
+  await run('lot-ghost-author', () => ops.createLot({ ...operator, actor: { ...operator.actor, userId: 'fantasma' } }, lotOf([{ sourceOrderId: 123, sku: 'SKU', quantity: 1 }])));
+  await run('column-2', () => ops.createColumn(operator, { name: 'Outra', order: 1, color: '#123456' }));
+  await run('reorder-wrong-column', () => ops.reorderLotsInColumn(operator, ids['column-2'], [{ id: ids.lot, order: 0 }]));
+  await run('delete-column-in-use', () => ops.deleteColumn(operator, columnId));
+  await run('comment', () => ops.createComment(operator, { lotId: ids.lot, content: 'Olá' }));
+  await run('comment-outsider', () => ops.updateComment(outsider, ids.comment, 'ataque'));
+  await run('comment-admin', () => ops.updateComment(admin, ids.comment, 'pelo admin'));
+  await run('delete-lot', () => ops.deleteLot(operator, ids.lot));
+  await run('delete-column', () => ops.deleteColumn(operator, columnId));
+  return steps;
+}
+
+test('Firestore and PostgreSQL production write adapters are observationally equivalent', async () => {
+  await seedProductionBase();
+  await resetFirestore();
+  const db = await seedIdentities();
+  const sqlSteps = await productionTrace(production);
+
+  // The SQL trace ran against the seeded columns/orders; give Firestore the same starting point.
+  await db.collection('salesOrders').doc('123').set({ id: 123, numero: 456, total: 999,
+    contato: { nome: 'Private', cpf: 'secret' }, xml: 'secret',
+    itens: [{ codigo: 'SKU', descricao: 'Steel', quantidade: 5, unidade: 'KG', valor: 100 }] });
+  const firestoreSteps = await productionTrace(firestoreProductionWriteRepository);
+
+  assert.deepEqual(sqlSteps, firestoreSteps);
+  assert.ok(sqlSteps.filter(step => !(step as { error?: string }).error).length >= 7, JSON.stringify(sqlSteps));
+});
+
+test('production lot items never carry commercial data from the order', async () => {
+  await seedProductionBase();
+  await resetFirestore();
+  await seedIdentities();
+  await pool.query(`update brsteel_ops.sales_orders set payload = $1 where source_id = '123'`,
+    [JSON.stringify({ id: 123, numero: 456, total: 999, contato: { nome: 'Private', cpf: 'secret' }, xml: 'secret',
+      itens: [{ codigo: 'SKU', descricao: 'Steel', quantidade: 5, unidade: 'KG', valor: 100 }] })]);
+
+  const ops = createProductionWriteOperations(production);
+  const lot = await ops.createLot(operator, { title: 'Lote', columnId: 'queue', priority: 'normal',
+    items: [{ sourceOrderId: 123, sku: 'SKU', quantity: 2 }] });
+
+  const items = (await pool.query('select payload from brsteel_ops.production_lot_items')).rows.map(row => row.payload);
+  assert.equal(items.length, 1);
+  assert.deepEqual(items[0], { lotId: lot.data.id, sku: 'SKU', quantity: 2, productName: 'Steel', unit: 'KG',
+    sourceOrderId: 123, sourceOrderNumber: '456', customerName: '', createdAt: items[0].createdAt });
+  const serialized = JSON.stringify(items);
+  for (const leak of ['secret', 'Private', 'cpf', 'xml', '999', '100']) {
+    assert.ok(!serialized.includes(leak), `production items leaked ${leak}: ${serialized}`);
+  }
 });
