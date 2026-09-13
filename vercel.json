@@ -1,8 +1,21 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "crons": [
-    { "path": "/api/cron/ml-health", "schedule": "0 6 * * *" },
-    { "path": "/api/cron/ml-messages-drain", "schedule": "* * * * *" },
-    { "path": "/api/cron/ml-messages-backfill", "schedule": "*/5 * * * *" }
+    {
+      "path": "/api/cron/ml-health",
+      "schedule": "0 6 * * *"
+    },
+    {
+      "path": "/api/cron/ml-messages-drain",
+      "schedule": "* * * * *"
+    },
+    {
+      "path": "/api/cron/ml-messages-backfill",
+      "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/cron/bling-webhook-drain",
+      "schedule": "*/5 * * * *"
+    }
   ]
 }

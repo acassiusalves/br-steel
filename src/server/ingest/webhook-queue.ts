@@ -1,6 +1,7 @@
 import 'server-only';
 import { createHash } from 'node:crypto';
 import { adminDb } from '@/lib/firebase-admin';
+import { readCoreWriteMode } from '@/server/operations/maintenance';
 
 export const WEBHOOK_EVENTS = 'blingWebhookEvents';
 export type WebhookTopic = 'order' | 'stock' | 'other';
@@ -50,6 +51,8 @@ export async function markWebhookEvent(id: string, status: WebhookStatus, error?
  * stays retryable instead of depending on Bling deciding to deliver again.
  */
 export async function drainWebhookEvents(limit: number, handle: (event: QueuedEvent) => Promise<void>) {
+  // During the cutover the queue must accumulate rather than apply anything, and resume afterwards.
+  if (await readCoreWriteMode() === 'blocked') return { processed: 0, failed: 0, suspended: true };
   const pending = await adminDb.collection(WEBHOOK_EVENTS)
     .where('status', 'in', ['received', 'failed']).limit(limit).get();
   let processed = 0, failed = 0;
@@ -76,5 +79,5 @@ export async function drainWebhookEvents(limit: number, handle: (event: QueuedEv
       failed++;
     }
   }
-  return { processed, failed };
+  return { processed, failed, suspended: false };
 }

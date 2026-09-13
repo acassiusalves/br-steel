@@ -283,6 +283,66 @@ async function handleOrderDeleted(orderId: number): Promise<void> {
 }
 
 // POST - Receive webhook events from Bling
+export type DeliveryResult = {
+  outcome: 'processed' | 'ignored';
+  message: string;
+  orderId?: number;
+  processed?: number;
+};
+
+/**
+ * Applies one delivery. Shared by the HTTP handler and the drain so a retried event follows exactly
+ * the same path as a first attempt — a drain that reimplemented this would drift from it.
+ *
+ * Throws on failure. The caller decides what that means: the HTTP handler leaves the event queued as
+ * failed and still answers 200, because a non-200 only makes Bling redeliver blindly.
+ */
+export async function processDelivery(event: string, data: Record<string, unknown>, payload: unknown): Promise<DeliveryResult> {
+  if (isOrderEvent(event)) {
+    // parse() throws on anything that is not a positive integer, so there is no falsy case below.
+    const orderId = z.number().int().positive().safe().parse(data.id);
+    console.log(`📦 [WEBHOOK] Processando pedido ${orderId} (ação: ${getEventAction(event)})`);
+
+    if (getEventAction(event) === 'deleted') {
+      await handleOrderDeleted(orderId);
+      await updateWebhookStatus(orderId, event);
+      return { outcome: 'processed', message: `Pedido ${orderId} marcado como excluído`, orderId };
+    }
+
+    let orderDetails = await fetchOrderDetails(orderId);
+    if (!orderDetails) throw new Error('Pedido não encontrado na API do Bling.');
+
+    // Enriquecer com nome da situação (API v3 não retorna o nome)
+    orderDetails = await enrichOrderWithSituacaoNome(orderDetails);
+    const invoiceEnrichment = await enrichOrderWithInvoice(orderDetails, (url) => blingFetch(url), {
+      fetchXml: process.env.BLING_FETCH_INVOICE_XML_ON_WEBHOOK === '1',
+      skipExistingXml: true,
+      source: 'bling-webhook',
+    });
+    orderDetails = invoiceEnrichment.order;
+    const stats = invoiceEnrichment.stats;
+    if (stats.invoiceDetailsFetched > 0 || stats.invoiceXmlFetched > 0 || stats.invoiceErrors > 0 || stats.invoiceXmlErrors > 0) {
+      console.log(`📄 [WEBHOOK] NF-e: detalhes=${stats.invoiceDetailsFetched}, xml=${stats.invoiceXmlFetched}, erros=${stats.invoiceErrors + stats.invoiceXmlErrors}`);
+    }
+
+    await saveSalesOrders([{ ...orderDetails, webhookSource: true, webhookReceivedAt: new Date().toISOString() }]);
+    await updateWebhookStatus(orderId, event);
+    // The local copy is already cleared; failing to publish the shared marker must not fail a write
+    // that has already been persisted.
+    await invalidateProductStockCache().catch(() => undefined);
+    return { outcome: 'processed', message: `Pedido ${orderDetails.numero || orderId} processado`, orderId };
+  }
+
+  if (isStockEvent(event)) {
+    console.log(`📦 [WEBHOOK] Processando evento de estoque: ${event}`);
+    const stock = await handleStockWebhook(payload, event);
+    return { outcome: 'processed', message: `Estoque processado: ${stock.processed} item(s)`, processed: stock.processed };
+  }
+
+  console.log(`ℹ️ [WEBHOOK] Evento ${event} não suportado, ignorando`);
+  return { outcome: 'ignored', message: 'Evento não processado' };
+}
+
 export async function POST(request: Request) {
   const startTime = Date.now();
   let queuedEventId: string | null = null;
@@ -340,123 +400,15 @@ export async function POST(request: Request) {
     }
 
     // Process order events
-    if (isOrderEvent(event)) {
-      const orderId = z.number().int().positive().safe().parse(data.id);
-      const action = getEventAction(event);
-
-      if (!orderId) {
-        console.error('❌ [WEBHOOK] ID do pedido não informado');
-        return NextResponse.json({ error: 'ID do pedido não informado' }, { status: 400 });
-      }
-
-      console.log(`📦 [WEBHOOK] Processando pedido ${orderId} (ação: ${action})`);
-
-      if (action === 'deleted') {
-        await handleOrderDeleted(orderId);
-        await updateWebhookStatus(orderId, event);
-        await markWebhookEvent(eventId, 'processed');
-
-        return NextResponse.json({
-          success: true,
-          message: `Pedido ${orderId} marcado como excluído`,
-          event,
-          processedIn: `${Date.now() - startTime}ms`,
-        });
-      }
-
-      // Fetch complete order details
-      let orderDetails = await fetchOrderDetails(orderId);
-
-      if (!orderDetails) {
-        await markWebhookEvent(eventId, 'failed', 'Pedido não encontrado na API do Bling.');
-      console.warn(`⚠️ [WEBHOOK] Pedido ${orderId} não encontrado na API`);
-        return NextResponse.json({
-          success: false,
-          message: 'Pedido não encontrado na API',
-          event,
-          processedIn: `${Date.now() - startTime}ms`,
-        });
-      }
-
-      // Enriquecer com nome da situação (API v3 não retorna o nome)
-      orderDetails = await enrichOrderWithSituacaoNome(orderDetails);
-
-      const invoiceEnrichment = await enrichOrderWithInvoice(
-        orderDetails,
-        (url) => blingFetch(url),
-        {
-          fetchXml: process.env.BLING_FETCH_INVOICE_XML_ON_WEBHOOK === '1',
-          skipExistingXml: true,
-          source: 'bling-webhook',
-        }
-      );
-      orderDetails = invoiceEnrichment.order;
-
-      if (
-        invoiceEnrichment.stats.invoiceDetailsFetched > 0 ||
-        invoiceEnrichment.stats.invoiceXmlFetched > 0 ||
-        invoiceEnrichment.stats.invoiceErrors > 0 ||
-        invoiceEnrichment.stats.invoiceXmlErrors > 0
-      ) {
-        console.log(
-          `📄 [WEBHOOK] NF-e: detalhes=${invoiceEnrichment.stats.invoiceDetailsFetched}, xml=${invoiceEnrichment.stats.invoiceXmlFetched}, erros=${invoiceEnrichment.stats.invoiceErrors + invoiceEnrichment.stats.invoiceXmlErrors}`
-        );
-      }
-
-      // Save order to Firestore with webhook source flag
-      const orderWithSource = {
-        ...orderDetails,
-        webhookSource: true,
-        webhookReceivedAt: new Date().toISOString(),
-      };
-
-      await saveSalesOrders([orderWithSource]);
-      await updateWebhookStatus(orderId, event);
-
-      // Invalida o cache de estoque para garantir dados atualizados na próxima requisição
-      // The local copy is already cleared; failing to publish the shared marker must not fail a write
-  // that has already been persisted.
-  await invalidateProductStockCache().catch(() => undefined);
-
-      await markWebhookEvent(eventId, 'processed');
-      console.log(`✅ [WEBHOOK] Pedido ${orderDetails.numero || orderId} salvo com sucesso`);
-      console.log(`⏱️ [WEBHOOK] Processado em ${Date.now() - startTime}ms`);
-
-      return NextResponse.json({
-        success: true,
-        message: `Pedido ${orderDetails.numero || orderId} processado`,
-        event,
-        orderId,
-        processedIn: `${Date.now() - startTime}ms`,
-      });
-    }
-
-    // Process stock events
-    if (isStockEvent(event)) {
-      console.log(`📦 [WEBHOOK] Processando evento de estoque: ${event}`);
-
-      const result = await handleStockWebhook(payload, event);
-
-      await markWebhookEvent(eventId, 'processed');
-      console.log(`✅ [WEBHOOK] Estoque processado: ${result.processed} item(s)`);
-      console.log(`⏱️ [WEBHOOK] Processado em ${Date.now() - startTime}ms`);
-
-      return NextResponse.json({
-        success: true,
-        message: `Estoque processado: ${result.processed} item(s)`,
-        event,
-        processed: result.processed,
-        processedIn: `${Date.now() - startTime}ms`,
-      });
-    }
-
-    // Event not supported
-    await markWebhookEvent(eventId, 'ignored');
-    console.log(`ℹ️ [WEBHOOK] Evento ${event} não suportado, ignorando`);
+    const result = await processDelivery(event, data, payload);
+    await markWebhookEvent(eventId, result.outcome);
+    console.log(`✅ [WEBHOOK] ${result.message} (${Date.now() - startTime}ms)`);
     return NextResponse.json({
       success: true,
-      message: 'Evento não processado',
+      message: result.message,
       event,
+      ...(result.orderId !== undefined ? { orderId: result.orderId } : {}),
+      ...(result.processed !== undefined ? { processed: result.processed } : {}),
       processedIn: `${Date.now() - startTime}ms`,
     });
 
