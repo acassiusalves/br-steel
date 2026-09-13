@@ -9,6 +9,12 @@ export const TABLES = {
 } as const;
 export type OperationalCollection = keyof typeof TABLES;
 export const COLLECTIONS = Object.keys(TABLES) as OperationalCollection[];
+
+/**
+ * Rows written natively by the application carry this run instead of a snapshot hash. The importer must
+ * never reconcile them away and the comparison must never count them as snapshot documents.
+ */
+export const NATIVE_RUN_ID = '0'.repeat(64);
 export type SourceRecord = { collection: OperationalCollection; id: string; version: string; data: Record<string, unknown> };
 export type OperationalSnapshot = { formatVersion: 1; sourceProject: string; capturedAt: string;
   completeCollections: OperationalCollection[]; records: SourceRecord[] };

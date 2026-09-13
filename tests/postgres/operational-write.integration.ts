@@ -4,6 +4,8 @@ import { Pool, type PoolClient } from 'pg';
 import { withOperationalWrite } from '@/server/persistence/postgres-write';
 import { recordWriteAudit, replayIdempotent, storeIdempotent, type WriteActor } from '@/server/persistence/write-audit';
 import { withPilotSnapshot } from '@/server/persistence/pilot-snapshot';
+import { COLLECTIONS, NATIVE_RUN_ID } from '@/server/migration/operational-snapshot';
+import { createLocalImportPool, importSnapshot } from '@/server/migration/operational-import';
 
 const url = process.env.BRSTEEL_PG_LOCAL_URL;
 assert.ok(url);
@@ -19,9 +21,11 @@ async function seedReadyCopy(ready = true) {
   await pool.query('truncate brsteel_import.runs cascade');
   await pool.query('truncate brsteel_write.audit, brsteel_write.idempotency');
   await pool.query(`insert into brsteel_import.runs (id, source_project, captured_at, status, next_index, total_records, completed_at)
-    values ($1, 'demo-brsteel-auth', now(), 'complete', 0, 0, now())`, [RUN]);
+    values ($1, 'brsteel-native', '-infinity', 'complete', 0, 0, '-infinity') on conflict (id) do nothing`, [NATIVE_RUN_ID]);
+  await pool.query(`insert into brsteel_import.runs (id, source_project, captured_at, status, next_index, total_records, completed_at)
+    values ($1, 'demo-brsteel-auth', now() - interval '1 hour', 'complete', 0, 0, now() - interval '1 hour')`, [RUN]);
   await pool.query(`insert into brsteel_import.state (singleton, source_project, active_run, ready, captured_at, completed_at)
-    values (true, 'demo-brsteel-auth', $1, $2, now(), now())
+    values (true, 'demo-brsteel-auth', $1, $2, now() - interval '1 hour', now() - interval '1 hour')
     on conflict (singleton) do update set active_run = excluded.active_run, ready = excluded.ready,
       captured_at = excluded.captured_at, completed_at = excluded.completed_at`, [RUN, ready]);
 }
@@ -205,4 +209,23 @@ test('api roles stay locked out of the native write schema', async () => {
   } finally {
     client.release();
   }
+});
+
+test('native rows survive an import that reconciles snapshot documents', async () => {
+  await seedReadyCopy();
+  await pool.query(`insert into brsteel_ops.supplies (source_id, payload, source_version, source_hash, import_run_id)
+    values ('native-1', '{"codigo": "N1"}'::jsonb, 1, $1, $2)`, ['f'.repeat(64), NATIVE_RUN_ID]);
+
+  const importPool = createLocalImportPool(url!);
+  try {
+    // A complete but empty snapshot is the sharpest case: every snapshot document is absent.
+    await importSnapshot(importPool, { formatVersion: 1, sourceProject: 'demo-brsteel-auth',
+      capturedAt: new Date().toISOString(), completeCollections: [...COLLECTIONS], records: [] });
+  } finally {
+    await importPool.end();
+  }
+
+  const row = (await pool.query(
+    `select source_deleted from brsteel_ops.supplies where source_id = 'native-1'`)).rows[0];
+  assert.equal(row?.source_deleted, false, 'a native row must not be reconciled away by a snapshot import');
 });

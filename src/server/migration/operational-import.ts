@@ -1,5 +1,5 @@
 import { Pool, type PoolClient } from 'pg';
-import { COLLECTIONS, TABLES, contentHash, prepareSnapshot, type PreparedSnapshot } from './operational-snapshot';
+import { COLLECTIONS, TABLES, contentHash, prepareSnapshot, type PreparedSnapshot, NATIVE_RUN_ID } from './operational-snapshot';
 import { prepareStockReadModels } from '../persistence/stored-stock-model';
 import { checkImportTarget } from './operational-hosted';
 
@@ -23,7 +23,8 @@ async function compare(client: PoolClient, snapshot: PreparedSnapshot) {
   let records = 0;
   for (const collection of COLLECTIONS) {
     const expected = new Map(snapshot.records.filter(r => r.collection === collection).map(r => [r.id, r]));
-    const actual = await client.query(`select source_id, payload, source_version::text, source_hash from brsteel_ops.${TABLES[collection]} where not source_deleted`);
+    const actual = await client.query(`select source_id, payload, source_version::text, source_hash
+      from brsteel_ops.${TABLES[collection]} where not source_deleted and import_run_id <> $1`, [NATIVE_RUN_ID]);
     if (actual.rows.length !== expected.size) throw new Error(`Count mismatch: ${collection}`);
     for (const row of actual.rows) {
       const source = expected.get(row.source_id);
@@ -37,7 +38,8 @@ async function compare(client: PoolClient, snapshot: PreparedSnapshot) {
     const items = row.data.itens as unknown[] | null | undefined;
     items?.forEach((item, position) => expectedItems.set(`${row.id}/${position}`, item));
   }
-  const items = await client.query('select order_id, position, payload from brsteel_ops.sales_order_items');
+  const items = await client.query(`select i.order_id, i.position, i.payload from brsteel_ops.sales_order_items i
+    join brsteel_ops.sales_orders o on o.source_id = i.order_id where o.import_run_id <> $1`, [NATIVE_RUN_ID]);
   if (items.rows.length !== expectedItems.size) throw new Error('Order item count mismatch');
   for (const item of items.rows) {
     const source = expectedItems.get(`${item.order_id}/${item.position}`);
@@ -45,7 +47,7 @@ async function compare(client: PoolClient, snapshot: PreparedSnapshot) {
   }
   const stockModels = prepareStockReadModels(snapshot.records.filter(row => row.collection === 'stockUpdates'));
   for (const row of (await client.query(`select source_id,stock_read,observed_at_ms,sku_order
-    from brsteel_ops.stock_observations where not source_deleted`)).rows) {
+    from brsteel_ops.stock_observations where not source_deleted and import_run_id <> $1`, [NATIVE_RUN_ID])).rows) {
     const expected = stockModels.get(row.source_id);
     if (contentHash(row.stock_read) !== contentHash(expected?.stock ?? null)
       || row.observed_at_ms !== (expected?.observedAtMs ?? null) || row.sku_order !== (expected?.skuOrder ?? null)) {
@@ -53,7 +55,8 @@ async function compare(client: PoolClient, snapshot: PreparedSnapshot) {
     }
   }
   const limits = new Map(snapshot.records.filter(row => row.collection === 'supplies').map(row => [row.id,String(row.data.codigo || row.id)]));
-  for (const row of (await client.query('select source_id,lookup_sku from brsteel_ops.supplies where not source_deleted')).rows) {
+  for (const row of (await client.query(`select source_id,lookup_sku from brsteel_ops.supplies
+    where not source_deleted and import_run_id <> $1`, [NATIVE_RUN_ID])).rows) {
     if (row.lookup_sku !== limits.get(row.source_id)) throw new Error('Supply lookup key mismatch');
   }
   return { records, items: items.rows.length, hash: snapshot.hash };
@@ -146,7 +149,8 @@ export async function importSnapshot(pool: Pool, raw: unknown, options: {
     }
     const result = await transaction(client, async () => {
       for (const table of Object.values(TABLES)) {
-        await client.query(`update brsteel_ops.${table} set source_deleted=true where import_run_id<>$1`, [snapshot.hash]);
+        await client.query(`update brsteel_ops.${table} set source_deleted=true
+          where import_run_id<>$1 and import_run_id<>$2`, [snapshot.hash, NATIVE_RUN_ID]);
       }
       await client.query('delete from brsteel_ops.sales_order_items i using brsteel_ops.sales_orders o where i.order_id=o.source_id and o.source_deleted');
       const compared = await compare(client, snapshot);

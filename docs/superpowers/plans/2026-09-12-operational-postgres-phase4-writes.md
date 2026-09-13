@@ -115,7 +115,21 @@ O teste de backup foi atualizado junto: **15 tabelas e 3 schemas**, mais a recus
 
 Um defeito de teste encontrado e corrigido no caminho: escalonamento de papel é verificado contra o `session_user`, não o `current_user`. Um pool construído com `options: '-c role=...'` mantém `postgres` como `session_user`, então `set role` passaria sem provar nada. As asserções de escalonamento usam `set session authorization`, como o teste de backup já fazia; as de grant e RLS continuam válidas com o pool por `-c role=`.
 
-**Achado que bloqueia a Task 2.** As tabelas de `brsteel_ops` têm `import_run_id text not null references brsteel_import.runs(id)`. Uma gravação nativa — um insumo criado pelo usuário, um lote novo — não pertence a nenhuma execução de importação e não tem valor para essa coluna. Antes de implementar a Task 2 é preciso decidir entre: uma execução sentinela permanente que represente "origem nativa"; tornar a coluna anulável com um discriminador de origem; ou tabelas nativas próprias separadas das projeções. A escolha afeta a reconciliação da etapa 5, porque o comparador precisa distinguir o que veio do Firestore do que nasceu no PostgreSQL.
+### Origem nativa: execução sentinela
+
+As tabelas de `brsteel_ops` têm `import_run_id text not null references brsteel_import.runs(id)`, e uma gravação nativa não pertence a execução de importação nenhuma. **Decisão do usuário: execução sentinela.** Implementada em `NATIVE_RUN_ID = '0'.repeat(64)`, exportada de `operational-snapshot.ts`, com a linha criada pela migration `20260912235500_operational_native_run.sql` (`source_project = 'brsteel-native'`, datas em `-infinity`, para nunca competir com a cópia mais recente).
+
+A escolha exigiu corrigir o importador, que sem isso apagaria dados de usuário. A reconciliação em `operational-import.ts` fazia:
+
+```sql
+update brsteel_ops.<table> set source_deleted=true where import_run_id<>$1
+```
+
+Uma execução sentinela difere de todo hash de snapshot por definição, então a primeira importação após qualquer gravação nativa marcaria como excluído **todo insumo, lote, movimentação e comentário criado por usuário**. O teste `native rows survive an import that reconciles snapshot documents` reproduz exatamente isso: falhou com `source_deleted = true` antes da correção.
+
+Cinco pontos passaram a excluir a sentinela — a reconciliação e as quatro conferências de `compare`: contagem por coleção, itens de pedido (por junção com o pedido, já que a tabela de itens não tem run próprio), modelos de estoque e chaves de insumo. Sem os quatro últimos, uma linha nativa quebraria a conferência com `Count mismatch` em vez de apagar dados — falha barulhenta, mas ainda falha.
+
+**Consequência para a etapa 5:** o comparador de corte distingue origem Firestore de origem nativa por `import_run_id = NATIVE_RUN_ID`. Uma linha nativa não tem contraparte no Firestore e não pode ser tratada como divergência.
 
 ---
 
