@@ -38,7 +38,7 @@ left join limits l on to_jsonb(l.lookup_sku)=f.sku
 order by a.quantity desc,a.first_seen`;
 }
 
-const demandSql = buildDemandSql();
+export const demandSql = buildDemandSql();
 
 export function createPostgresProductionDemandRepository(pool: Pool): ProductionDemandReadRepository {
   return { async read(raw) {

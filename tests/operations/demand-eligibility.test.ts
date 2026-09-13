@@ -1,5 +1,6 @@
 import { expect, it } from 'vitest';
-import { countsAsConsumption, CANCELLED_ORDER_STATUS, buildCancelledStatusSqlFragment } from '@/server/persistence/demand-eligibility';
+import { countsAsConsumption, CANCELLED_ORDER_STATUS } from '@/server/persistence/demand-eligibility';
+import { demandSql } from '@/server/persistence/postgres-production-demand';
 
 const order = (over: Record<string, unknown> = {}) =>
   ({ notaFiscal: { id: 500 }, situacao: { id: 9, nome: 'Atendido', valor: 1 }, ...over }) as never;
@@ -23,22 +24,18 @@ it('counts an order whose status is missing rather than dropping it', () => {
   expect(countsAsConsumption(order({ situacao: undefined }))).toBe(true);
 });
 
-it('SQL fragment reflects CANCELLED_ORDER_STATUS constant', () => {
-  // Este teste garante que a query SQL em postgres-production-demand.ts interpolará corretamente
-  // a lista de situações canceladas. Se a SQL estivesse com um valor hardcoded divergente
-  // (ex. se alguém adicionasse um novo id à constante mas esquecesse de atualizar a SQL),
-  // este teste falharia.
-  const sqlFragment = buildCancelledStatusSqlFragment();
+it('generated SQL in postgres-production-demand.ts excludes every id in CANCELLED_ORDER_STATUS', () => {
+  // Este teste lê `demandSql`, a query já montada e exportada por postgres-production-demand.ts —
+  // a mesma string usada em client.query() em tempo de execução — em vez de comparar
+  // buildCancelledStatusSqlFragment() com a própria constante que ele consome (o que seria
+  // autorreferente: ambos vêm de demand-eligibility.ts e nunca tocam a SQL de fato executada).
+  // Extrai a cláusula "not in (...)" aplicada a situacao,id na query real e confirma que ela
+  // exclui exatamente os ids de CANCELLED_ORDER_STATUS — nem a mais, nem a menos. Se essa linha da
+  // SQL fosse revertida para um valor hardcoded divergente da constante, este teste falharia.
+  const situacaoClause = demandSql.match(/coalesce\(o\.payload#>'\{situacao,id\}','null'::jsonb\)\s*(not in \([^)]*\))/);
+  expect(situacaoClause).not.toBeNull();
+  const exclusionFragment = situacaoClause![1];
 
-  // Verifica que o fragmento contém 'not in' com os valores da constante
-  expect(sqlFragment).toContain('not in');
-
-  // Verifica que cada id cancelado aparece no fragmento SQL como jsonb
-  for (const statusId of CANCELLED_ORDER_STATUS) {
-    const expectedJsonb = `'${statusId}'::jsonb`;
-    expect(sqlFragment).toContain(expectedJsonb);
-  }
-
-  // Verifica que o fragmento é sintaticamente válido SQL: contém os parênteses necessários
-  expect(sqlFragment).toMatch(/not in \(.+\)/);
+  const excludedIds = new Set(Array.from(exclusionFragment.matchAll(/'(\d+)'::jsonb/g), match => Number(match[1])));
+  expect(excludedIds).toEqual(new Set(CANCELLED_ORDER_STATUS));
 });
