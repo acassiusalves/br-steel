@@ -122,9 +122,31 @@ A CLI `npm run cutover -- <reconcile|compare|report>` imprime apenas contagens, 
 
 ---
 
+## Task 2.5: Seletor trocável em runtime
+
+**Falha deste plano, corrigida.** As Tasks 3 e 4 mandavam "trocar o seletor", mas **nenhuma tarefa construía essa capacidade**: os oito seletores eram `export` fixos resolvidos no carregamento do módulo. Não era possível ensaiar a troca de algo que não era trocável. Esta tarefa foi acrescentada e executada em 13/09/2026.
+
+- [x] `appConfig/operationalSource` guarda `firestore` ou `postgres`, lido em runtime com cache de no máximo 5 s. Ausente ou irreconhecível significa `firestore`: a fonte muda de propósito, nunca por acidente nem por erro de digitação na configuração.
+- [x] `selectRepository` resolve a implementação **por chamada**, não no carregamento. Um repositório ligado no import congelaria a fonte pela vida da instância, e o corte precisa valer sem redeploy. Todo método de todo contrato é assíncrono, que é o que torna isso viável.
+- [x] Selecionar PostgreSQL sem conexão configurada é **indisponibilidade 503, nunca recuo silencioso** para o Firestore: durante um corte, recuar mandaria leituras — e depois gravações — para a fonte que todos acreditam aposentada.
+- [x] `operationalPoolConfig` recusa superusuário, ausência de senha, parâmetros extras na URL e TLS não verificado fora de loopback. O nome do login não é fixado, porque é escolha de quem provisiona; `postgres` é recusado explicitamente.
+- [x] Teste prova que a mesma ligação de módulo passa a responder pelo outro banco sem reimportar nada, comparando valores deliberadamente diferentes nos dois lados (999 no Firestore, 700 no PostgreSQL).
+
+Um defeito encontrado no caminho: o proxy cacheava o repositório construído e não acompanhava o descarte do pool, então continuava respondendo por uma conexão encerrada. Resolvido com contador de geração — importa em produção, não só no teste.
+
+**O seletor nasce em `firestore` e assim permanece.** Esta tarefa constrói a capacidade de trocar; trocar é a Task 4.
+
+---
+
 ## Task 3: Ensaio completo em homologação
 
 **Requer autorização explícita do usuário.** Nenhum passo toca produção.
+
+**Bloqueado por provisionamento, não por código.** A capacidade de troca existe desde a Task 2.5. Falta o que só o controlador pode fazer:
+
+1. **Um login de escrita no Supabase hospedado.** A migration cria `brsteel_ops_writer` como `NOLOGIN`, por desenho; um login temporário precisa ser provisionado e associado a esse papel.
+2. **Uma cópia recente dos dados reais** no destino — a do piloto da etapa 3 foi encerrada junto com os acessos temporários.
+3. **As variáveis no projeto de homologação:** `BRSTEEL_OPERATIONAL_DATABASE_URL` e `BRSTEEL_OPERATIONAL_CA`.
 
 - [ ] **Passo 1 — Preparar.** Publicar o candidato em `br-steel-mcp-staging.vercel.app` (projeto `prj_YD3ATzBPFQo4bD1ZlojrDTigUZp8`), com cópia recente dos dados reais e credencial de runtime restrita a `brsteel_ops_writer`. Registrar o deployment de rollback.
 - [ ] **Passo 2 — Ensaiar o corte inteiro.** Executar, cronometrando cada fase: `draining` → esperar as chamadas em trânsito → `blocked` → confirmar dreno da fila suspenso → reconciliação final → comparação → exigir **divergência zero** → trocar o seletor → retomar a fila → `open`.

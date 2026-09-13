@@ -1,3 +1,7 @@
 import 'server-only';
+import { firestoreSalesReadRepository } from './firestore-sales';
+import { createPostgresSalesRepository } from './postgres-sales';
+import { selectRepository } from './source';
 
-export { firestoreSalesReadRepository as salesReadRepository } from './firestore-sales';
+/** Resolved per call. Firestore stays active until the shared record says otherwise. */
+export const salesReadRepository = selectRepository(firestoreSalesReadRepository, createPostgresSalesRepository);
