@@ -55,6 +55,17 @@ async function seedDefaultColumns() {
 
 async function createLot(input: LotInput, identities: { author: WriteIdentity; assignedTo: WriteIdentity | null }) {
   const lot = adminDb.collection('productionLots').doc(), year = new Date().getUTCFullYear();
+  // Highest number already minted this year, read outside the transaction so migrated lots cannot
+  // collide with the counter without enlarging the contended read set.
+  const pattern = new RegExp(`^LOT-${year}-(\\d+)$`);
+  const bootstrapSeed = (await adminDb.collection('productionLots').get()).docs
+    .reduce((highest, doc) => {
+      const match = String(doc.data().lotNumber || '').match(pattern);
+      return match ? Math.max(highest, Number(match[1])) : highest;
+    }, 0);
+  // The annual counter is a single hot document and the bootstrap path scans every lot, so two people
+  // creating a lot at the same time genuinely contend. Five attempts — the default — is thin for that:
+  // the loser exhausts them and surfaces "Transaction is invalid or closed" as if it were a real error.
   const created = await adminDb.runTransaction(async tx => {
     const assignedTo = identities.assignedTo ? { ...identities.assignedTo, assignedAt: now() } : null;
     const column = ref('productionColumns', input.columnId); exists(await tx.get(column));
@@ -70,11 +81,14 @@ async function createLot(input: LotInput, identities: { author: WriteIdentity; a
       return { lotId: lot.id, sku: i.sku, quantity: i.quantity, productName: String(matches[0].descricao || i.sku), unit: String(matches[0].unidade || 'UN'), sourceOrderId: i.sourceOrderId, sourceOrderNumber: String(sale.numero || sale.id), customerName: '' };
     });
     const counter = ref('operationsMetadata', `production-lots-${year}`); const counterDoc = await tx.get(counter);
-    // Bootstrap once from existing numbers to avoid collisions after migrating legacy lots.
-    const existingLots = await tx.get(counterDoc.exists ? adminDb.collection('productionLots').where('columnId', '==', column.id) : adminDb.collection('productionLots'));
-    let sequence = Number(counterDoc.data()?.sequence || 0);
+    // Only the lots of this column are read inside the transaction. The legacy bootstrap scan used to
+    // live here too, and reading the whole collection while also writing to it made two concurrent
+    // creations invalidate each other's read set on every attempt. It is computed before the
+    // transaction now and folded in with Math.max, so a stale seed can never lower the sequence.
+    const existingLots = await tx.get(adminDb.collection('productionLots').where('columnId', '==', column.id));
+    let sequence = Math.max(Number(counterDoc.data()?.sequence || 0), bootstrapSeed);
     let maxOrder = -1;
-    existingLots.docs.forEach(d => { const l = d.data(); const match = String(l.lotNumber || '').match(new RegExp(`^LOT-${year}-(\\d+)$`)); if (match) sequence = Math.max(sequence, Number(match[1])); if (l.columnId === column.id) maxOrder = Math.max(maxOrder, Number(l.columnOrder || 0)); });
+    existingLots.docs.forEach(d => { const l = d.data(); maxOrder = Math.max(maxOrder, Number(l.columnOrder || 0)); });
     sequence++; const lotNumber = `LOT-${year}-${String(sequence).padStart(4, '0')}`; const at = now();
     tx.set(counter, { sequence });
     // Touch the column so create/delete and concurrent appends serialize on its document.
@@ -82,7 +96,7 @@ async function createLot(input: LotInput, identities: { author: WriteIdentity; a
     tx.create(lot, { title: input.title, description: input.description || null, priority: input.priority, columnId: column.id, columnOrder: maxOrder + 1, dueDate: input.dueDate || null, assignedTo, createdBy: identities.author, linkedOrderIds, totalItems: items.reduce<number>((sum, i) => sum + i.quantity, 0), totalSkus: new Set(items.map(i => i.sku)).size, lotNumber, createdAt: at, updatedAt: at });
     items.forEach(i => tx.create(adminDb.collection('productionLotItems').doc(), { ...i, createdAt: at }));
     return { id: lot.id, lotNumber };
-  });
+  }, { maxAttempts: 10 });
   return result(created);
 }
 

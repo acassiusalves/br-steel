@@ -433,6 +433,14 @@ test('SQL lots bootstrap the counter from legacy numbers instead of colliding', 
 
   const created = await production.createLot(lotInput(), { author, assignedTo: null }, actor);
   assert.equal(created.data.lotNumber, `LOT-${YEAR}-0043`, 'the counter must start above the highest legacy number');
+
+  // A number minted in another column is still a number: ignoring it would mint a duplicate.
+  const other = await production.createColumn({ name: 'Outra', order: 1, color: '#123456' }, actor);
+  await pool.query(`insert into brsteel_ops.production_lots (source_id, payload, source_version, source_hash, import_run_id)
+    values ('legacy-outra', $1, 1, $2, $3)`,
+    [JSON.stringify({ title: 'Legado', columnId: other.data.id, columnOrder: 0, lotNumber: `LOT-${YEAR}-0100` }), 'c'.repeat(64), RUN]);
+  const after = await production.createLot(lotInput(), { author, assignedTo: null }, actor);
+  assert.equal(after.data.lotNumber, `LOT-${YEAR}-0101`);
 });
 
 test('SQL production enforces item, column and comment rules', async () => {
