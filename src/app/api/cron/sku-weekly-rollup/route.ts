@@ -14,6 +14,14 @@ import { readCoreWriteMode } from '@/server/operations/maintenance';
 
 export const dynamic = 'force-dynamic';
 
+/**
+ * Teto explícito, não o padrão da plataforma: uma execução sem checkpoint enfileira as 104 semanas da
+ * janela de retenção, e é o próprio plano que manda deixar esse passe para o script de backfill.
+ * `rollUpPendingWeeks` para antes disso pelo orçamento dela e grava o checkpoint a cada semana, então
+ * o teto aqui é a rede de segurança, não o mecanismo.
+ */
+export const maxDuration = 300;
+
 export async function GET(request: Request) {
   // Fecha fechado, como o bling-webhook-drain: este cron aplica gravações de negócio.
   const secret = process.env.CRON_SECRET;
@@ -24,10 +32,12 @@ export async function GET(request: Request) {
 
   try {
     if (await readCoreWriteMode() !== 'open') {
-      return NextResponse.json({ ok: true, suspended: true, weeks: [], skus: 0 });
+      return NextResponse.json({ ok: true, suspended: true, weeks: [], skus: 0, remaining: 0 });
     }
-    const { weeks, skus } = await rollUpPendingWeeks();
-    return NextResponse.json({ ok: true, suspended: false, weeks, skus });
+    // `remaining > 0` significa que o orçamento acabou antes das semanas: o checkpoint já guardou o
+    // que fechou e a execução seguinte continua daí — nada aqui precisa ser refeito à mão.
+    const { weeks, skus, remaining } = await rollUpPendingWeeks();
+    return NextResponse.json({ ok: true, suspended: false, weeks, skus, remaining });
   } catch (error) {
     // Nunca devolver a mensagem crua do driver: pode carregar payload ou credencial.
     console.error('[CRON-SKU-ROLLUP]', error);

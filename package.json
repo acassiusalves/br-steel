@@ -21,7 +21,8 @@
     "verify:mcp-staging": "node --import tsx scripts/mcp-staging-check.ts",
     "typecheck:ci": "node scripts/ci/typecheck-baseline.mjs",
     "test:vitest": "firebase emulators:exec --only firestore --project demo-brsteel-auth --config firebase.test.json 'npx --no-install vitest run tests/access tests/oauth tests/mcp tests/operations tests/backup tests/deployment'",
-    "cutover": "node --conditions=react-server --import tsx scripts/operational-cutover.ts"
+    "cutover": "node --conditions=react-server --import tsx scripts/operational-cutover.ts",
+    "backfill:sku-weekly-demand": "node --conditions=react-server --import tsx scripts/backfill-sku-weekly-demand.ts"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",

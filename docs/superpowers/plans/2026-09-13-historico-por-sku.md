@@ -996,6 +996,29 @@ one, so a missed run heals itself. Suspended while the core is blocked."
 
 ---
 
+> **Nota pós-execução (Tasks 4 e 5).** A revisão de branch encontrou dois defeitos que a revisão por
+> tarefa não podia ver, e eles foram corrigidos no código:
+>
+> - `rollUpPendingWeeks` gravava o checkpoint **uma vez, depois do laço**. Um encerramento no meio —
+>   teto de tempo, deploy, falha de rede — descartava todo o progresso, e a execução seguinte
+>   recomeçava do zero: a promessa de "uma execução perdida se corrige sozinha na seguinte" não valia
+>   para uma lacuna grande demais para caber num passe. O checkpoint passou a avançar dentro do laço,
+>   por semana fechada, como `scripts/backfill-sku-weekly-demand.ts:39` já fazia. A função também
+>   ganhou orçamento de tempo (`remaining` no retorno, e na resposta do cron) e a rota ganhou
+>   `maxDuration = 300` explícito — sem checkpoint a lista é a janela inteira de 104 semanas, e nada
+>   impedia o cron de tentar esse passe até ser morto.
+> - `rollUpWeek` usava o SKU cru como id de documento. `CHAPA/10` (SKU real neste repositório) e um
+>   item sem `descricao` derrubavam o batch inteiro — até 450 SKUs saudáveis junto —, e o erro era
+>   suprimido pelo cron, então toda segunda-feira repetia a mesma falha. O id passou a ser saneado com
+>   o SKU verdadeiro no campo `sku`, na convenção que `stockUpdates` já usava, a descrição passou a ser
+>   coagida e o SKU que nem assim vira id é ignorado com aviso, sem levar a semana junto.
+>
+> O código em `src/server/persistence/firestore-sku-weekly-demand.ts` é a fonte de verdade. A
+> assinatura de `rollUpPendingWeeks` ganhou um segundo parâmetro opcional e um campo no retorno; nada
+> mais mudou.
+
+---
+
 ### Task 6: Script de backfill
 
 Deliberadamente fora do cron: reconstruir 12.521 pedidos num passe único arrisca o teto de 300s da função, e o job não precisa viver no deploy.
@@ -1081,12 +1104,13 @@ single pass would risk the 300s function ceiling."
 - [ ] **Step 4: Run it once against production, after Task 5 is deployed**
 
 ```bash
-node --conditions=react-server --import tsx scripts/backfill-sku-weekly-demand.ts
+npm run backfill:sku-weekly-demand
 ```
 
 `npx tsx` sozinho **não funciona**: `server-only` lança fora da condição `react-server`. É o mesmo
-motivo pelo qual o script `cutover` no `package.json` já usa essa forma. O cabeçalho do próprio
-script registra a invocação correta.
+motivo pelo qual o script `cutover` no `package.json` já usa `node --conditions=react-server --import
+tsx` — e por isso este script ganhou o alias acima, na mesma forma, em vez de depender de quem roda
+lembrar das flags no dia do deploy. O cabeçalho do próprio script registra a invocação.
 
 Expected: uma linha por semana e a contagem final. Conferir no console do Firestore que `skuWeeklyDemand` tem um documento por SKU e que `appConfig/skuWeeklyDemandRollup.lastClosedWeek` é a semana fechada mais recente.
 
@@ -1693,7 +1717,10 @@ Task 2 não depende de nada e é a única com custo por adiamento: cada webhook 
 - **Tabela `stock_observation_log` no Postgres.** Registrada como dívida assumida no spec. A fonte
   operacional ainda é Firestore e o Postgres é piloto; a Task 7 preenche `history: []` naquele caminho
   para satisfazer o contrato. O passo precisa entrar no runbook da cadeia de migração, que é aplicada à
-  mão — não acontece sozinho.
+  mão — não acontece sozinho. **Feito:** está no pré-voo da Task 4 de
+  `2026-09-12-operational-postgres-phase5-cutover.md`, como pré-requisito bloqueante, com o que se
+  perde se o corte acontecer sem ele. E o leitor Postgres de demanda passou a avisar que devolve
+  `history` vazio, para que o MCP não contradiga a tela em silêncio depois do corte.
 - **Modelo de previsão** com tendência e sazonalidade. A série passa a existir; usá-la é outro trabalho.
 - **Série de saldo no sparkline.** A Task 2 começa a capturar hoje; o gráfico só faz sentido depois de
   alguns meses de massa.

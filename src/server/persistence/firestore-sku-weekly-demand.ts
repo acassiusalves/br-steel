@@ -1,6 +1,8 @@
 import 'server-only';
+import { createHash } from 'node:crypto';
 import { FieldValue } from 'firebase-admin/firestore';
 import { adminDb } from '@/lib/firebase-admin';
+import { documentIdSchema } from '@/server/operations/common';
 import type { SaleOrder } from '@/types/sale-order';
 import { closedWeeksSince, isoWeekRange } from '@/lib/iso-week';
 import { countsAsConsumption } from './demand-eligibility';
@@ -12,6 +14,35 @@ export const ROLLUP_CHECKPOINT = 'skuWeeklyDemandRollup';
 export type WeekBucket = { units: number; orders: number };
 
 const checkpointRef = () => adminDb.collection('appConfig').doc(ROLLUP_CHECKPOINT);
+
+/** Firestore recusa um id que case com `__.*__`, o que `documentIdSchema` não cobre. */
+const RESERVED_DOC_ID = /^__.*__$/;
+
+/**
+ * Id de documento para um SKU, ou `null` quando o SKU não serve de identificador.
+ *
+ * O SKU vem do pedido, não de um cadastro nosso: `CHAPA/10` é dado real aqui — tests/mcp/audit.test.ts
+ * tem um caso de regressão dedicado a ele — e `collection.doc('CHAPA/10')` estoura antes de qualquer
+ * escrita, derrubando o lote inteiro. A convenção que `stockUpdates` já estabeleceu é a que vale:
+ * o id do documento pode ser uma versão saneada e o SKU verdadeiro mora no campo `sku`, que é por onde
+ * a leitura passa (`normalizeStoredStockObservation` lê `String(data.sku || id)`, nunca o id sozinho).
+ *
+ * Quando o próprio SKU já serve de id, ele continua sendo o id: nenhum documento existente troca de
+ * chave e a coleção segue legível no console. Só o SKU que não serve ganha um id derivado, com sufixo
+ * de hash do SKU original — `CHAPA/10` e `CHAPA_10` são dois produtos e não podem cair no mesmo
+ * documento, que é o que uma substituição simples de `/` por `_` faria.
+ */
+function weeklyDemandDocId(sku: unknown): string | null {
+  if (typeof sku !== 'string' || !sku) return null;
+  if (documentIdSchema.safeParse(sku).success && !RESERVED_DOC_ID.test(sku)) return sku;
+  // O sufixo garante unicidade; o prefixo legível é só para quem for olhar a coleção. O corte em 180
+  // deixa o resultado dentro do teto de 200 de `documentIdSchema` com folga para o sufixo.
+  const id = `${sku.replace(/\//g, '_').slice(0, 180)}~${createHash('sha256').update(sku).digest('hex').slice(0, 12)}`;
+  return documentIdSchema.safeParse(id).success && !RESERVED_DOC_ID.test(id) ? id : null;
+}
+
+/** SKU verdadeiro de um documento do rollup, no mesmo padrão de `normalizeStoredStockObservation`. */
+const storedSku = (doc: FirebaseFirestore.QueryDocumentSnapshot): string => String(doc.data().sku || doc.id);
 
 /**
  * Firestore recusa um batch com mais de 500 operações. O teto aqui fica com folga abaixo disso: tanto
@@ -55,7 +86,12 @@ export async function rollUpWeek(week: string, now: Date = new Date()) {
     if (!countsAsConsumption(order)) continue;
     for (const item of order.itens ?? []) {
       if (!item.codigo || !Number.isFinite(item.quantidade) || item.quantidade <= 0) continue;
-      const bucket = buckets.get(item.codigo) ?? { description: item.descricao, orders: new Set<number>(), units: 0 };
+      // `descricao` é obrigatório no tipo e ausente na fonte: o cast `doc.data() as SaleOrder` acima
+      // não verifica nada, e o próprio leitor Postgres carrega uma coluna `description_present`
+      // (postgres-production-demand.ts:13) porque o item sem descrição existe de verdade. Sem esta
+      // coerção o `undefined` chega ao batch e derruba o lote inteiro, não só este SKU.
+      const description = typeof item.descricao === 'string' ? item.descricao : '';
+      const bucket = buckets.get(item.codigo) ?? { description, orders: new Set<number>(), units: 0 };
       bucket.orders.add(order.id);
       bucket.units += item.quantidade;
       buckets.set(item.codigo, bucket);
@@ -68,19 +104,35 @@ export async function rollUpWeek(week: string, now: Date = new Date()) {
   // retenção, descartando quase todo o histórico guardado.
   const oldest = closedWeeksSince(null, now)[0];
 
-  await commitInChunks([...buckets], (batch, [sku, bucket]) => {
-    const ref = adminDb.collection(WEEKLY_DEMAND).doc(sku);
+  // Resolver os ids antes de abrir qualquer batch: um SKU que não vira id é descartado com aviso, e
+  // não leva junto os até 450 SKUs saudáveis do mesmo commit. Uma semana inteira não pode ficar presa
+  // por causa de um item — o checkpoint nunca avançaria e toda segunda-feira repetiria a mesma falha.
+  const entries: Array<{ id: string; sku: string; bucket: { description: string; units: number; orders: Set<number> } }> = [];
+  for (const [sku, bucket] of buckets) {
+    const id = weeklyDemandDocId(sku);
+    if (!id) {
+      console.warn('[SKU-ROLLUP] SKU sem id de documento utilizável; ignorado nesta semana.', { week, sku });
+      continue;
+    }
+    entries.push({ id, sku, bucket });
+  }
+
+  await commitInChunks(entries, (batch, { id, sku, bucket }) => {
+    const ref = adminDb.collection(WEEKLY_DEMAND).doc(id);
     batch.set(ref, {
-      sku, description: bucket.description,
+      sku,
+      // Sem descrição não se grava campo nenhum: a escrita é `merge`, então omitir preserva a
+      // descrição que já estava lá, enquanto gravar `''` a apagaria.
+      ...(bucket.description ? { description: bucket.description } : {}),
       weeks: { [week]: { units: bucket.units, orders: bucket.orders.size } satisfies WeekBucket },
       lastClosedWeek: week, updatedAt: now.toISOString(),
     }, { merge: true });
   });
-  await closeWeek(week, oldest, new Set(buckets.keys()));
+  await closeWeek(week, oldest, new Set(entries.map(entry => entry.sku)));
   // Local: a instância que acabou de escrever não pode continuar servindo a cópia antiga. As demais
   // convergem pelo TTL, que é o suficiente para um valor semanal.
   resetWeeklyHistoryCache();
-  return { week, skus: buckets.size };
+  return { week, skus: entries.length };
 }
 
 /**
@@ -101,7 +153,9 @@ async function closeWeek(week: string, oldest: string, freshSkus: ReadonlySet<st
   for (const doc of snapshot.docs) {
     const weeks = (doc.data().weeks ?? {}) as Record<string, WeekBucket>;
     const keys = Object.keys(weeks);
-    const stale = keys.filter(key => key < oldest || (key === week && !freshSkus.has(doc.id)));
+    // `freshSkus` traz SKUs verdadeiros; o id do documento pode ser uma versão saneada deles.
+    const sku = storedSku(doc);
+    const stale = keys.filter(key => key < oldest || (key === week && !freshSkus.has(sku)));
     if (!stale.length) continue;
     changes.push({ ref: doc.ref, stale, remaining: keys.length - stale.length });
   }
@@ -112,20 +166,42 @@ async function closeWeek(week: string, oldest: string, freshSkus: ReadonlySet<st
 }
 
 /**
- * Fecha todas as semanas pendentes desde o checkpoint, sem tocar na semana corrente.
+ * Orçamento de tempo de uma execução, abaixo do teto de 300s declarado em `maxDuration` na rota do
+ * cron. Sem checkpoint, `closedWeeksSince(null, now)` devolve as 104 semanas da janela inteira: é o
+ * cold start, que o plano manda fazer pelo script de backfill justamente porque um passe único
+ * arrisca o teto. O cron não tinha nada que o impedisse de tentar assim mesmo — e ser morto no meio
+ * é pior que parar: nada indica o que faltou.
+ */
+const ROLLUP_BUDGET_MS = 240_000;
+
+/**
+ * Fecha as semanas pendentes desde o checkpoint, sem tocar na semana corrente.
  *
  * Processar a lista inteira, e não apenas a semana anterior, é o que faz uma execução perdida se
  * auto-corrigir na seguinte sem intervenção.
+ *
+ * O checkpoint avança **dentro** do laço, a cada semana fechada, como o backfill em
+ * `scripts/backfill-sku-weekly-demand.ts:39` já faz. Com a gravação só no fim, um encerramento no
+ * meio — teto de tempo, deploy, falha de rede — descartava todo o progresso e a execução seguinte
+ * recomeçava do zero: uma lacuna grande demais para um passe nunca fecharia, por mais vezes que o
+ * cron rodasse. A semana fechada já está escrita e é idempotente; o checkpoint apenas registra isso.
+ *
+ * Ao esgotar o orçamento a execução para limpa e devolve `remaining`, em vez de seguir até ser morta.
+ * A primeira semana roda sempre, custe o que custar, para que toda execução avance pelo menos uma.
  */
-export async function rollUpPendingWeeks(now: Date = new Date()) {
+export async function rollUpPendingWeeks(now: Date = new Date(), budgetMs: number = ROLLUP_BUDGET_MS) {
+  const startedAt = Date.now();
   const last = (await checkpointRef().get()).data()?.lastClosedWeek;
-  const weeks = closedWeeksSince(typeof last === 'string' ? last : null, now);
+  const pending = closedWeeksSince(typeof last === 'string' ? last : null, now);
+  const weeks: string[] = [];
   let skus = 0;
-  for (const week of weeks) skus += (await rollUpWeek(week, now)).skus;
-  if (weeks.length) {
-    await checkpointRef().set({ lastClosedWeek: weeks.at(-1), updatedAt: now.toISOString() }, { merge: true });
+  for (const week of pending) {
+    if (weeks.length && Date.now() - startedAt >= budgetMs) break;
+    skus += (await rollUpWeek(week, now)).skus;
+    await checkpointRef().set({ lastClosedWeek: week, updatedAt: now.toISOString() }, { merge: true });
+    weeks.push(week);
   }
-  return { weeks, skus };
+  return { weeks, skus, remaining: pending.length - weeks.length };
 }
 
 /**
@@ -155,7 +231,8 @@ export async function readWeeklyHistory(weeks: number): Promise<Map<string, Hist
       // A chave ISO ordena lexicograficamente igual à ordem cronológica, dentro e entre anos.
       const points = Object.keys(stored).sort()
         .map(week => ({ week, units: stored[week].units, orders: stored[week].orders }));
-      if (points.length) series.set(doc.id, points);
+      // Chaveado pelo SKU verdadeiro, não pelo id: quem consulta conhece `CHAPA/10`, não o id saneado.
+      if (points.length) series.set(storedSku(doc), points);
     }
     // Guarda a série inteira e recorta por chamada, para que janelas diferentes dividam um cache só.
     cached = { at: Date.now(), series };

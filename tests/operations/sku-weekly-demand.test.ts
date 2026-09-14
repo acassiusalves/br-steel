@@ -176,3 +176,119 @@ it('chunks the week-closing batch instead of shipping every stale doc in one com
   expect(commits).toBe(3);
   expect((await adminDb.collection(WEEKLY_DEMAND).get()).size).toBe(1); // só CBA600 sobra
 });
+
+/**
+ * Um pedido cujos itens são dados exatamente como vierem — sem `descricao`, com `codigo` de outro
+ * tipo — para exercitar o que a fonte realmente entrega, e não o que o tipo `SaleOrder` promete.
+ */
+const rawOrder = (id: number, data: string, itens: unknown[]) =>
+  adminDb.collection('salesOrders').doc(String(id)).set({
+    id, numero: id, data, total: 100, contato: { id, nome: 'Cliente' },
+    notaFiscal: { id: 900 + id }, situacao: { id: 9, nome: 'Atendido', valor: 1 }, itens,
+  });
+
+it('stores a slash-containing SKU instead of failing the whole chunk on the document path', async () => {
+  // `CHAPA/10` é SKU real neste repositório: tests/mcp/audit.test.ts:11 existe por causa dele.
+  await order(301, '2026-09-08', 'CHAPA/10', 5);
+  await order(302, '2026-09-09', 'CBA600', 2);
+  await rollUpWeek('2026-W37');
+
+  // O SKU saudável do mesmo lote não pode ter sido levado junto: o commit é por lote inteiro.
+  expect(await weeksOf('CBA600')).toEqual({ '2026-W37': { units: 2, orders: 1 } });
+  const stored = (await adminDb.collection(WEEKLY_DEMAND).get()).docs.find(doc => doc.data().sku === 'CHAPA/10');
+  expect(stored).toBeDefined();
+  expect(stored!.id).not.toContain('/');
+  expect(stored!.data().weeks).toEqual({ '2026-W37': { units: 5, orders: 1 } });
+  // Quem lê continua enxergando o SKU verdadeiro, não o id saneado.
+  expect((await readWeeklyHistory(12)).get('CHAPA/10')).toEqual([{ week: '2026-W37', units: 5, orders: 1 }]);
+});
+
+it('keeps two SKUs apart when only the sanitized character separates them', async () => {
+  await order(303, '2026-09-08', 'CHAPA/10', 5);
+  await order(304, '2026-09-09', 'CHAPA_10', 7);
+  await rollUpWeek('2026-W37');
+  const history = await readWeeklyHistory(12);
+  expect(history.get('CHAPA/10')).toEqual([{ week: '2026-W37', units: 5, orders: 1 }]);
+  expect(history.get('CHAPA_10')).toEqual([{ week: '2026-W37', units: 7, orders: 1 }]);
+});
+
+it('closes a week whose items have no descricao at all', async () => {
+  // `descricao` é obrigatório no tipo e opcional na fonte — postgres-production-demand.ts:13 carrega
+  // uma coluna `description_present` justamente porque o campo falta de verdade.
+  await rawOrder(305, '2026-09-08', [{ id: 3050, codigo: 'SEMDESC', quantidade: 3, valor: 50, unidade: 'UN' }]);
+  await rollUpWeek('2026-W37');
+  expect(await weeksOf('SEMDESC')).toEqual({ '2026-W37': { units: 3, orders: 1 } });
+  expect((await adminDb.collection(WEEKLY_DEMAND).doc('SEMDESC').get()).data()).not.toHaveProperty('description');
+});
+
+it('never overwrites a stored description with an empty one', async () => {
+  await order(306, '2026-09-01', 'CBA600', 1);
+  await rollUpWeek('2026-W36');
+  await rawOrder(307, '2026-09-08', [{ id: 3070, codigo: 'CBA600', quantidade: 2, valor: 50, unidade: 'UN' }]);
+  await rollUpWeek('2026-W37');
+  expect((await adminDb.collection(WEEKLY_DEMAND).doc('CBA600').get()).data()?.description).toBe('Peça CBA600');
+});
+
+it('skips a SKU with no usable document id and still closes the week for the rest', async () => {
+  await rawOrder(308, '2026-09-08', [
+    { id: 3080, codigo: { valor: 'objeto' }, descricao: 'Item corrompido', quantidade: 3, valor: 10, unidade: 'UN' },
+    { id: 3081, codigo: 'CBA600', descricao: 'Peça CBA600', quantidade: 2, valor: 50, unidade: 'UN' },
+  ]);
+  const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+  let warnings: unknown[][] = [];
+  try {
+    await expect(rollUpWeek('2026-W37')).resolves.toMatchObject({ week: '2026-W37', skus: 1 });
+    // `mockRestore` limpa o histórico junto com a implementação, então o registro sai antes dele.
+    warnings = warn.mock.calls;
+  } finally {
+    warn.mockRestore();
+  }
+  expect(await weeksOf('CBA600')).toEqual({ '2026-W37': { units: 2, orders: 1 } });
+  expect(warnings).toHaveLength(1);
+  expect(String(warnings[0][0])).toContain('[SKU-ROLLUP]');
+});
+
+it('advances the checkpoint week by week, so an interrupted run resumes where it stopped', async () => {
+  await order(401, '2026-08-25', 'CBA600', 2); // W35
+  await order(402, '2026-09-01', 'CBA600', 6); // W36
+  await order(403, '2026-09-08', 'CBA600', 4); // W37
+  const checkpoint = adminDb.collection('appConfig').doc('skuWeeklyDemandRollup');
+  await checkpoint.set({ lastClosedWeek: '2026-W34' });
+
+  // Cada semana faz exatamente uma consulta a `salesOrders`: estourar na terceira mata a execução no
+  // meio, como o teto de 300s da função mataria um cold start de 104 semanas.
+  let weekQueries = 0;
+  const real = adminDb.collection.bind(adminDb);
+  const spy = vi.spyOn(adminDb, 'collection').mockImplementation(path => {
+    if (path === 'salesOrders' && ++weekQueries === 3) throw new Error('função encerrada pelo teto de tempo');
+    return real(path);
+  });
+  try {
+    await expect(rollUpPendingWeeks(new Date('2026-09-16T12:00:00Z'))).rejects.toThrow('teto de tempo');
+  } finally {
+    spy.mockRestore();
+  }
+
+  // As duas semanas já fechadas não podem ser descartadas: com o checkpoint só no fim do laço, a
+  // execução seguinte recomeça do zero e a lacuna nunca fecha, por mais vezes que o cron rode.
+  expect((await checkpoint.get()).data()?.lastClosedWeek).toBe('2026-W36');
+  expect((await rollUpPendingWeeks(new Date('2026-09-16T12:00:00Z'))).weeks).toEqual(['2026-W37']);
+  expect(await weeksOf('CBA600')).toEqual({
+    '2026-W35': { units: 2, orders: 1 }, '2026-W36': { units: 6, orders: 1 }, '2026-W37': { units: 4, orders: 1 },
+  });
+});
+
+it('stops at the time budget and reports what is left, instead of running until the function is killed', async () => {
+  await order(404, '2026-08-25', 'CBA600', 2); // W35
+  await order(405, '2026-09-01', 'CBA600', 6); // W36
+  await order(406, '2026-09-08', 'CBA600', 4); // W37
+  const checkpoint = adminDb.collection('appConfig').doc('skuWeeklyDemandRollup');
+  await checkpoint.set({ lastClosedWeek: '2026-W34' });
+
+  // Orçamento zerado: uma semana sempre fecha, para que toda execução avance, e a seguinte para.
+  const run = await rollUpPendingWeeks(new Date('2026-09-16T12:00:00Z'), 0);
+  expect(run.weeks).toEqual(['2026-W35']);
+  expect(run.remaining).toBe(2);
+  expect((await checkpoint.get()).data()?.lastClosedWeek).toBe('2026-W35');
+  expect(await weeksOf('CBA600')).toEqual({ '2026-W35': { units: 2, orders: 1 } });
+});

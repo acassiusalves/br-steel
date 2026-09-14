@@ -119,6 +119,18 @@ regra: cron que aplica gravação de negócio fecha fechado. Sem o segredo confi
 O cron processa **todas as semanas desde `lastClosedWeek`**, não apenas a anterior. Uma execução
 perdida se auto-corrige na seguinte, sem intervenção.
 
+O checkpoint avança **a cada semana fechada**, não uma vez no fim do laço: uma execução encerrada no
+meio conserva o que já fechou, e a seguinte continua de onde parou. Sem isso uma lacuna grande demais
+para caber num passe nunca fecharia — cada execução recomeçaria do zero e morreria no mesmo ponto. A
+execução também tem orçamento de tempo próprio, abaixo do `maxDuration` declarado na rota: ao esgotá-lo
+ela para limpa e reporta `remaining`, em vez de seguir até ser morta pela plataforma. Uma semana sempre
+fecha, para que toda execução avance.
+
+O cold start continua não sendo trabalho do cron: sem checkpoint a lista é a janela inteira de 104
+semanas, e reconstruí-la é o papel do script de backfill (abaixo). O orçamento existe para que, se
+alguém disparar o cron nessa situação, ele convirja em execuções sucessivas em vez de repetir um passe
+impossível.
+
 O rollup **nunca grava a semana corrente**. `skuWeeklyDemand` contém apenas semanas fechadas; a semana
 em curso é sempre derivada ao vivo, pelo caminho de leitura abaixo. Isso mantém o documento imutável
 depois de escrito e elimina a necessidade de reescrever o mesmo bucket sete dias seguidos.
@@ -214,6 +226,10 @@ histórico nasce alcançável, em vez de nascer preso ao cliente como aconteceu 
 | Falha | Comportamento |
 | --- | --- |
 | Rollup falha numa execução | A próxima fecha todas as semanas pendentes desde `lastClosedWeek`. Sem intervenção. |
+| Rollup encerrado no meio (teto de tempo, deploy) | O checkpoint avança por semana fechada, então o que já fechou fica. A execução seguinte continua da semana seguinte, não do começo. |
+| Mais semanas pendentes do que cabe numa execução | Para no orçamento de tempo e devolve `remaining > 0`. Cada execução fecha pelo menos uma semana, então a lacuna converge. Reconstrução completa continua sendo trabalho do script de backfill. |
+| SKU que não serve de id de documento (`CHAPA/10`, código não textual) | O id do documento é uma versão saneada e o SKU verdadeiro fica no campo `sku`, como em `stockUpdates`. O que nem assim vira id é ignorado com aviso em log — um item não pode derrubar a semana inteira. |
+| Item sem `descricao` | Grava sem o campo; a descrição já armazenada é preservada pelo `merge`. O tipo diz que `descricao` é obrigatório, a fonte diz que não. |
 | Rollup roda duas vezes na mesma semana | No-op — a escrita por mapa é idempotente. |
 | `skuWeeklyDemand` vazio ou ausente | `history: []`. A tabela renderiza exatamente como hoje. A feature degrada para invisível, nunca para erro. |
 | Append em `stockObservations` falha | Uma retentativa; depois, `set` legado só no `stockUpdates` e registro da perda. **O webhook nunca retorna 500 por causa do log** — mesmo princípio já aplicado em `invalidateProductStockCache().catch(() => undefined)`. |

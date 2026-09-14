@@ -7,10 +7,11 @@
  * firestore-sku-weekly-demand.ts começa com `import 'server-only'`, que é um no-op só dentro do build
  * do Next (condition `react-server`); fora dele o pacote lança na importação. Por isso a invocação usa
  * `node --conditions=react-server --import tsx`, não `npx tsx` puro — mesmo padrão do script `cutover`
- * em package.json, que importa a mesma árvore de módulos server-only.
+ * em package.json, que importa a mesma árvore de módulos server-only. O alias evita que quem roda
+ * isto à mão no dia do deploy precise lembrar das flags:
  *
- *   node --conditions=react-server --import tsx scripts/backfill-sku-weekly-demand.ts            # janela padrão (104 semanas)
- *   node --conditions=react-server --import tsx scripts/backfill-sku-weekly-demand.ts 2025-W01   # a partir de uma semana específica
+ *   npm run backfill:sku-weekly-demand              # janela padrão (104 semanas)
+ *   npm run backfill:sku-weekly-demand -- 2025-W01  # a partir de uma semana específica
  *
  * Retomável: o checkpoint avança semana a semana, então uma interrupção continua de onde parou.
  */

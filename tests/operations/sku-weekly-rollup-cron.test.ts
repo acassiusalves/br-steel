@@ -56,3 +56,15 @@ it('writes nothing while the core is blocked', async () => {
   expect(await (await call('Bearer ' + cronSecret)).json()).toMatchObject({ ok: true, suspended: true, weeks: [] });
   expect((await adminDb.collection('skuWeeklyDemand').get()).empty).toBe(true);
 });
+
+it('declares the function ceiling explicitly instead of inheriting the platform default', async () => {
+  // Sem isto o cron herda o padrão da plataforma e um cold start de 104 semanas morre em silêncio.
+  const route = await import('@/app/api/cron/sku-weekly-rollup/route');
+  expect(route.maxDuration).toBe(300);
+});
+
+it('reports how many weeks are still pending after a run', async () => {
+  await adminDb.collection('appConfig').doc('skuWeeklyDemandRollup').set({ lastClosedWeek: '2026-W36' });
+  expect(await (await call('Bearer ' + cronSecret)).json())
+    .toMatchObject({ ok: true, weeks: ['2026-W37'], remaining: 0 });
+});
