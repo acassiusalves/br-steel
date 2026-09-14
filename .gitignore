@@ -48,3 +48,6 @@ service-account.json
 
 # Rascunho de execução por subagentes (briefs, relatórios, diffs de revisão)
 .superpowers/
+
+# Saída do pré-visualizador de gráfico (scripts/render-chart-preview.tsx)
+chart-preview.html
