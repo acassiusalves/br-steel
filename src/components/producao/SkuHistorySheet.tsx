@@ -1,21 +1,32 @@
 'use client';
 
 import * as React from 'react';
-import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
+import { ResponsiveContainer } from 'recharts';
 import { Loader2 } from 'lucide-react';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { fetchOperation } from '@/lib/operation-client';
+import { DemandAreaChart } from '@/components/producao/DemandAreaChart';
+import { fillWeekGaps } from '@/lib/history-series';
 import type { HistoryPoint } from '@/server/persistence/production-demand-contract';
 
-/** Detalhe do SKU: 52 semanas fechadas, onde o sparkline mostra 12. */
-export function SkuHistorySheet({ sku, description, onOpenChange }:
-  { sku: string | null; description?: string; onOpenChange: (open: boolean) => void }) {
+type Props = {
+  sku: string | null;
+  description?: string;
+  stockMin?: number;
+  stockMax?: number;
+  onOpenChange: (open: boolean) => void;
+};
+
+/** Detalhe do SKU: 52 semanas fechadas, onde o sparkline da tabela mostra 12. */
+export function SkuHistorySheet({ sku, description, stockMin, stockMax, onOpenChange }: Props) {
   const [points, setPoints] = React.useState<HistoryPoint[]>([]);
   const [isLoading, setIsLoading] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
   React.useEffect(() => {
-    if (!sku) return;
+    // Limpa ao fechar, não só ao abrir: sem isto o SKU seguinte aparece no título por um quadro
+    // com os dados do anterior ainda desenhados.
+    if (!sku) { setPoints([]); setError(null); setIsLoading(false); return; }
     let active = true;
     setIsLoading(true); setError(null); setPoints([]);
     fetchOperation<HistoryPoint[]>(`/api/operations/sku-history?sku=${encodeURIComponent(sku)}&semanas=52`)
@@ -24,31 +35,38 @@ export function SkuHistorySheet({ sku, description, onOpenChange }:
     return () => { active = false; };
   }, [sku]);
 
+  const series = React.useMemo(() => fillWeekGaps(points), [points]);
+  const hasBand = typeof stockMin === 'number' && typeof stockMax === 'number' && stockMax > 0;
+
   return (
     <Dialog open={Boolean(sku)} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-3xl">
         <DialogHeader>
-          <DialogTitle>{sku}</DialogTitle>
-          <DialogDescription>{description ?? 'Demanda semanal das últimas 52 semanas fechadas.'}</DialogDescription>
+          <DialogTitle className="font-mono">{sku}</DialogTitle>
+          <DialogDescription>
+            {description ? `${description} · ` : ''}Unidades vendidas por semana, até 52 semanas fechadas.
+          </DialogDescription>
         </DialogHeader>
+
         {isLoading ? (
-          <div className="flex h-64 items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-primary" /></div>
+          <div className="flex h-72 items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-primary" /></div>
         ) : error ? (
           // Falha de rede/servidor: estado distinto do "série vazia" abaixo — mesma ausência de
-          // barras, mas aqui é uma pane, não um SKU sem venda faturada. Não colapsar os dois.
-          <p role="alert" className="text-destructive py-12 text-center text-sm">{error}</p>
-        ) : points.length ? (
-          <ResponsiveContainer width="100%" height={256}>
-            <BarChart data={points} margin={{ top: 8, right: 8, bottom: 8, left: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" vertical={false} />
-              <XAxis dataKey="week" tickFormatter={week => week.slice(-3)} fontSize={11} interval="preserveStartEnd" />
-              <YAxis fontSize={11} allowDecimals={false} />
-              <Tooltip formatter={(value: number) => [`${value} unidades`, 'Vendidas']} />
-              <Bar dataKey="units" fill="currentColor" className="text-primary" radius={[2, 2, 0, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
+          // desenho, mas aqui é uma pane, não um SKU sem venda faturada. Não colapsar os dois.
+          <p role="alert" className="text-destructive py-16 text-center text-sm">{error}</p>
+        ) : series.length > 1 ? (
+          <>
+            <ResponsiveContainer width="100%" height={288}>
+              <DemandAreaChart series={series} stockMin={stockMin} stockMax={stockMax} />
+            </ResponsiveContainer>
+            <p className="text-muted-foreground text-xs">
+              {hasBand
+                ? `A faixa cinza é o estoque alvo deste SKU, de ${stockMin} a ${stockMax} unidades.`
+                : 'Este SKU não tem estoque mínimo e máximo configurados, então o gráfico não mostra a faixa de referência.'}
+            </p>
+          </>
         ) : (
-          <p className="text-muted-foreground py-12 text-center text-sm">
+          <p className="text-muted-foreground py-16 text-center text-sm">
             Ainda não há semanas consolidadas para este SKU.
           </p>
         )}

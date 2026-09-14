@@ -67,7 +67,7 @@ export default function ProducaoClient() {
   const [demand, setDemand] = React.useState<ProductionDemand[]>([]);
   const [isLoading, setIsLoading] = React.useState(true);
   const [updatingSku, setUpdatingSku] = React.useState<string | null>(null);
-  const [openSku, setOpenSku] = React.useState<{ sku: string; description: string } | null>(null);
+  const [openSku, setOpenSku] = React.useState<Pick<ProductionDemand, 'sku' | 'description' | 'stockMin' | 'stockMax'> | null>(null);
   const [date, setDate] = React.useState<DateRange | undefined>(() => ({ from: startOfMonth(new Date()), to: new Date() }));
   const { toast } = useToast();
 
@@ -452,7 +452,7 @@ export default function ProducaoClient() {
                         <TableCell className="text-center text-primary">
                           <button
                             type="button"
-                            onClick={() => setOpenSku({ sku: item.sku, description: item.description })}
+                            onClick={() => setOpenSku({ sku: item.sku, description: item.description, stockMin: item.stockMin, stockMax: item.stockMax })}
                             aria-label={`Ver histórico de ${item.sku}`}
                             className="rounded focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
                           >
@@ -564,6 +564,8 @@ export default function ProducaoClient() {
       <SkuHistorySheet
         sku={openSku?.sku ?? null}
         description={openSku?.description}
+        stockMin={openSku?.stockMin}
+        stockMax={openSku?.stockMax}
         onOpenChange={open => { if (!open) setOpenSku(null); }}
       />
     </DashboardLayout>
