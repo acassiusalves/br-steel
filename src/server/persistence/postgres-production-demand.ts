@@ -59,6 +59,12 @@ export function createPostgresProductionDemandRepository(pool: Pool): Production
         history: [],
       }));
       const warnings = storedStockWarnings(hasStock);
+      // Sem este aviso o corte de fonte silencia a série: o MCP passa a responder por aqui, com
+      // `history: []` para todo SKU, enquanto /producao e consultar_historico_sku continuam servindo
+      // a série real do Firestore. Duas respostas contraditórias do mesmo servidor, e a vazia
+      // indistinguível de "este SKU não vendeu". Dizer o que o vazio não significa é o mesmo registro
+      // dos avisos vizinhos, e a mesma escolha da Task 8: não responder errado em silêncio.
+      if (data.length) warnings.push('A série semanal por SKU (campo `history`) não existe nesta fonte e vem vazia para todos os SKUs: o rollup semanal está apenas no Firestore. Série vazia aqui não indica SKU sem venda faturada nem falha de integração, apenas ausência do histórico nesta fonte.');
       if (data.some(row => row.stockLevel === null)) warnings.push('Saldo de estoque não encontrado no banco para parte dos SKUs da demanda; esses valores são nulos.');
       if (!data.length) warnings.push('Nenhum pedido faturado com itens válidos foi encontrado no banco de dados deste ambiente no período informado.');
       return result(data, 'postgres', warnings);

@@ -161,7 +161,28 @@ Um defeito encontrado no caminho: o proxy cacheava o repositório construído e 
 
 **Requer autorização explícita do usuário, com janela combinada.** Executar somente após a Task 3 aprovada e as medições dentro dos tetos.
 
-- [ ] **Passo 1 — Pré-voo.** Confirmar: backup recente restaurável (etapa 3), deployment de rollback anotado, fila de webhooks vazia ou drenada, nenhuma sincronização manual em curso, comparador em verde na última execução de homologação. Anotar o deployment atual de produção antes de qualquer mudança.
+**Pré-requisito de dados: o log append-only de estoque precisa existir no destino.** A captura de
+histórico de saldo mora **só** na implementação Firestore: `applyStockObservation` grava uma linha em
+`stockObservations` a cada saldo que muda (`src/server/persistence/firestore-sales-ingest.ts:53`). O
+caminho PostgreSQL não tem equivalente — `brsteel_ops.stock_observations` tem `source_id` único por
+SKU e é sobrescrita a cada webhook (`on conflict (source_id) do update`,
+`src/server/persistence/postgres-sales-ingest.ts:77`), um registro por SKU, exatamente o
+comportamento que o log foi criado para substituir. O repositório é resolvido por chamada a partir de
+`appConfig/operationalSource`, então **no instante em que o Passo 4 troca o seletor para escritores a
+captura para**, sem erro, sem alerta e sem mudança em nenhuma tela: cada saldo observado a partir dali
+é perdido de forma irrecuperável, e o que já foi capturado deixa de crescer. Não há migration para
+isso em `supabase/operational/migrations/` hoje, e a cadeia é aplicada à mão — não acontece sozinho.
+Ver "Dívida assumida" em `docs/superpowers/specs/2026-09-13-historico-por-sku-design.md`.
+
+Para cortar sem perder o recurso, antes da janela: (1) uma migration nova na cadeia criando
+`brsteel_ops.stock_observation_log` (append-only, uma linha por observação, com a retenção de 24 meses
+que `expiresAt` dá no Firestore); (2) `createPostgresSalesIngestRepository.applyStockObservation`
+gravando nessa tabela além da projeção de último valor; (3) o histórico já capturado no Firestore
+copiado para ela na reconciliação do Passo 3, como qualquer outra coleção. Se o corte precisar
+acontecer sem isso, a perda tem que ser uma decisão explícita do controlador, registrada na evidência
+do Passo 6 — nunca uma descoberta posterior.
+
+- [ ] **Passo 1 — Pré-voo.** Confirmar: backup recente restaurável (etapa 3), deployment de rollback anotado, fila de webhooks vazia ou drenada, nenhuma sincronização manual em curso, comparador em verde na última execução de homologação, **`stock_observation_log` aplicada no destino e o caminho PostgreSQL gravando nela** (ver o pré-requisito de dados acima) ou a perda da captura decidida e registrada. Anotar o deployment atual de produção antes de qualquer mudança.
 - [ ] **Passo 2 — Abrir a janela.** `draining` → aguardar o tempo medido na Task 3 → `blocked`. Confirmar pelo registro de auditoria que nenhuma mutação nova entrou.
 - [ ] **Passo 3 — Reconciliar e comparar.** Executar a reconciliação final e o comparador. **Divergência zero é condição de avanço.** Qualquer divergência encerra a janela: reabrir em `open` com Firestore e investigar fora do corte.
 - [ ] **Passo 4 — Ativar.** Trocar o seletor para PostgreSQL para leitores e escritores. Retomar o dreno da fila, que reaplica os eventos acumulados de forma idempotente. Voltar para `open`.
