@@ -50,7 +50,9 @@ const definitions: ReadToolDefinition[] = [
  { name: 'consultar_historico_sku', title: 'Histórico do SKU',
    description: 'Consulta a série semanal de demanda de um SKU, em semanas ISO de America/Sao_Paulo. Somente semanas fechadas e salvas no banco; a semana corrente acompanha consultar_demanda_producao. Série vazia indica SKU sem venda faturada consolidada, não falha de integração.',
    capability: 'producao:read', page: '/producao',
-   schema: z.object({ sku: documentIdSchema, semanas: z.number().int().min(1).max(104).optional() }).strict(),
+   // sku: mesma convenção de consultar_estoque_produtos — a operação só faz Map.get pelo SKU
+   // verdadeiro, nunca constrói um caminho de documento, então documentIdSchema não se aplica.
+   schema: z.object({ sku: z.string().min(1).max(200), semanas: z.number().int().min(1).max(104).optional() }).strict(),
    run: skuHistory },
  {
   name: 'listar_pedidos_para_producao', title: 'Pedidos para produção',

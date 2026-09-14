@@ -32,7 +32,10 @@ export async function GET(request: Request) {
 
   try {
     if (await readCoreWriteMode() !== 'open') {
-      return NextResponse.json({ ok: true, suspended: true, weeks: [], skus: 0, remaining: 0 });
+      // Sem `remaining`: as semanas continuam pendentes, a execução só não tentou fechá-las. Reportar
+      // 0 aqui diria o oposto do que aconteceu. Mesmo padrão do ramo suspenso de webhook-queue.ts, que
+      // também só reporta o que de fato ocorreu (0 processado) e omite o campo que não apurou.
+      return NextResponse.json({ ok: true, suspended: true, weeks: [], skus: 0 });
     }
     // `remaining > 0` significa que o orçamento acabou antes das semanas: o checkpoint já guardou o
     // que fechou e a execução seguinte continua daí — nada aqui precisa ser refeito à mão.

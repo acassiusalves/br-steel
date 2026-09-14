@@ -48,7 +48,10 @@ de demanda, que pode esperar sem custo.
 
 ### `skuWeeklyDemand/{sku}`
 
-Um documento por SKU, semanas como mapa.
+Um documento por SKU, semanas como mapa. `{sku}` na chave é o caso comum, não uma garantia: quando o
+SKU não serve de id de documento (contém `/`, por exemplo), o id gravado é uma versão saneada e
+derivada dele, e o SKU verdadeiro sempre viaja no campo `sku` — nunca só no id. Detalhe completo na
+linha "SKU que não serve de id de documento" da tabela de Erros e degradação, abaixo.
 
 ```
 {
