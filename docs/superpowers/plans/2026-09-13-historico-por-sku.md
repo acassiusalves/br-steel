@@ -1076,8 +1076,12 @@ single pass would risk the 300s function ceiling."
 - [ ] **Step 4: Run it once against production, after Task 5 is deployed**
 
 ```bash
-npx tsx scripts/backfill-sku-weekly-demand.ts
+node --conditions=react-server --import tsx scripts/backfill-sku-weekly-demand.ts
 ```
+
+`npx tsx` sozinho **não funciona**: `server-only` lança fora da condição `react-server`. É o mesmo
+motivo pelo qual o script `cutover` no `package.json` já usa essa forma. O cabeçalho do próprio
+script registra a invocação correta.
 
 Expected: uma linha por semana e a contagem final. Conferir no console do Firestore que `skuWeeklyDemand` tem um documento por SKU e que `appConfig/skuWeeklyDemandRollup.lastClosedWeek` é a semana fechada mais recente.
 
