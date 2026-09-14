@@ -1447,7 +1447,9 @@ export function DemandSparkline({ history }: { history: HistoryPoint[] }) {
   const points = history.map((point, index) => [PADDING + index * step, y(point.units)] as const);
 
   const openIndex = history.findIndex(point => point.open);
-  const solid = openIndex === -1 ? points : points.slice(0, openIndex + 1);
+  // Termina o sólido ANTES do ponto aberto: a lacuna do stroke-dasharray é transparente, não
+  // apagadora, então uma linha sólida por baixo apareceria através dela e o "tracejado" sairia sólido.
+  const solid = openIndex === -1 ? points : points.slice(0, openIndex);
   const dashed = openIndex === -1 ? [] : points.slice(openIndex - 1);
   const [lastX, lastY] = points.at(-1)!;
   const path = (list: readonly (readonly [number, number])[]) => list.map(([x, v]) => `${x},${v}`).join(' ');
