@@ -45,3 +45,6 @@ next-env.d.ts
 firebase-debug.log
 firestore-debug.log
 service-account.json
+
+# Rascunho de execução por subagentes (briefs, relatórios, diffs de revisão)
+.superpowers/

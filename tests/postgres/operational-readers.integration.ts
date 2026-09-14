@@ -65,6 +65,13 @@ const fixture: SourceRecord[] = [
 let snapshot: OperationalSnapshot;
 const normalize = (response: any) => {
   const copy = structuredClone(response); delete copy.asOf;
+  // `history` é a série semanal do rollup, que só existe no Firestore — e lá depende do relógio: a
+  // semana corrente entra como ponto aberto assim que o período pedido a alcança. Comparar os dois
+  // leitores por esse campo compararia o calendário, não o SQL, e as datas deste fixture só estão a
+  // salvo enquanto forem passado. Pela mesma razão sai o aviso com que o leitor Postgres declara a
+  // ausência da série.
+  for (const row of Array.isArray(copy.data) ? copy.data : []) if (row && typeof row === 'object') delete row.history;
+  if (Array.isArray(copy.warnings)) copy.warnings = copy.warnings.filter((warning: string) => !/série semanal por SKU/.test(warning));
   return JSON.parse(JSON.stringify(copy).replaceAll('"postgres"','"firestore"'));
 };
 const operator: AccessContext = { actor:{userId:'operator',role:'Operador',source:'mcp'},active:true,

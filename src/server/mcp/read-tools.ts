@@ -10,6 +10,7 @@ import { listProductStock } from '@/server/operations/stock';
 import { listSupplies, listMovements } from '@/server/operations/supplies';
 import { productionDemand } from '@/server/operations/production-demand';
 import { listProduction, getProductionLot, getProductionOrder } from '@/server/operations/production';
+import { skuHistory } from '@/server/operations/sku-history';
 export type ReadToolDefinition = { name: string; title: string; description: string; capability?: Capability; page?: string; schema: z.AnyZodObject; run(context: AccessContext, input: any): Promise<OperationResult<unknown>> };
 const pagination = { limit: z.number().int().min(1).max(100).default(50), cursor: z.string().max(1000).optional() };
 const period = { from: dateSchema, to: dateSchema };
@@ -33,10 +34,10 @@ async function myAccess(context: AccessContext) {
  }
  return result({ name: user.name, role: user.role, capabilities, pages: [...pages] });
 }
-const defaultReadOperations = { listSales,getSale,summarizeSales,listProductStock,listSupplies,listMovements,productionDemand,listProduction,getProductionLot,getProductionOrder };
+const defaultReadOperations = { listSales,getSale,summarizeSales,listProductStock,listSupplies,listMovements,productionDemand,listProduction,getProductionLot,getProductionOrder,skuHistory };
 export type ReadOperations = typeof defaultReadOperations;
 export function createReadTools(operations: ReadOperations = defaultReadOperations): ReadToolDefinition[] {
-const { listSales,getSale,summarizeSales,listProductStock,listSupplies,listMovements,productionDemand,listProduction,getProductionLot,getProductionOrder } = operations;
+const { listSales,getSale,summarizeSales,listProductStock,listSupplies,listMovements,productionDemand,listProduction,getProductionLot,getProductionOrder,skuHistory } = operations;
 const definitions: ReadToolDefinition[] = [
  { name: 'consultar_meu_acesso', title: 'Meu acesso', description: 'Consulta nome e permissões efetivas de leitura do usuário autenticado.', schema: z.object({}).strict(), run: myAccess },
  { name: 'listar_pedidos', title: 'Pedidos', description: 'Lista pedidos com dados comerciais mínimos e paginação.', capability: 'vendas:read', schema: paged.extend({ from: dateSchema.optional(), to: dateSchema.optional(), storeId: z.number().int().optional(), statusId: z.number().int().optional() }).strict(), run: async (ctx, input) => { const r = await listSales(ctx,input); return { ...r, data: r.data.map(sale) }; } },
@@ -46,6 +47,13 @@ const definitions: ReadToolDefinition[] = [
  { name: 'listar_insumos', title: 'Insumos', description: 'Lista cadastro, saldos e limites de insumos.', capability: 'insumos:read', schema: paged, run: async (ctx,input) => { const r = await listSupplies(ctx,input); return { ...r, data: r.data.map(i => pick(i,['id','nome','codigo','gtin','unidade','precoCusto','estoqueAtual','estoqueMinimo','estoqueMaximo','tempoEntrega'])) }; } },
  { name: 'listar_movimentacoes_insumo', title: 'Histórico do insumo', description: 'Lista movimentações no período opcional, por dias civis de America/Sao_Paulo.', capability: 'insumos:read', schema: paged.extend({ supplyId: documentIdSchema, from: dateSchema.optional(), to: dateSchema.optional() }).strict(), run: async (ctx,input) => { const r = await listMovements(ctx,input); return { ...r, data: r.data.map(i => pick(i,['id','supplyId','type','quantity','unitCost','notes','createdAt','balanceAfter'])) }; } },
  { name: 'consultar_demanda_producao', title: 'Demanda de produção', description: 'Calcula demanda por SKU a partir dos pedidos faturados, saldos e limites salvos no banco de dados do sistema, com paginação e sem dados financeiros ou clientes. Não consulta o Bling; estoque ausente é nulo e resultado vazio não indica falha de integração.', capability: 'producao:read', page: '/producao', schema: paged.extend(period).strict(), run: async (ctx,input) => { const r = await productionDemand(ctx,{ from: input.from, to: input.to }); return { ...r, ...arrayPage([...r.data].sort((a,b) => a.sku < b.sku ? -1 : a.sku > b.sku ? 1 : 0),input) }; } },
+ { name: 'consultar_historico_sku', title: 'Histórico do SKU',
+   description: 'Consulta a série semanal de demanda de um SKU, em semanas ISO de America/Sao_Paulo. Somente semanas fechadas e salvas no banco; a semana corrente acompanha consultar_demanda_producao. Série vazia indica SKU sem venda faturada consolidada, não falha de integração.',
+   capability: 'producao:read', page: '/producao',
+   // sku: mesma convenção de consultar_estoque_produtos — a operação só faz Map.get pelo SKU
+   // verdadeiro, nunca constrói um caminho de documento, então documentIdSchema não se aplica.
+   schema: z.object({ sku: z.string().min(1).max(200), semanas: z.number().int().min(1).max(104).optional() }).strict(),
+   run: skuHistory },
  {
   name: 'listar_pedidos_para_producao', title: 'Pedidos para produção',
   description: 'Lista pedidos com itens operacionais. Com orderId, limit e cursor paginam os itens desse pedido; sem orderId, paginam pedidos. Use itemsNextCursor da listagem como cursor junto ao orderId para continuar os itens.',

@@ -5,8 +5,11 @@ import type { ProductionDemand, ProductionDemandReadRepository } from './product
 import { withOperationalSnapshot } from './postgres-read';
 import { latestStockSql } from './postgres-stock';
 import { storedStockWarnings } from './stored-stock-model';
+import { buildCancelledStatusSqlFragment } from './demand-eligibility';
 
-const demandSql = `with valid_items as (
+function buildDemandSql(): string {
+  const cancelledStatusFragment = buildCancelledStatusSqlFragment();
+  return `with valid_items as (
   select o.source_id,i.position,i.payload->'codigo' as sku,i.payload->'descricao' as description,
     i.payload ? 'descricao' as description_present,i.quantity,
     row_number() over(order by o.order_date,o.source_id,i.position) as item_order,
@@ -18,6 +21,7 @@ const demandSql = `with valid_items as (
   from brsteel_ops.sales_orders o join brsteel_ops.sales_order_items i on i.order_id=o.source_id
   where not o.source_deleted and o.order_date between $1 and $2
     and coalesce(o.payload#>'{notaFiscal,id}','null'::jsonb) not in ('null'::jsonb,'false'::jsonb,'0'::jsonb,'""'::jsonb)
+    and coalesce(o.payload#>'{situacao,id}','null'::jsonb) ${cancelledStatusFragment}
     and coalesce(i.payload->'codigo','null'::jsonb) not in ('null'::jsonb,'false'::jsonb,'0'::jsonb,'""'::jsonb)
     and i.quantity>0
 ), aggregated as (
@@ -32,6 +36,9 @@ from aggregated a join valid_items f on f.item_order=a.first_seen
 left join latest_stock s on to_jsonb(s.observed_sku)=f.sku
 left join limits l on to_jsonb(l.lookup_sku)=f.sku
 order by a.quantity desc,a.first_seen`;
+}
+
+export const demandSql = buildDemandSql();
 
 export function createPostgresProductionDemandRepository(pool: Pool): ProductionDemandReadRepository {
   return { async read(raw) {
@@ -48,8 +55,16 @@ export function createPostgresProductionDemandRepository(pool: Pool): Production
         stockLevel: row.stock_read?.saldoVirtualTotal ?? null,
         stockSource: row.stock_read ? 'postgres' : 'unavailable', stockAsOf: row.stock_read?.virtualAsOf ?? null,
         stockMin: row.minimum ?? undefined, stockMax: row.maximum ?? undefined,
+        // O rollup semanal ainda não tem equivalente em Postgres; o contrato exige o campo.
+        history: [],
       }));
       const warnings = storedStockWarnings(hasStock);
+      // Sem este aviso o corte de fonte silencia a série: o MCP passa a responder por aqui, com
+      // `history: []` para todo SKU, enquanto /producao e consultar_historico_sku continuam servindo
+      // a série real do Firestore. Duas respostas contraditórias do mesmo servidor, e a vazia
+      // indistinguível de "este SKU não vendeu". Dizer o que o vazio não significa é o mesmo registro
+      // dos avisos vizinhos, e a mesma escolha da Task 8: não responder errado em silêncio.
+      if (data.length) warnings.push('A série semanal por SKU (campo `history`) não existe nesta fonte e vem vazia para todos os SKUs: o rollup semanal está apenas no Firestore. Série vazia aqui não indica SKU sem venda faturada nem falha de integração, apenas ausência do histórico nesta fonte.');
       if (data.some(row => row.stockLevel === null)) warnings.push('Saldo de estoque não encontrado no banco para parte dos SKUs da demanda; esses valores são nulos.');
       if (!data.length) warnings.push('Nenhum pedido faturado com itens válidos foi encontrado no banco de dados deste ambiente no período informado.');
       return result(data, 'postgres', warnings);

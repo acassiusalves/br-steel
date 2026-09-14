@@ -10,7 +10,7 @@ function entityFor(tool: string, args: unknown) {
   const selectors: Record<string, [string, string]> = {
     consultar_pedido: ['order', 'id'], listar_pedidos_para_producao: ['order', 'orderId'],
     consultar_lote_producao: ['productionLot', 'lotId'], listar_movimentacoes_insumo: ['supply', 'supplyId'],
-    consultar_estoque_produtos: ['product', 'sku'],
+    consultar_estoque_produtos: ['product', 'sku'], consultar_historico_sku: ['product', 'sku'],
   };
   const selector = selectors[tool];
   if (!selector || !args || typeof args !== 'object' || Array.isArray(args)) return null;

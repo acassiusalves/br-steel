@@ -121,10 +121,6 @@
         {
           "fieldPath": "data",
           "order": "DESCENDING"
-        },
-        {
-          "fieldPath": "__name__",
-          "order": "DESCENDING"
         }
       ]
     },
@@ -138,10 +134,6 @@
         },
         {
           "fieldPath": "data",
-          "order": "DESCENDING"
-        },
-        {
-          "fieldPath": "__name__",
           "order": "DESCENDING"
         }
       ]
@@ -161,10 +153,6 @@
         {
           "fieldPath": "data",
           "order": "DESCENDING"
-        },
-        {
-          "fieldPath": "__name__",
-          "order": "DESCENDING"
         }
       ]
     },
@@ -179,9 +167,19 @@
         {
           "fieldPath": "createdAt",
           "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "stockObservations",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "sku",
+          "order": "ASCENDING"
         },
         {
-          "fieldPath": "__name__",
+          "fieldPath": "observedAt",
           "order": "ASCENDING"
         }
       ]
@@ -196,6 +194,12 @@
     },
     {
       "collectionGroup": "mcpRateLimits",
+      "fieldPath": "expiresAt",
+      "ttl": true,
+      "indexes": []
+    },
+    {
+      "collectionGroup": "stockObservations",
       "fieldPath": "expiresAt",
       "ttl": true,
       "indexes": []

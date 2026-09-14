@@ -2,6 +2,8 @@ import { afterEach, expect, it, vi } from 'vitest';
 import type { Pool } from 'pg';
 import type { AccessContext } from '@/server/access/types';
 import { getPostgresPilotConfig } from '@/server/mcp/postgres-pilot-config';
+import { createPostgresReadTools } from '@/server/mcp/postgres-pilot';
+import { readTools } from '@/server/mcp/read-tools';
 import { withPilotSnapshot } from '@/server/persistence/pilot-snapshot';
 import { withOperationalSnapshot } from '@/server/persistence/postgres-read';
 
@@ -10,6 +12,10 @@ const context = { actor: { userId: 'pilot', source: 'mcp' } } as AccessContext;
 const env = { MCP_PG_PILOT_ENABLED:'true', MCP_PG_PILOT_USER_IDS:'pilot', MCP_PG_PILOT_SNAPSHOT_HASH:'a'.repeat(64),
   MCP_PG_PILOT_EXPIRES_AT:'2026-09-12T20:00:00Z', MCP_PG_PILOT_DATABASE_URL:'postgres://brsteel_pilot_reader:p@db.mlumbvxpaqfzpdjnvzxc.supabase.co:5432/postgres', MCP_PG_PILOT_CA:'test CA' };
 const policy = { sourceProject:'marketflow-9h4tg', snapshotHash:'a'.repeat(64), expiresAt:Date.parse(env.MCP_PG_PILOT_EXPIRES_AT) };
+// Tool-list tests only inspect static metadata (name/description) and never call `.run`, so a real
+// pool is unnecessary: every repository factory only touches the pool lazily inside
+// `withOperationalSnapshot`, once a tool actually reads.
+const dummyPool = {} as unknown as Pool;
 const state = { ready:true, source_project:policy.sourceProject, active_run:policy.snapshotHash,
   captured_at:new Date('2026-09-12T17:00:00Z'), completed_at:new Date('2026-09-12T18:00:00Z') };
 afterEach(() => vi.useRealTimers());
@@ -27,6 +33,26 @@ it('requires explicit bounded configuration for selected users', () => {
     {MCP_PG_PILOT_DATABASE_URL:''},{MCP_PG_PILOT_CA:''},{MCP_PG_PILOT_DATABASE_URL:env.MCP_PG_PILOT_DATABASE_URL+'?sslmode=no-verify'}]) {
     expect(() => getPostgresPilotConfig(context,{...env,...patch},now)).toThrow();
   }
+});
+
+it('does not advertise a tool the pilot cannot honour: consultar_historico_sku has no Postgres copy yet', () => {
+  const tools = createPostgresReadTools(dummyPool, policy);
+  expect(tools.find(tool => tool.name === 'consultar_historico_sku')).toBeUndefined();
+});
+it('still snapshot-wraps tools with Postgres coverage, description and all', () => {
+  const tools = createPostgresReadTools(dummyPool, policy);
+  const base = readTools.find(tool => tool.name === 'consultar_demanda_producao')!;
+  const wrapped = tools.find(tool => tool.name === 'consultar_demanda_producao');
+  expect(wrapped).toBeDefined();
+  expect(wrapped!.description).not.toBe(base.description);
+  expect(wrapped!.description).toMatch(/cópia identificada por data de captura; não representa dados atuais/);
+});
+it('keeps consultar_meu_acesso live and unwrapped, exactly like the default tool list', () => {
+  const tools = createPostgresReadTools(dummyPool, policy);
+  const base = readTools.find(tool => tool.name === 'consultar_meu_acesso')!;
+  const live = tools.find(tool => tool.name === 'consultar_meu_acesso');
+  expect(live).toBeDefined();
+  expect(live!.description).toBe(base.description);
 });
 
 // The SQL client is the external boundary; the real transaction helper and request scope run unchanged.

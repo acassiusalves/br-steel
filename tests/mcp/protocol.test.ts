@@ -23,7 +23,7 @@ it('official SDK initializes, lists only read tools, calls real data, notifies a
   const { client, responses } = await sdkClient();
   try {
     expect(client.getServerVersion()?.name).toBe('br-steel');
-    const list = await client.listTools(); expect(list.tools).toHaveLength(12);
+    const list = await client.listTools(); expect(list.tools).toHaveLength(13);
     expect(list.tools.every(t => t.annotations?.readOnlyHint === true)).toBe(true);
     expect(list.tools.find(t => t.name === 'listar_pedidos')?.inputSchema.additionalProperties).toBe(false);
     const summary = await client.callTool({ name: 'resumir_vendas', arguments: { from: '2026-09-01', to: '2026-09-02' } });

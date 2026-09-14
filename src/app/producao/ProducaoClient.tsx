@@ -36,6 +36,8 @@ import {
 } from "@/components/ui/table";
 
 import type { ProductionDemand } from '@/server/operations/production-demand';
+import { DemandSparkline } from '@/components/producao/DemandSparkline';
+import { SkuHistorySheet } from '@/components/producao/SkuHistorySheet';
 import { Button } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Calendar } from '@/components/ui/calendar';
@@ -65,6 +67,7 @@ export default function ProducaoClient() {
   const [demand, setDemand] = React.useState<ProductionDemand[]>([]);
   const [isLoading, setIsLoading] = React.useState(true);
   const [updatingSku, setUpdatingSku] = React.useState<string | null>(null);
+  const [openSku, setOpenSku] = React.useState<{ sku: string; description: string } | null>(null);
   const [date, setDate] = React.useState<DateRange | undefined>(() => ({ from: startOfMonth(new Date()), to: new Date() }));
   const { toast } = useToast();
 
@@ -83,6 +86,7 @@ export default function ProducaoClient() {
     orderCount: true,
     totalQuantitySold: true,
     weeklyAverage: true,
+    trend: true,
     corte: true,
     dobra: true,
     actions: true,
@@ -364,6 +368,7 @@ export default function ProducaoClient() {
                                   orderCount: "Qtd. Pedidos",
                                   totalQuantitySold: "Qtd. Vendida",
                                   weeklyAverage: "Média Semanal",
+                                  trend: "Tendência",
                                   corte: "Corte",
                                   dobra: "Dobra",
                                   actions: "Ações",
@@ -397,6 +402,7 @@ export default function ProducaoClient() {
                   {columnVisibility.orderCount && <TableHead className="text-right">Qtd. de Pedidos (com NF)</TableHead>}
                   {columnVisibility.totalQuantitySold && <TableHead className="text-right">Qtd. Total Vendida</TableHead>}
                   {columnVisibility.weeklyAverage && <TableHead className="text-right">Média Semanal (Unidades)</TableHead>}
+                  {columnVisibility.trend && <TableHead className="text-center">Tendência</TableHead>}
                   {columnVisibility.corte && <TableHead className="text-right">Corte</TableHead>}
                   {columnVisibility.dobra && <TableHead className="text-right">Dobra</TableHead>}
                   {columnVisibility.actions && <TableHead className="text-center">Ações</TableHead>}
@@ -440,6 +446,18 @@ export default function ProducaoClient() {
                               <TrendingUp className="h-4 w-4 text-green-500" />
                             ) : null}
                           </div>
+                        </TableCell>
+                      )}
+                      {columnVisibility.trend && (
+                        <TableCell className="text-center text-primary">
+                          <button
+                            type="button"
+                            onClick={() => setOpenSku({ sku: item.sku, description: item.description })}
+                            aria-label={`Ver histórico de ${item.sku}`}
+                            className="rounded focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
+                          >
+                            <DemandSparkline history={item.history ?? []} />
+                          </button>
                         </TableCell>
                       )}
                       {columnVisibility.corte && <TableCell className="text-right">{item.corte}</TableCell>}
@@ -543,6 +561,11 @@ export default function ProducaoClient() {
           </CardFooter>
         </Card>
       </div>
+      <SkuHistorySheet
+        sku={openSku?.sku ?? null}
+        description={openSku?.description}
+        onOpenChange={open => { if (!open) setOpenSku(null); }}
+      />
     </DashboardLayout>
   );
 }
