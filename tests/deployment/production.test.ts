@@ -62,3 +62,15 @@ it('runs the actual offline CLI without loading local env files or printing secr
   expect(run(fixture()).stderr).toContain('invalid vercel.json');
  } finally { rmSync(cwd, { recursive: true, force: true }); }
 });
+
+it('declares no explicit __name__ in a Firestore index', () => {
+ // O Firestore anexa __name__ implicitamente, com a direção do último campo explícito. Declará-lo
+ // faz a comparação do CLI nunca casar com o que o servidor reporta: todo `firebase deploy
+ // --only firestore:indexes` tenta recriar o índice, recebe 409 "index already exists" e aborta
+ // antes de criar os índices que de fato faltam. Já aconteceu em produção com salesOrders.
+ const declared = JSON.parse(readFileSync(new URL('../../firestore.indexes.json', import.meta.url), 'utf8'));
+ const offenders = (declared.indexes as { collectionGroup: string; fields: { fieldPath: string }[] }[])
+  .filter(index => index.fields.some(field => field.fieldPath === '__name__'))
+  .map(index => index.collectionGroup);
+ expect(offenders).toEqual([]);
+});
