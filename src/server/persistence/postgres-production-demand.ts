@@ -55,6 +55,8 @@ export function createPostgresProductionDemandRepository(pool: Pool): Production
         stockLevel: row.stock_read?.saldoVirtualTotal ?? null,
         stockSource: row.stock_read ? 'postgres' : 'unavailable', stockAsOf: row.stock_read?.virtualAsOf ?? null,
         stockMin: row.minimum ?? undefined, stockMax: row.maximum ?? undefined,
+        // O rollup semanal ainda não tem equivalente em Postgres; o contrato exige o campo.
+        history: [],
       }));
       const warnings = storedStockWarnings(hasStock);
       if (data.some(row => row.stockLevel === null)) warnings.push('Saldo de estoque não encontrado no banco para parte dos SKUs da demanda; esses valores são nulos.');
