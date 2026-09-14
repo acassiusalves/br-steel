@@ -1058,10 +1058,15 @@ main().then(() => process.exit(0)).catch(error => { console.error(error); proces
 
 ```bash
 firebase emulators:exec --only firestore --project demo-brsteel-auth --config firebase.test.json \
-  'FIRESTORE_EMULATOR_HOST=127.0.0.1:8188 GCLOUD_PROJECT=demo-brsteel-auth npx tsx scripts/backfill-sku-weekly-demand.ts 2026-W36'
+  'FIRESTORE_EMULATOR_HOST=127.0.0.1:8188 NEXT_PUBLIC_FIREBASE_PROJECT_ID=demo-brsteel-auth \
+   node --conditions=react-server --import tsx scripts/backfill-sku-weekly-demand.ts 2026-W36'
 ```
 
-Expected: imprime "Consolidando N semanas", uma linha por semana, e termina com "Concluído". O emulador está vazio, então cada semana reporta 0 SKUs — o que valida o caminho sem tocar em dado real.
+Duas coisas que a forma óbvia erra: `npx tsx` sozinho lança em `server-only` fora da condição
+`react-server`, e o guard do emulador em `src/lib/firebase-admin.ts` lê
+`NEXT_PUBLIC_FIREBASE_PROJECT_ID`/`FIREBASE_PROJECT_ID`, nunca `GCLOUD_PROJECT`.
+
+Expected: imprime "Consolidando N semanas", uma linha por semana, e termina com "Concluído". O emulador está vazio, então cada semana reporta 0 SKUs — o que valida o caminho sem tocar em dado real. Confirme no emulador que `appConfig/skuWeeklyDemandRollup.lastClosedWeek` avançou, não apenas que o script imprimiu linhas.
 
 - [ ] **Step 3: Commit**
 
