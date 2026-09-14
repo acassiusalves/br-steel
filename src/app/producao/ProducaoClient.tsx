@@ -36,6 +36,7 @@ import {
 } from "@/components/ui/table";
 
 import type { ProductionDemand } from '@/server/operations/production-demand';
+import { DemandSparkline } from '@/components/producao/DemandSparkline';
 import { Button } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Calendar } from '@/components/ui/calendar';
@@ -83,6 +84,7 @@ export default function ProducaoClient() {
     orderCount: true,
     totalQuantitySold: true,
     weeklyAverage: true,
+    trend: true,
     corte: true,
     dobra: true,
     actions: true,
@@ -364,6 +366,7 @@ export default function ProducaoClient() {
                                   orderCount: "Qtd. Pedidos",
                                   totalQuantitySold: "Qtd. Vendida",
                                   weeklyAverage: "Média Semanal",
+                                  trend: "Tendência",
                                   corte: "Corte",
                                   dobra: "Dobra",
                                   actions: "Ações",
@@ -397,6 +400,7 @@ export default function ProducaoClient() {
                   {columnVisibility.orderCount && <TableHead className="text-right">Qtd. de Pedidos (com NF)</TableHead>}
                   {columnVisibility.totalQuantitySold && <TableHead className="text-right">Qtd. Total Vendida</TableHead>}
                   {columnVisibility.weeklyAverage && <TableHead className="text-right">Média Semanal (Unidades)</TableHead>}
+                  {columnVisibility.trend && <TableHead className="text-center">Tendência</TableHead>}
                   {columnVisibility.corte && <TableHead className="text-right">Corte</TableHead>}
                   {columnVisibility.dobra && <TableHead className="text-right">Dobra</TableHead>}
                   {columnVisibility.actions && <TableHead className="text-center">Ações</TableHead>}
@@ -440,6 +444,11 @@ export default function ProducaoClient() {
                               <TrendingUp className="h-4 w-4 text-green-500" />
                             ) : null}
                           </div>
+                        </TableCell>
+                      )}
+                      {columnVisibility.trend && (
+                        <TableCell className="text-center text-primary">
+                          <DemandSparkline history={item.history ?? []} />
                         </TableCell>
                       )}
                       {columnVisibility.corte && <TableCell className="text-right">{item.corte}</TableCell>}
