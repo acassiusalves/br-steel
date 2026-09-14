@@ -9,8 +9,8 @@ const ctx: AccessContext = { actor: { userId: 'admin', role: 'Administrador', so
 const tool = (name: string) => readTools.find(t => t.name === name)!;
 const run = (name: string, input = {}, context = ctx) => tool(name).run(context, tool(name).schema.parse(input)) as Promise<any>;
 beforeEach(async () => { await resetDatabase(); await seedUser('admin', { role: 'Administrador', name: 'Actual Admin' }); });
-it('registers twelve authorized reads, rejects actor injection and coerced numbers', async () => {
- expect(readTools).toHaveLength(12);
+it('registers thirteen authorized reads, rejects actor injection and coerced numbers', async () => {
+ expect(readTools).toHaveLength(13);
  for (const t of readTools) { if (t.capability) expect(() => requireOperation(ctx, t.capability!, t.page)).not.toThrow(); expect(t.schema.safeParse({ userId: 'admin' }).success).toBe(false); }
  const schema = tool('listar_pedidos').schema;
  expect(schema.parse({}).limit).toBe(50);
