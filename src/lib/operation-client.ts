@@ -24,17 +24,26 @@ const event = 'brsteel:operations-changed';
 export const notifyOperationsChanged = () => window.dispatchEvent(new Event(event));
 /** One request at a time, no polling in hidden tabs, no delivery after unmount. */
 export function subscribeOperation<T>(load: () => Promise<T>, onData: (value: T) => void, onError: (error: Error) => void) {
-  let active = true, loading = false, rerun = false;
-  const refresh = async () => {
+  let active = true, loading = false, rerun = false, timer = 0;
+  /** Only an explicit change queues a reload behind a load in flight, because that load may have read
+   *  the data the change replaced. Polling and returning to the tab never queue: the load already
+   *  running is the refresh they were asking for. */
+  const refresh = async (queueIfBusy = false) => {
     if (!active || document.visibilityState === 'hidden') return;
-    if (loading) { rerun = true; return; }
+    if (loading) { if (queueIfBusy) rerun = true; return; }
     loading = true;
     try { const data = await load(); if (active) onData(data); }
     catch (error) { if (active) onError(error instanceof Error ? error : new Error('Falha ao atualizar os dados.')); }
     finally { loading = false; if (rerun && active) { rerun = false; void refresh(); } }
   };
-  void refresh();
-  const timer = window.setInterval(refresh, 10000);
-  document.addEventListener('visibilitychange', refresh); window.addEventListener(event, refresh);
-  return () => { active = false; window.clearInterval(timer); document.removeEventListener('visibilitychange', refresh); window.removeEventListener(event, refresh); };
+  // The next poll is scheduled once the previous one settles, never on a fixed clock: a load slower than
+  // the interval would otherwise be followed straight away by the next, reloading without pause.
+  const poll = () => void refresh().finally(() => {
+    window.clearTimeout(timer);
+    if (active) timer = window.setTimeout(poll, 10000);
+  });
+  const reload = () => void refresh(true);
+  poll();
+  document.addEventListener('visibilitychange', poll); window.addEventListener(event, reload);
+  return () => { active = false; window.clearTimeout(timer); document.removeEventListener('visibilitychange', poll); window.removeEventListener(event, reload); };
 }

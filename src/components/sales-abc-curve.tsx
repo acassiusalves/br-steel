@@ -261,13 +261,16 @@ export default function SalesAbcCurve() {
     refreshGroups();
   }, [refreshGroups]);
 
-  // Protected sales polling, paused while the page is hidden.
+  // Protected sales polling, paused while the page is hidden. Scoped to the selected period:
+  // loading every order took one sequential request per 100 and never finished.
   React.useEffect(() => {
+    if (!date?.from || !date?.to) { setIsLoading(false); return; }
     setIsLoading(true);
-    return subscribeOperation(() => fetchAllOperationPages<SaleOrder>('/api/operations/sales'), sales => {
+    const params = new URLSearchParams({ from: format(date.from, 'yyyy-MM-dd'), to: format(date.to, 'yyyy-MM-dd') });
+    return subscribeOperation(() => fetchAllOperationPages<SaleOrder>(`/api/operations/sales?${params}`), sales => {
       setAllSales(sales); setLoadError(null); setIsLoading(false);
     }, error => { setAllSales([]); setLoadError(error.message); setIsLoading(false); });
-  }, []);
+  }, [date]);
 
   // Filter orders by date and drop cancelled ones
   const filteredOrders = React.useMemo(() => {
