@@ -122,12 +122,16 @@ const SalesListPage = () => {
     averageTicket: 0,
   });
 
+  // Only the selected period is fetched. Loading every order meant one sequential request per
+  // 100 of them before the first row could render, so the listing never finished loading.
   React.useEffect(() => {
+    if (!date?.from || !date?.to) { setIsLoading(false); return; }
     setIsLoading(true);
-    return subscribeOperation(() => fetchAllOperationPages<SaleOrder>('/api/operations/sales'), sales => {
+    const params = new URLSearchParams({ from: format(date.from, 'yyyy-MM-dd'), to: format(date.to, 'yyyy-MM-dd') });
+    return subscribeOperation(() => fetchAllOperationPages<SaleOrder>(`/api/operations/sales?${params}`), sales => {
       setAllSales(sales); setLoadError(null); setIsLoading(false);
     }, error => { setAllSales([]); setFilteredSales([]); setSelectedOrder(null); setLoadError(error.message); setIsLoading(false); });
-  }, []); 
+  }, [date]);
   
   // Recalculate stats and apply filters
   React.useEffect(() => {
