@@ -6,6 +6,8 @@ O código do corte está pronto e testado: interruptor de manutenção, reconcil
 
 Guarde credenciais num arquivo privado fora do Git, com permissão `0600`. Nada deste roteiro deve ser colado em chat, issue ou PR.
 
+**Estado do destino conferido em 15/09/2026**, direto no banco: as sete migrations operacionais aplicadas, cópia do piloto `ready=true` (capturada 12/09 17:41 UTC), banco em 48 MB dos 500 MB do Free. `brsteel_write.audit` e `brsteel_write.idempotency` estão **vazias** — nenhuma gravação real jamais chegou ao PostgreSQL hospedado. Todo o teste de escrita da etapa 4 rodou em contêiner local descartável.
+
 ---
 
 ## O que você precisa em mãos
@@ -20,18 +22,13 @@ Guarde credenciais num arquivo privado fora do Git, com permissão `0600`. Nada 
 
 ---
 
-## Passo 1 — Aplicar as duas migrations pendentes
+## Passo 1 — Conferir a cadeia de migrations
 
-O piloto da etapa 3 aplicou as cinco primeiras migrations operacionais. **Duas são posteriores e ainda não estão no destino:**
+**As sete migrations operacionais já estão no destino.** Este passo pedia a aplicação de `20260912234410_operational_writer_role.sql` e `20260912235500_operational_native_run.sql`; as duas foram aplicadas antes de 13/09/2026. O `README.md` registrou isso na época, este roteiro não acompanhou. Reconferido em 15/09/2026: as sete devolvem o valor esperado.
 
-| Arquivo | O que cria |
-| --- | --- |
-| `20260912234410_operational_writer_role.sql` | papel `brsteel_ops_writer`, schema `brsteel_write`, auditoria e idempotência |
-| `20260912235500_operational_native_run.sql` | execução sentinela `NATIVE_RUN_ID` para linhas nativas |
+**Não reaplique.** `operational_writer_role` falha com o schema já existente — e uma falha aqui pareceria defeito do destino, quando seria só ordem errada de leitura. A tabela completa das sete conferências está no `README.md`.
 
-Aplique **nessa ordem**, uma de cada vez, conferindo o resultado antes de seguir. A segunda depende da primeira apenas indiretamente, mas a ordem é a do histórico.
-
-Conferência depois de aplicar:
+Confira estas três antes de seguir:
 
 ```sql
 -- Deve devolver uma linha, com todos os atributos em false exceto rolinherit.
@@ -52,14 +49,23 @@ Se qualquer uma falhar, **pare**: o restante do roteiro assume as três verdadei
 
 ## Passo 2 — Provisionar o login temporário de runtime
 
-O papel `brsteel_ops_writer` nasce `NOLOGIN` de propósito. Crie um login temporário associado a ele, com senha aleatória e prazo curto:
+O papel `brsteel_ops_writer` nasce `NOLOGIN` de propósito. Crie um login temporário associado a ele, com senha aleatória e prazo curto.
+
+> **Um ensaio anterior executou este passo e não completou o encerramento.** Em 15/09/2026 o papel `brsteel_ops_runtime` ainda existe no destino: `NOLOGIN`, `valid until 2026-09-14 20:00+00` (vencido), **ainda associado a `brsteel_ops_writer`** e sem sessão ativa. Ele não vem de migration nenhuma — só deste roteiro. Não é exposição aberta; é resíduo. Mas um `create role` puro falharia com *role already exists*, e por isso o bloco abaixo começa derrubando o que sobrou: o ensaio parte de estado conhecido, nunca de estado herdado.
 
 ```sql
--- Troque <SENHA> por um valor aleatório de 32+ caracteres e <PRAZO> por algo como '2026-09-14 20:00+00'.
+-- Resíduo de ensaio anterior, se houver. As associações do papel caem junto com ele.
+drop role if exists brsteel_ops_runtime;
+
+-- Troque <SENHA> por um valor aleatório de 32+ caracteres e <PRAZO> por uma data futura
+-- dentro da sua janela. NÃO reutilize '2026-09-14 20:00+00': é o exemplo da versão anterior
+-- deste roteiro, e é literalmente o prazo que ficou no resíduo.
 create role brsteel_ops_runtime login password '<SENHA>' valid until '<PRAZO>'
   nosuperuser nocreatedb nocreaterole noreplication nobypassrls inherit connection limit 4;
 grant brsteel_ops_writer to brsteel_ops_runtime;
 ```
+
+Se o `drop` reclamar de objetos dependentes, **pare e investigue**: significa que alguém concedeu privilégio direto ao papel em vez de passar pela associação, e o resíduo é maior do que este roteiro supõe.
 
 Conferência — o login **não** pode ter mais do que o papel concede:
 
@@ -73,7 +79,7 @@ where member.rolname = 'brsteel_ops_runtime';
 
 > **Uma associação a mais é esperada no hospedado.** `postgres` é membro de `brsteel_ops_writer` com `admin_option`, porque no PostgreSQL 16+ quem cria um papel recebe administração sobre ele — e o `postgres` do Supabase, ao contrário do de um contêiner local, não é superusuário. Não é escalonamento do escritor. O teste de integração local afirma zero associações e passa, justamente porque lá o criador é superusuário e dispensa o registro: **é um comportamento que a suíte local não consegue observar.**
 
-O papel escritor já cobre leitura **e** escrita do núcleo: ele tem `SELECT` nas 13 tabelas de `brsteel_ops`, `SELECT` em `brsteel_import.state` e DML onde precisa. Não conceda nada além disso.
+O papel escritor já cobre leitura **e** escrita do núcleo: conferido em 15/09/2026, tem `SELECT` nas **11** tabelas de `brsteel_ops`, na única de `brsteel_import` (`state`) e nas duas de `brsteel_write`, além de DML onde precisa. Não conceda nada além disso. (A versão anterior dizia "13 tabelas de `brsteel_ops`"; 13 é a soma dos schemas `brsteel_ops` e `brsteel_import`, como diz o README — não a contagem de um deles.)
 
 **Nunca use o login `postgres` no runtime.** O código recusa: `operationalPoolConfig` rejeita `postgres` e `postgres.<projeto>` explicitamente.
 
@@ -81,9 +87,9 @@ O papel escritor já cobre leitura **e** escrita do núcleo: ele tem `SELECT` na
 
 ## Passo 3 — Copiar os dados reais para o destino
 
-**A cópia do piloto ainda está no destino.** O que foi encerrado no piloto foram os *acessos*, não os dados — conferido em 13/09: 12.538 pedidos, 361 observações de estoque, 54 insumos, 3 lotes, marcada como pronta, capturada em 12/09 17:41 UTC.
+**A cópia do piloto ainda está no destino.** O que foi encerrado no piloto foram os *acessos*, não os dados — reconferido em 15/09/2026 direto no banco: 12.538 pedidos, 12.999 itens, 361 observações de estoque, 54 insumos, 3 lotes, `ready=true`, capturada em 12/09 17:41 UTC e concluída às 17:54.
 
-Mesmo assim é preciso uma exportação nova, por dois motivos: a cópia é de ontem e o schema mudou desde então. **Não reaproveite um JSON antigo** — ele não prova compatibilidade com o schema atual.
+Mesmo assim é preciso uma exportação nova, por dois motivos: a cópia é de 12/09 e o schema mudou desde então. **Não reaproveite um JSON antigo** — ele não prova compatibilidade com o schema atual.
 
 A importação vai **reconciliar sobre a cópia existente**, não carregar do zero. É exatamente o caminho que a guarda de colisão entre linha nativa e documento de snapshot protege.
 
@@ -145,6 +151,8 @@ Os comandos de reconciliação e comparação são `npm run cutover -- reconcile
 
 ## Encerramento — revogar tudo
 
+**O encerramento do ensaio anterior não foi concluído.** Em 15/09/2026, `brsteel_ops_runtime` ainda existia e `brsteel_pilot_importer` ainda estava associado a `brsteel_ops_importer` — ambos `NOLOGIN`, com prazo vencido e sem sessão ativa, mas de pé. Desligar o login é a metade que foi feita. A outra metade é esta lista, e ela precisa ser executada até o fim, com as conferências.
+
 Ao terminar o ensaio, **no mesmo dia**:
 
 ```sql
@@ -161,7 +169,18 @@ select pg_terminate_backend(pid) from pg_stat_activity where usename = 'brsteel_
 
 -- Deve devolver zero.
 select count(*) from pg_stat_activity where usename in ('brsteel_ops_runtime', 'brsteel_pilot_importer');
+
+-- Deve devolver zero: o papel de runtime não pode continuar de pé.
+select count(*) from pg_roles where rolname = 'brsteel_ops_runtime';
+
+-- Deve devolver zero: a associação do importador de piloto tem de sair.
+select count(*) from pg_auth_members m
+join pg_roles granted on granted.oid = m.roleid
+join pg_roles member on member.oid = m.member
+where member.rolname = 'brsteel_pilot_importer' and granted.rolname = 'brsteel_ops_importer';
 ```
+
+Sessão zerada não é encerramento. Enquanto o papel existir e a associação estiver de pé, o que separa o destino de um acesso ativo é só uma senha e um `valid until` — dois comandos de distância.
 
 Remova as variáveis do projeto de homologação, apague o snapshot e os relatórios dos diretórios privados, e restaure o deployment anterior de homologação.
 
@@ -171,6 +190,7 @@ Remova as variáveis do projeto de homologação, apague o snapshot e os relató
 
 - **Não aplicar estas migrations em `supabase/migrations`.** Aquela cadeia é do provedor de identidade OAuth; as operacionais ficam separadas justamente para não serem aplicadas por engano.
 - **Não configurar `BRSTEEL_OPERATIONAL_DATABASE_URL` em produção.** A capacidade de trocar a fonte está publicada lá; o que a mantém desligada é `appConfig/operationalSource` não existir. Uma variável sozinha não troca nada, mas as duas juntas trocariam.
+- **Não reaplicar as migrations operacionais.** As sete já estão no destino desde 12/09; reaplicar `operational_writer_role` falha com o schema existente.
 - **Não usar um snapshot antigo.** O schema mudou desde o piloto.
 - **Não pular o `verify`.** Importar sem conferir de forma independente é a diferença entre ter uma cópia e achar que tem.
 - **Não deixar os logins ativos além da janela.** O `valid until` é rede de segurança, não substituto da revogação.
