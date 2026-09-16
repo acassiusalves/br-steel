@@ -128,6 +128,32 @@ test('imports every collection, resumes checkpoints, reconciles and serves consi
   assert.equal(checks.rows[0].rls, true);
 });
 
+/**
+ * Posicionado logo após a importação, enquanto as duas fontes ainda descrevem o mesmo estado:
+ * os testes seguintes importam snapshots modificados e a comparação deixaria de ser válida.
+ *
+ * Os três leitores que substituíram consultas diretas ao Firestore em `order-service` e `actions`.
+ * Equivalência é a propriedade que importa: a tela não pode mudar de resposta conforme a fonte.
+ *
+ * `importedOrderIds` é a de lógica menos óbvia — exige itens, e só cobra XML ou detalhes fiscais de
+ * quem tem nota, para que um pedido sem nota nunca seja reprovado por falta de algo que não existe.
+ * As quatro combinações de filtro são exercitadas porque é aí que um `and`/`or` trocado se esconde.
+ */
+test('count, lastOrderDate and importedOrderIds match the Firestore adapter', async () => {
+  const total = await sales.count();
+  assert.equal(total, await firestoreSalesReadRepository.count());
+  assert.ok(total > 0, 'fixture precisa ter pedidos para o teste não passar por vacuidade');
+
+  assert.equal(await sales.lastOrderDate(), await firestoreSalesReadRepository.lastOrderDate());
+
+  for (const filter of [{}, { requireInvoiceDetails: true }, { requireInvoiceXml: true },
+                        { requireInvoiceDetails: true, requireInvoiceXml: true }]) {
+    const actual = await sales.importedOrderIds(filter);
+    const expected = await firestoreSalesReadRepository.importedOrderIds(filter);
+    assert.deepEqual([...actual].sort(), [...expected].sort(), `filtro ${JSON.stringify(filter)}`);
+  }
+});
+
 test('rejects changed content at the same version and source mismatch without corrupting the ready copy', async () => {
   const changed = baseline(); changed.capturedAt = later(1); changed.records[0].data.total = 999;
   await assert.rejects(importSnapshot(pool, changed), /version/i);

@@ -3,7 +3,7 @@ import type { Pool } from 'pg';
 import { z } from 'zod';
 import type { SaleOrder } from '@/types/sale-order';
 import { dateSchema, dateRangeSchema, documentIdSchema, result, OperationError } from '@/server/operations/common';
-import type { SalesMetric, SalesReadRepository, SalesSummary } from './sales-contract';
+import type { ImportedOrderFilter, SalesMetric, SalesReadRepository, SalesSummary } from './sales-contract';
 import { withOperationalSnapshot } from './postgres-read';
 
 const metrics = (table: string) => `(select jsonb_build_object('totalRevenue',coalesce(sum(amount order by order_date,source_id),0),
@@ -65,6 +65,35 @@ export function createPostgresSalesRepository(pool: Pool): SalesReadRepository {
         const row = (await client.query('select payload from brsteel_ops.sales_orders where source_id=$1 and not source_deleted',[id])).rows[0];
         if (!row) throw new OperationError('NOT_FOUND','Pedido não encontrado.',404);
         return result(row.payload as SaleOrder,'postgres');
+      });
+    },
+    async count() {
+      // Sem filtrar `source_deleted`, para igualar o adaptador Firestore: a tela administrativa conta
+      // documentos, e um pedido excluído na origem continua salvo aqui. Divergir por fonte seria pior
+      // que qualquer definição — a mesma tela tem de responder o mesmo número nos dois bancos.
+      return withOperationalSnapshot(pool, async client => Number(
+        (await client.query('select count(*)::bigint as total from brsteel_ops.sales_orders')).rows[0].total));
+    },
+    async lastOrderDate() {
+      return withOperationalSnapshot(pool, async client => {
+        const row = (await client.query(
+          'select max(order_date) as last from brsteel_ops.sales_orders')).rows[0];
+        // `order_date` é `date`; o driver devolve `Date`, e a fronteira fala texto civil.
+        return row?.last ? new Date(row.last).toISOString().slice(0, 10) : null;
+      });
+    },
+    async importedOrderIds(filter: ImportedOrderFilter) {
+      return withOperationalSnapshot(pool, async client => {
+        // Mesmas regras do Firestore: itens obrigatórios, exigências fiscais só para quem tem nota.
+        const rows = (await client.query(
+          `select source_id from brsteel_ops.sales_orders
+             where jsonb_array_length(coalesce(payload->'itens','[]'::jsonb)) > 0
+               and (not $1::boolean or coalesce((payload->'notaFiscal'->>'id')::numeric,0) <= 0
+                    or coalesce((payload->'notaFiscal'->>'xmlAvailable')::boolean,false))
+               and (not $2::boolean or coalesce((payload->'notaFiscal'->>'id')::numeric,0) <= 0
+                    or coalesce((payload->'notaFiscal'->>'hasFiscalDetails')::boolean,false))`,
+          [Boolean(filter.requireInvoiceXml), Boolean(filter.requireInvoiceDetails)])).rows;
+        return new Set(rows.map(row => String(row.source_id)));
       });
     },
     async readOrdersForPeriod(input) {
