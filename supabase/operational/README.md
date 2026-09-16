@@ -4,6 +4,8 @@ Esta pasta contém a base SQL e as ferramentas de importação do núcleo operac
 
 O [piloto hospedado de 12/09/2026](../../docs/evidence/operational-postgres-hosted-pilot.md) copiou e conferiu 12.967 registros reais e mediu os leitores candidatos. Os acessos temporários foram revogados ao encerrar o ensaio. Não houve ativação dos leitores nos endpoints de produção. O [ensaio dos endpoints](../../docs/evidence/operational-postgres-endpoint-pilot.md) validou depois OAuth, perfis e leitura PostgreSQL pela Vercel de homologação; ao final, acessos e variáveis foram retirados e o deployment anterior foi restaurado.
 
+O [ensaio do corte de 16/09/2026](../../docs/evidence/operational-postgres-cutover-rehearsal.md) executou a sequência inteira contra o destino hospedado — bloqueio, reconciliação de 13.063 registros e comparação com **divergência zero** — com o núcleo de produção parado por 10 min 15 s. Uma primeira tentativa revelou que o `reconcile` não alcançava o hospedado, defeito corrigido antes da segunda. **A troca da fonte não aconteceu** e a reversibilidade segue não demonstrada.
+
 ## Verificação reproduzível
 
 O [ensaio de backup/restauração](../../docs/evidence/operational-postgres-backup.md) validou o schema final e conteúdo da cópia hospedada em PostgreSQL local descartável. O [roteiro de recuperação](backup-restore.md) descreve a credencial separada, criptografia, conferência e revogação. Backups diários e armazenamento externo ainda precisam ser operacionalizados antes de produção.
