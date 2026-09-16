@@ -221,16 +221,18 @@ As gravações estão corretas: `saveSalesOrdersOptimized` delega a `salesIngest
 | Onde | Chamado por | Efeito após o corte | Situação |
 | --- | --- | --- | --- |
 | `firestore-sku-weekly-demand.ts` `rollUpWeek` | cron semanal | demanda silenciosamente errada; alimenta `consultar_historico_sku` e a tela de produção | **corrigido** |
-| `operations/stock.ts` (observações de webhook) | tela de estoque do site | o caminho vivo perde observações novas; o MCP não é afetado, usa o caminho armazenado | aberto |
-| `actions.ts` `deleteAllSalesOrders` | `api-settings` | **destrutivo**: apagaria a base que não está mais em uso | aberto |
-| `actions.ts` `countImportedOrders` | `api-settings` | contagem congelada na tela | aberto |
-| `actions.ts` `clearStockUpdates` | sem chamador encontrado | limparia a base errada | aberto |
-| `order-service.ts` `getLastImportedOrderDate` | `actions.ts` | importação manual recomeça de data antiga | aberto |
-| `order-service.ts` `getImportedOrderIdsWithDetails` | `actions.ts` | importação manual reimporta o que já existe | aberto |
-| `order-service.ts` `orderExists` | `actions.ts` | detecção de duplicata deixa de funcionar | aberto |
-| `order-service.ts` `getExistingOrderIds` | sem chamador encontrado | possivelmente código morto | aberto |
+| `operations/stock.ts` (observações de webhook) | tela de estoque do site | o caminho vivo perde observações novas; o MCP não é afetado, usa o caminho armazenado | **corrigido** |
+| `actions.ts` `deleteAllSalesOrders` | `api-settings` | **destrutivo**: apagaria a base que não está mais em uso | **corrigido** |
+| `actions.ts` `countImportedOrders` | `api-settings` | contagem congelada na tela | **corrigido** |
+| `actions.ts` `clearStockUpdates` | sem chamador encontrado | limparia a base errada | **corrigido** |
+| `order-service.ts` `getLastImportedOrderDate` | `actions.ts` | importação manual recomeça de data antiga | **corrigido** |
+| `order-service.ts` `getImportedOrderIdsWithDetails` | `actions.ts` | importação manual reimporta o que já existe | **corrigido** |
+| `order-service.ts` `orderExists` | `actions.ts` | detecção de duplicata deixa de funcionar | **corrigido** |
+| `order-service.ts` `getExistingOrderIds` | sem chamador encontrado | possivelmente código morto | **corrigido** |
 
-O caso corrigido tinha o método pronto no contrato (`readOrdersForPeriod`). Os demais exigem métodos novos em `SalesReadRepository` e `StockReadRepository`, implementação nos dois adaptadores e testes — trabalho maior, fora do escopo de uma correção pontual.
+Todos foram resolvidos em 16/09/2026. Dois eram código morto e foram apagados. Dois são ferramentas administrativas destrutivas sem equivalente na outra fonte: passaram a recusar por `requireFirestoreSource`, porque apagar a base que ninguém mais usa enquanto o operador vê "pronto" é pior que não apagar. Os outros quatro ganharam roteamento — três métodos novos em `SalesReadRepository` e o uso de `stockReadRepository.snapshot()` no caminho vivo do estoque.
+
+O teste de equivalência entre os adaptadores pagou-se na hora: o SQL filtrava exclusões lógicas enquanto o Firestore conta todo documento, e a mesma tela mostraria totais diferentes conforme a fonte.
 
 **Nada disto aparece num ensaio.** O ensaio prova que a cópia fica idêntica no instante do bloqueio; ele não exercita a aplicação depois do corte. O que revelaria estes casos é a troca da fonte em homologação, com a aplicação servindo do PostgreSQL — o passo que segue pendente.
 

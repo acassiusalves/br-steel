@@ -75,15 +75,18 @@ export async function readStockSnapshot() {
   const warnings: string[] = [];
   if (failed) warnings.push('Bling indisponível. O resultado contém somente observações anteriores ou de webhook; não representa uma consulta atual ao ERP.');
   const bySku = new Map<string, ProductStock>((cached?.data ?? []).map(row => [row.produto.codigo, { ...row, source: fromCache || failed ? 'cache' : 'bling' }]));
-  const webhooks = await adminDb.collection('stockUpdates').get();
-  for (const doc of webhooks.docs) {
-    const data = doc.data(); if (data.isSimulated || String(data.lastEvent ?? '').includes('(test)') || number(data.estoqueAtual) === null) continue;
-    const sku = String(data.sku || doc.id), at = String(data.webhookReceivedAt || '');
-    if (!Number.isFinite(Date.parse(at))) continue;
+  // Pelo repositório, nunca por `adminDb.collection('stockUpdates')` direto: a leitura direta ignora
+  // `operationalSource` e, depois de um corte, sobreporia observações de uma coleção que parou de
+  // receber webhooks. O repositório já aplica a mesma normalização — descarta simulados, eventos de
+  // teste, saldo nulo e data impossível — e devolve a última observação válida por SKU.
+  const observations = (await stockReadRepository.snapshot()).data;
+  for (const observed of observations) {
+    const sku = observed.produto.codigo, at = observed.virtualAsOf ?? observed.asOf;
+    if (!at || !Number.isFinite(Date.parse(at))) continue;
     const existing = bySku.get(sku);
     if (existing?.virtualAsOf && Date.parse(existing.virtualAsOf) > Date.parse(at)) continue;
-    bySku.set(sku, { ...(existing ?? { produto: { id: 0, codigo: sku, nome: String(data.nome || sku) }, deposito: { id: 0, nome: '' }, saldoFisico: null, saldoFisicoTotal: null, physicalAsOf: null }),
-      saldoVirtual: data.estoqueAtual, saldoVirtualTotal: data.estoqueAtual, source: existing ? 'mixed' : 'webhook', asOf: at, virtualAsOf: at });
+    bySku.set(sku, { ...(existing ?? { ...observed, deposito: { id: 0, nome: '' }, saldoFisico: null, saldoFisicoTotal: null, physicalAsOf: null }),
+      saldoVirtual: observed.saldoVirtual, saldoVirtualTotal: observed.saldoVirtualTotal, source: existing ? 'mixed' : 'webhook', asOf: at, virtualAsOf: at });
   }
   const data = [...bySku.values()].sort((a, b) => a.produto.codigo.localeCompare(b.produto.codigo));
   if (data.some(row => row.saldoVirtualTotal === null || row.saldoFisicoTotal === null)) warnings.push('Há saldos não informados. Campos desconhecidos são nulos, não zero.');

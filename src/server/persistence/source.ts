@@ -39,6 +39,21 @@ export async function readOperationalSource(): Promise<OperationalSource> {
 }
 
 /**
+ * Recusa uma ação que só sabe operar no Firestore quando a fonte ativa é outra.
+ *
+ * Existe para ferramentas administrativas destrutivas que varrem uma coleção inteira: depois de um
+ * corte, elas apagariam a base que não está mais em uso, e o operador veria "pronto" sem que nada do
+ * que ele quis apagar tivesse saído. Recusar alto é a única resposta honesta enquanto não houver
+ * equivalente na outra fonte.
+ */
+export async function requireFirestoreSource(action: string): Promise<void> {
+  const source = await readOperationalSource();
+  if (source === 'firestore') return;
+  throw new OperationError('UNAVAILABLE',
+    `${action} só opera sobre o Firestore, e a fonte ativa é ${source}. A ação foi recusada para não alterar a base errada.`, 503);
+}
+
+/**
  * Refuses anything but an explicit, TLS-verified connection under a dedicated role. The login name is
  * the controller's to choose when provisioning, so it is not pinned here — but `postgres` is refused:
  * the runtime must never hold the superuser.

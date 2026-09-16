@@ -2,7 +2,7 @@ import 'server-only';
 import { FieldPath } from 'firebase-admin/firestore';
 import { z } from 'zod';
 import { adminDb } from '@/lib/firebase-admin';
-import type { SalesListInput, SalesRange, SalesReadRepository } from './sales-contract';
+import type { ImportedOrderFilter, SalesListInput, SalesRange, SalesReadRepository } from './sales-contract';
 import type { SaleOrder } from '@/types/sale-order';
 import { dateSchema, dateRangeSchema, documentIdSchema, result, OperationError } from '@/server/operations/common';
 function ordersQuery(input: { from?: string; to?: string; storeId?: number; statusId?: number }) {
@@ -62,6 +62,31 @@ async function summarize(input: SalesRange, options: { databaseOnly: boolean }) 
   }, 'firestore', warnings);
 }
 
+async function count(): Promise<number> {
+  return (await adminDb.collection('salesOrders').count().get()).data().count;
+}
+async function lastOrderDate(): Promise<string | null> {
+  const snapshot = await adminDb.collection('salesOrders').orderBy('data', 'desc').limit(1).get();
+  const data = snapshot.docs[0]?.data()?.data;
+  return typeof data === 'string' && data ? data : null;
+}
+/**
+ * Um pedido só conta como importado quando tem itens. As exigências fiscais valem apenas para quem
+ * tem nota: um pedido sem nota nunca é reprovado por falta de XML que não existe.
+ */
+async function importedOrderIds(filter: ImportedOrderFilter): Promise<Set<string>> {
+  const ids = new Set<string>();
+  for (const doc of (await adminDb.collection('salesOrders').get()).docs) {
+    const order = doc.data();
+    if (!Array.isArray(order.itens) || !order.itens.length) continue;
+    const invoiceId = Number(order.notaFiscal?.id || 0);
+    const hasInvoice = Number.isFinite(invoiceId) && invoiceId > 0;
+    if (filter.requireInvoiceXml && hasInvoice && !order.notaFiscal?.xmlAvailable) continue;
+    if (filter.requireInvoiceDetails && hasInvoice && !order.notaFiscal?.hasFiscalDetails) continue;
+    ids.add(doc.id);
+  }
+  return ids;
+}
 export const firestoreSalesReadRepository: SalesReadRepository = {
-  list, get, summarize, readOrdersForPeriod,
+  list, get, summarize, readOrdersForPeriod, count, lastOrderDate, importedOrderIds,
 };

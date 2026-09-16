@@ -6,6 +6,8 @@ import { beginBlingConnection } from '@/server/integrations/bling-oauth';
 import { requireWebContext } from '@/server/operations/context';
 import { requireOperation, documentIdSchema, dateRangeSchema } from '@/server/operations/common';
 import { requireCoreWritesEnabled } from '@/server/operations/maintenance';
+import { salesReadRepository } from '@/server/persistence/sales';
+import { requireFirestoreSource } from '@/server/persistence/source';
 import { summarizeSales } from '@/server/operations/sales';
 import { readStockSnapshot, invalidateProductStockCache, refreshProductionSku } from '@/server/operations/stock';
 import { productionDemand } from '@/server/operations/production-demand';
@@ -14,7 +16,7 @@ import { FieldValue } from 'firebase-admin/firestore';
 import { z } from 'zod';
 import { format } from 'date-fns';
 
-import { saveSalesOrders, filterNewOrders, getLastImportedOrderDate, orderExists, saveSalesOrdersOptimized, getImportedOrderIdsWithDetails } from '@/services/order-service';
+import { saveSalesOrders, filterNewOrders, getLastImportedOrderDate, saveSalesOrdersOptimized, getImportedOrderIdsWithDetails } from '@/services/order-service';
 
 import {
     createInvoiceEnrichmentStats,
@@ -709,6 +711,7 @@ function civilRange(from?: Date, to?: Date) {
 }
 export async function clearStockUpdates(): Promise<{ deleted: number }> {
   await requireAdministrator();
+  await requireFirestoreSource('Limpar observações de estoque');
   const rows = await adminDb.collection('stockUpdates').get();
   for (let i = 0; i < rows.size; i += 400) {
     const batch = adminDb.batch(); rows.docs.slice(i, i + 400).forEach(doc => batch.delete(doc.ref)); await batch.commit();
@@ -723,7 +726,7 @@ export async function getProductsStock() {
 }
 export async function countImportedOrders(): Promise<number> {
   requireOperation(await requireWebContext(), 'vendas:read');
-  return (await adminDb.collection('salesOrders').count().get()).data().count;
+  return salesReadRepository.count();
 }
 export async function getSalesDashboardData({ from, to }: { from?: Date; to?: Date }) {
   return (await summarizeSales(await requireWebContext(), civilRange(from, to))).data;
@@ -739,6 +742,7 @@ export async function updateSingleSkuStock(sku: string): Promise<StockData> {
 }
 export async function deleteAllSalesOrders(): Promise<{ deletedCount: number }> {
   await requireAdministrator();
+  await requireFirestoreSource('Apagar todos os pedidos');
   const rows = await adminDb.collection('salesOrders').get();
   for (let i = 0; i < rows.size; i += 400) {
     const batch = adminDb.batch(); rows.docs.slice(i, i + 400).forEach(doc => batch.delete(doc.ref)); await batch.commit();
