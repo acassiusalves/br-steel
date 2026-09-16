@@ -158,7 +158,17 @@ Com os quatro passos prontos, o ensaio é código que já existe e está testado
 
 Depois, o retorno nos dois sentidos: antes de qualquer gravação oficial, e depois de gravações oficiais — que é o passo que prova que o corte é reversível.
 
-Os comandos de reconciliação e comparação são `npm run cutover -- reconcile` e `npm run cutover -- compare`, com `BRSTEEL_CUTOVER_DATABASE_URL` e `BRSTEEL_CUTOVER_SOURCE_PROJECT`.
+Os comandos de reconciliação e comparação são `npm run cutover -- reconcile` e `npm run cutover -- compare`. Contra o destino hospedado são **três** variáveis, e a URL é a do importador, não a do runtime:
+
+| Variável | Valor |
+| --- | --- |
+| `BRSTEEL_CUTOVER_SOURCE_PROJECT` | `marketflow-9h4tg` |
+| `BRSTEEL_CUTOVER_DATABASE_URL` | login `brsteel_pilot_importer` no pooler de sessão (5432), **sem query string** |
+| `BRSTEEL_CUTOVER_CA_FILE` | caminho do certificado raiz |
+
+O login é o do importador porque `assertHostedIdentity` exige `current_user` igual ao papel do piloto; o runtime seria recusado. A URL não aceita query string de propósito: o TLS vem do código, com CA e verificação de hostname, nunca de parâmetro que quem digita pode afrouxar.
+
+> **Até 16/09/2026 o `reconcile` não funcionava contra o hospedado.** O script montava um `pg.Pool` cru, e `checkImportTarget` só reconhece pools criados pelas fábricas — um pool cru cai no ramo local e exige o banco `brsteel_ops_local`. O sintoma era `Local import target required`, e aparecia **depois** do núcleo já estar bloqueado, porque o `compare` não passa por esse caminho e por isso um ensaio seco passava limpo. Descoberto num ensaio real que manteve produção bloqueada por 46 segundos. Corrigido em `createCutoverPool`.
 
 ---
 

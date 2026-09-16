@@ -9,11 +9,33 @@
  * Imprime apenas contagens, divergências e o modo vigente. Nunca payloads, credenciais ou dados de
  * cliente: o relatório circula, o conteúdo não.
  */
-import { Pool } from 'pg';
+import { readFileSync } from 'node:fs';
+import type { Pool } from 'pg';
 import { initializeApp, getApps } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
 import { compareSources, reconcileFromFirestore } from '../src/server/migration/operational-reconcile';
+import { createLocalImportPool } from '../src/server/migration/operational-import';
+import { createHostedPilotPool } from '../src/server/migration/operational-hosted';
 import { readCoreWriteMode } from '../src/server/operations/maintenance';
+
+/**
+ * O pool precisa ser um alvo de importação **reconhecido**, não um `pg.Pool` qualquer.
+ *
+ * `checkImportTarget` consulta um registro de pools criados pelas fábricas; um pool cru cai no ramo
+ * local e exige o banco `brsteel_ops_local`. Contra o destino hospedado isso falhava com
+ * `Local import target required` — e falhava **depois** de o núcleo já estar bloqueado, porque
+ * `compare` não passa por esse caminho e não denunciava o problema antes.
+ *
+ * O destino hospedado exige o login `brsteel_pilot_importer` e o certificado raiz: a fábrica recusa
+ * query string justamente para que o TLS venha daqui, nunca da URL.
+ */
+function createCutoverPool(connectionString: string): Pool {
+  const { hostname } = new URL(connectionString);
+  if (['127.0.0.1', '[::1]', 'localhost'].includes(hostname)) return createLocalImportPool(connectionString);
+  const caFile = process.env.BRSTEEL_CUTOVER_CA_FILE;
+  if (!caFile) throw new Error('Destino hospedado exige BRSTEEL_CUTOVER_CA_FILE com o certificado raiz.');
+  return createHostedPilotPool(connectionString, 'importer', readFileSync(caFile, 'utf8'));
+}
 
 const COMMANDS = ['reconcile', 'compare', 'report'] as const;
 type Command = (typeof COMMANDS)[number];
@@ -27,13 +49,14 @@ async function main() {
   const connectionString = process.env.BRSTEEL_CUTOVER_DATABASE_URL;
   const sourceProject = process.env.BRSTEEL_CUTOVER_SOURCE_PROJECT;
   if (!connectionString || !sourceProject) {
-    console.error('Defina BRSTEEL_CUTOVER_DATABASE_URL e BRSTEEL_CUTOVER_SOURCE_PROJECT.');
+    console.error('Defina BRSTEEL_CUTOVER_DATABASE_URL e BRSTEEL_CUTOVER_SOURCE_PROJECT.'
+      + ' Para o destino hospedado, defina também BRSTEEL_CUTOVER_CA_FILE.');
     process.exit(1);
   }
 
   if (!getApps().length) initializeApp({ projectId: sourceProject });
   const db = getFirestore();
-  const pool = new Pool({ connectionString, max: 2 });
+  const pool = createCutoverPool(connectionString);
   try {
     const mode = await readCoreWriteMode();
     console.log(`modo do núcleo: ${mode}`);
