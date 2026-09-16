@@ -166,6 +166,8 @@ Os comandos de reconciliação e comparação são `npm run cutover -- reconcile
 | `BRSTEEL_CUTOVER_DATABASE_URL` | login `brsteel_pilot_importer` no pooler de sessão (5432), **sem query string** |
 | `BRSTEEL_CUTOVER_CA_FILE` | caminho do certificado raiz |
 
+A sequência inteira — `draining`, `blocked`, `reconcile`, `compare` e a devolução — está em `npm run cutover:rehearse -- --confirm`, com as mesmas três variáveis. Ele começa por um preflight que confere conexão, identidade, prontidão da cópia e o registro de manutenção **sem escrever nada**; só depois abre a janela. A restauração está num `finally` e cobre erro, divergência e Ctrl-C, mas não `SIGKILL` — nesse caso, apague `appConfig/coreWriteMode` para destravar.
+
 O login é o do importador porque `assertHostedIdentity` exige `current_user` igual ao papel do piloto; o runtime seria recusado. A URL não aceita query string de propósito: o TLS vem do código, com CA e verificação de hostname, nunca de parâmetro que quem digita pode afrouxar.
 
 > **Até 16/09/2026 o `reconcile` não funcionava contra o hospedado.** O script montava um `pg.Pool` cru, e `checkImportTarget` só reconhece pools criados pelas fábricas — um pool cru cai no ramo local e exige o banco `brsteel_ops_local`. O sintoma era `Local import target required`, e aparecia **depois** do núcleo já estar bloqueado, porque o `compare` não passa por esse caminho e por isso um ensaio seco passava limpo. Descoberto num ensaio real que manteve produção bloqueada por 46 segundos. Corrigido em `createCutoverPool`.
