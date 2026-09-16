@@ -212,6 +212,30 @@ Remova as variáveis do projeto de homologação, apague o snapshot e os relató
 
 ---
 
+## Bloqueadores conhecidos do corte real
+
+Levantamento de 16/09/2026. Nem toda leitura de dados do núcleo passa pelos repositórios trocáveis. Uma leitura direta em `adminDb.collection(...)` ignora `operationalSource` e, depois do corte, continua consultando uma coleção do Firestore que parou de crescer — **sem erro, com números cada vez mais defasados.**
+
+As gravações estão corretas: `saveSalesOrdersOptimized` delega a `salesIngestRepository.upsertOrders`, e o webhook do Bling usa o repositório para observação de estoque e exclusão lógica. O problema é só de leitura.
+
+| Onde | Chamado por | Efeito após o corte | Situação |
+| --- | --- | --- | --- |
+| `firestore-sku-weekly-demand.ts` `rollUpWeek` | cron semanal | demanda silenciosamente errada; alimenta `consultar_historico_sku` e a tela de produção | **corrigido** |
+| `operations/stock.ts` (observações de webhook) | tela de estoque do site | o caminho vivo perde observações novas; o MCP não é afetado, usa o caminho armazenado | aberto |
+| `actions.ts` `deleteAllSalesOrders` | `api-settings` | **destrutivo**: apagaria a base que não está mais em uso | aberto |
+| `actions.ts` `countImportedOrders` | `api-settings` | contagem congelada na tela | aberto |
+| `actions.ts` `clearStockUpdates` | sem chamador encontrado | limparia a base errada | aberto |
+| `order-service.ts` `getLastImportedOrderDate` | `actions.ts` | importação manual recomeça de data antiga | aberto |
+| `order-service.ts` `getImportedOrderIdsWithDetails` | `actions.ts` | importação manual reimporta o que já existe | aberto |
+| `order-service.ts` `orderExists` | `actions.ts` | detecção de duplicata deixa de funcionar | aberto |
+| `order-service.ts` `getExistingOrderIds` | sem chamador encontrado | possivelmente código morto | aberto |
+
+O caso corrigido tinha o método pronto no contrato (`readOrdersForPeriod`). Os demais exigem métodos novos em `SalesReadRepository` e `StockReadRepository`, implementação nos dois adaptadores e testes — trabalho maior, fora do escopo de uma correção pontual.
+
+**Nada disto aparece num ensaio.** O ensaio prova que a cópia fica idêntica no instante do bloqueio; ele não exercita a aplicação depois do corte. O que revelaria estes casos é a troca da fonte em homologação, com a aplicação servindo do PostgreSQL — o passo que segue pendente.
+
+---
+
 ## O que não fazer
 
 - **Não aplicar estas migrations em `supabase/migrations`.** Aquela cadeia é do provedor de identidade OAuth; as operacionais ficam separadas justamente para não serem aplicadas por engano.

@@ -6,6 +6,7 @@ import { documentIdSchema } from '@/server/operations/common';
 import type { SaleOrder } from '@/types/sale-order';
 import { closedWeeksSince, isoWeekRange } from '@/lib/iso-week';
 import { countsAsConsumption } from './demand-eligibility';
+import { salesReadRepository } from './sales';
 import type { HistoryPoint } from './production-demand-contract';
 
 export const WEEKLY_DEMAND = 'skuWeeklyDemand';
@@ -77,17 +78,19 @@ async function commitInChunks<T>(
  */
 export async function rollUpWeek(week: string, now: Date = new Date()) {
   const { from, to } = isoWeekRange(week);
-  const snapshot = await adminDb.collection('salesOrders')
-    .where('data', '>=', from).where('data', '<=', to).get();
+  // Pelo repositório, nunca por `adminDb.collection('salesOrders')` direto. A consulta direta ignora
+  // `operationalSource`: depois de um corte para PostgreSQL ela continuaria somando a partir de uma
+  // coleção que parou de crescer, devolvendo demanda cada vez mais defasada sem sinalizar nada. Uma
+  // fonte indisponível tem de falhar alto; número errado em silêncio é pior que falha.
+  const orders = await salesReadRepository.readOrdersForPeriod({ from, to });
 
   const buckets = new Map<string, { description: string; orders: Set<number>; units: number }>();
-  for (const doc of snapshot.docs) {
-    const order = doc.data() as SaleOrder;
+  for (const order of orders) {
     if (!countsAsConsumption(order)) continue;
     for (const item of order.itens ?? []) {
       if (!item.codigo || !Number.isFinite(item.quantidade) || item.quantidade <= 0) continue;
-      // `descricao` é obrigatório no tipo e ausente na fonte: o cast `doc.data() as SaleOrder` acima
-      // não verifica nada, e o próprio leitor Postgres carrega uma coluna `description_present`
+      // `descricao` é obrigatório no tipo e ausente na fonte: o repositório devolve `SaleOrder`
+      // sem verificar nada, e o próprio leitor Postgres carrega uma coluna `description_present`
       // (postgres-production-demand.ts:13) porque o item sem descrição existe de verdade. Sem esta
       // coerção o `undefined` chega ao batch e derruba o lote inteiro, não só este SKU.
       const description = typeof item.descricao === 'string' ? item.descricao : '';
