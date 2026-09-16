@@ -42,3 +42,23 @@ export function resolveFirebaseConfig(env: FirebaseClientEnvironment) {
     measurementId: env.measurementId ?? '',
   };
 }
+
+export type FirebaseAdminEnvironment = Partial<Record<'projectId' | 'credentialProjectId', string>>;
+
+/**
+ * Resolve o projeto do Admin SDK a partir da variável de ambiente e da própria credencial.
+ *
+ * A credencial vence quando a variável está ausente. Antes, um `marketflow-9h4tg` fixo vencia — e
+ * uma credencial de outro projeto era usada contra o Firestore de produção sem que nada dissesse
+ * isso. Quem esquecesse a variável num script local escrevia onde menos queria.
+ *
+ * Discordância entre as duas é erro, não preferência: as duas descrevem o mesmo alvo, e se
+ * discordam alguém já se enganou. Escolher uma delas em silêncio só adia a descoberta.
+ */
+export function resolveAdminProjectId(env: FirebaseAdminEnvironment): string {
+  const { projectId, credentialProjectId } = env;
+  if (projectId && credentialProjectId && projectId !== credentialProjectId) {
+    throw new Error(`A credencial pertence ao projeto ${credentialProjectId} e a configuração aponta ${projectId}.`);
+  }
+  return credentialProjectId || projectId || legacyFirebaseConfig.projectId;
+}

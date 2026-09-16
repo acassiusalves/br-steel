@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { legacyFirebaseConfig, resolveFirebaseConfig } from '@/lib/firebase-config';
+import { legacyFirebaseConfig, resolveAdminProjectId, resolveFirebaseConfig } from '@/lib/firebase-config';
 
 const staging = {
   projectId: 'brsteel-staging', apiKey: 'staging-public-key',
@@ -62,5 +62,36 @@ describe('Firebase client environment isolation', () => {
     { emulatorHost: 'localhost:8080' },
   ])('rejects unsafe emulator configuration %j', (env) => {
     expect(() => resolveFirebaseConfig(env)).toThrow(/loopback.*demo-/);
+  });
+});
+
+/**
+ * O lado admin resolvia o projeto por conta própria e caía num `marketflow-9h4tg` fixo quando a
+ * variável estava ausente — mesmo carregando credencial de outro projeto. Um script local que
+ * esquecesse a variável apontaria para produção por omissão, e a discordância entre credencial e
+ * projeto não dizia nada: seguia em silêncio.
+ *
+ * Aconteceu de verdade em 16/09/2026, na prova de reversibilidade. Só não escreveu em produção
+ * porque o script tinha uma verificação própria — que nenhum outro script é obrigado a ter.
+ */
+describe('Firebase admin project resolution', () => {
+  it('usa o projeto da credencial quando a variável está ausente, em vez do padrão de produção', () => {
+    expect(resolveAdminProjectId({ credentialProjectId: 'brsteel-mcp-staging' })).toBe('brsteel-mcp-staging');
+    expect(resolveAdminProjectId({ credentialProjectId: 'brsteel-mcp-staging' })).not.toBe(legacyFirebaseConfig.projectId);
+  });
+
+  it('recusa credencial e projeto discordantes em vez de escolher um dos dois', () => {
+    expect(() => resolveAdminProjectId({ projectId: 'marketflow-9h4tg', credentialProjectId: 'brsteel-mcp-staging' }))
+      .toThrow(/credencial/i);
+  });
+
+  it('aceita credencial e projeto coincidentes', () => {
+    expect(resolveAdminProjectId({ projectId: 'brsteel-mcp-staging', credentialProjectId: 'brsteel-mcp-staging' }))
+      .toBe('brsteel-mcp-staging');
+  });
+
+  it('preserva o comportamento atual quando não há credencial nem variável', () => {
+    expect(resolveAdminProjectId({})).toBe(legacyFirebaseConfig.projectId);
+    expect(resolveAdminProjectId({ projectId: 'marketflow-9h4tg' })).toBe('marketflow-9h4tg');
   });
 });

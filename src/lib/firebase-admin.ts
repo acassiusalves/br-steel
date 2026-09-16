@@ -1,4 +1,5 @@
-import { initializeApp, getApps, getApp, cert, applicationDefault } from "firebase-admin/app";
+import { initializeApp, getApps, getApp, cert, applicationDefault, type Credential } from "firebase-admin/app";
+import { resolveAdminProjectId } from "./firebase-config";
 import { getAuth } from "firebase-admin/auth";
 import { getFirestore } from "firebase-admin/firestore";
 import { getMessaging } from "firebase-admin/messaging";
@@ -36,13 +37,20 @@ function parseServiceAccountKey(raw: string) {
   throw lastError;
 }
 
-function getCredential() {
+/**
+ * Devolve a credencial **e o projeto a que ela pertence**, quando conhecido.
+ *
+ * O projeto acompanha a credencial porque é ele que resolve o alvo quando a configuração é omissa.
+ * As Credenciais Padrão da Aplicação não carregam essa informação aqui, e por isso devolvem
+ * `projectId` indefinido — a configuração continua mandando nesse caso.
+ */
+function getCredential(): { credential: Credential; projectId?: string } | undefined {
   // 1. Try explicit service account key from environment
   if (process.env.FIREBASE_SERVICE_ACCOUNT_KEY) {
     try {
       const serviceAccount = parseServiceAccountKey(process.env.FIREBASE_SERVICE_ACCOUNT_KEY);
       console.log("[Firebase Admin] Using credentials from FIREBASE_SERVICE_ACCOUNT_KEY env var");
-      return cert(serviceAccount);
+      return { credential: cert(serviceAccount), projectId: serviceAccount.project_id };
     } catch (e) {
       console.error("Failed to parse FIREBASE_SERVICE_ACCOUNT_KEY:", e);
     }
@@ -54,7 +62,7 @@ function getCredential() {
     try {
       const serviceAccount = JSON.parse(fs.readFileSync(serviceAccountPath, "utf8"));
       console.log("[Firebase Admin] Using credentials from service-account.json");
-      return cert(serviceAccount);
+      return { credential: cert(serviceAccount), projectId: serviceAccount.project_id };
     } catch (e) {
       console.error("Failed to read service-account.json:", e);
     }
@@ -63,7 +71,7 @@ function getCredential() {
   // 3. Fall back to Application Default Credentials
   try {
     console.log("[Firebase Admin] Using Application Default Credentials");
-    return applicationDefault();
+    return { credential: applicationDefault() };
   } catch (e) {
     console.error("Failed to get Application Default Credentials:", e);
     return undefined;
@@ -72,25 +80,27 @@ function getCredential() {
 
 let app;
 
-// Get project ID and storage bucket from environment
-const projectId =
-  process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID ||
-  process.env.FIREBASE_PROJECT_ID ||
-  "marketflow-9h4tg";
-const storageBucket =
-  process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET ||
-  process.env.FIREBASE_STORAGE_BUCKET ||
-  "marketflow-9h4tg.firebasestorage.app";
-
 if (getApps().length === 0) {
   const emulatorHost = process.env.FIRESTORE_EMULATOR_HOST;
+  // A credencial vem antes do projeto: quando a configuração é omissa, é o `project_id` dela que
+  // decide o alvo. O padrão anterior era fixo em produção, então uma credencial de outro projeto
+  // era usada contra o Firestore de produção sem que nada dissesse isso.
+  const resolved = emulatorHost ? undefined : getCredential();
+  const projectId = resolveAdminProjectId({
+    projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || process.env.FIREBASE_PROJECT_ID,
+    credentialProjectId: resolved?.projectId,
+  });
+  const storageBucket =
+    process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET ||
+    process.env.FIREBASE_STORAGE_BUCKET ||
+    `${projectId}.firebasestorage.app`;
+
   if (emulatorHost && (!/^(127\.0\.0\.1|localhost):\d+$/.test(emulatorHost) || !projectId.startsWith('demo-'))) {
     throw new Error('Local Firestore tests require a loopback emulator and a demo- project.');
   }
-  const credential = emulatorHost ? undefined : getCredential();
-  if (credential) {
+  if (resolved) {
     app = initializeApp({
-      credential,
+      credential: resolved.credential,
       projectId,
       storageBucket,
     });
