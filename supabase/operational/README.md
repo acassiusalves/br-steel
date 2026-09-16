@@ -86,7 +86,20 @@ node --env-file=/absolute/private.env --conditions=react-server --import tsx scr
 
 Relatórios são criados de forma exclusiva (0600), contêm somente métricas/hashes e passam a `failed` em caso de erro. A medição exige a mesma cópia pronta no início/fim, usa cinco amostras sequenciais por consulta e um pool de uma conexão. Os contadores são bytes do protocolo PostgreSQL decodificado; não são egress faturado nem medição do caminho completo pela Vercel. Nenhum comando muda seletores de runtime.
 
-As fábricas rejeitam `postgres`, outro projeto/banco, parâmetros que alterem TLS e pooler transacional no importador, que depende de lock de sessão. TLS verifica CA e hostname. Os papéis de piloto nascem sem login. Uma execução autorizada deve provisionar senha aleatória/expiração e associação somente a `brsteel_ops_reader` ou `brsteel_ops_importer`. Ao terminar, desativar logins, remover senhas, revogar as associações e encerrar as sessões desses dois logins. Esse encerramento foi executado no primeiro ensaio; reexecutar exige provisionar os acessos novamente.
+As fábricas rejeitam `postgres`, outro projeto/banco, parâmetros que alterem TLS e pooler transacional no importador, que depende de lock de sessão. TLS verifica CA e hostname. Os papéis de piloto nascem sem login. Uma execução autorizada deve provisionar senha aleatória/expiração e associação somente a `brsteel_ops_reader` ou `brsteel_ops_importer`.
+
+**A associação do importador precisa de `with inherit true` explícito.** `brsteel_pilot_importer` é criado `noinherit` pela migration, e no PostgreSQL 16+ a herança passou a ser propriedade da **associação**, não do papel: `grant` sem opção copia o atributo do papel, e `alter role ... inherit` **não** corrige uma associação já existente. Sem isso o login conecta normalmente e não enxerga privilégio nenhum — nem `usage` nos schemas — e a importação falha por permissão. `brsteel_pilot_reader` não tem o problema porque a migration o cria `inherit`.
+
+```sql
+grant brsteel_ops_importer to brsteel_pilot_importer with inherit true;
+-- Deve devolver true nas quatro.
+select has_table_privilege('brsteel_pilot_importer','brsteel_ops.sales_orders','insert'),
+       has_table_privilege('brsteel_pilot_importer','brsteel_import.runs','insert'),
+       has_table_privilege('brsteel_pilot_importer','brsteel_import.state','update'),
+       has_schema_privilege('brsteel_pilot_importer','brsteel_ops','usage');
+```
+
+Ao terminar, desativar logins, remover senhas, revogar as associações e encerrar as sessões desses dois logins. Se `rolinherit` do importador tiver sido alterado durante o provisionamento, devolvê-lo a `noinherit`. Esse encerramento foi executado **pela metade** no primeiro ensaio: os logins foram desativados, mas as associações permaneceram e o papel de runtime continuou de pé até 15/09/2026. Conferir a lista inteira, não só a ausência de sessão.
 
 O conector gera versões próprias no histórico hospedado, mapeadas na evidência do piloto. Não misturar essa cadeia com `supabase/migrations` nem aplicar `db push` incidentalmente ao projeto OAuth.
 
