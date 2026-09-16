@@ -1,0 +1,81 @@
+{
+  "stage": 5,
+  "title": "Ensaio do corte de fonte",
+  "date": "2026-09-16",
+  "status": "executado-com-divergencia-zero",
+  "sourceProject": "marketflow-9h4tg",
+  "targetProject": "mlumbvxpaqfzpdjnvzxc",
+  "sourceSwitched": false,
+  "activeSelector": "firestore",
+  "attempts": [
+    {
+      "attempt": 1,
+      "startedAt": "2026-09-16T01:47:20Z",
+      "blockedAt": "2026-09-16T01:47:41Z",
+      "restoredAt": "2026-09-16T01:48:28Z",
+      "blockedSeconds": 46,
+      "outcome": "failed",
+      "error": "Local import target required",
+      "cause": "scripts/operational-cutover.ts montava um pg.Pool cru; checkImportTarget so reconhece pools das fabricas e exige brsteel_ops_local para pools nao registrados",
+      "fix": "PR #23 — createCutoverPool escolhe a fabrica por tipo de destino"
+    },
+    {
+      "attempt": 2,
+      "startedAt": "2026-09-16T02:15:22Z",
+      "preflightPassed": true,
+      "blockedAt": "2026-09-16T02:15:43Z",
+      "snapshotCapturedAt": "2026-09-16T02:15:54Z",
+      "reconcileCompletedAt": "2026-09-16T02:25:19Z",
+      "compareCompletedAt": "2026-09-16T02:25:58Z",
+      "restoredAt": "2026-09-16T02:25:58Z",
+      "blockedSeconds": 615,
+      "outcome": "complete",
+      "reconcile": {
+        "records": 13063,
+        "items": 13095,
+        "hashPrefix": "912964a27020",
+        "durationSeconds": 566
+      },
+      "divergences": 0
+    }
+  ],
+  "compareCounts": {
+    "salesOrders": { "source": 12632, "copy": 12632, "native": 0 },
+    "stockUpdates": { "source": 363, "copy": 363, "native": 0 },
+    "supplies": { "source": 54, "copy": 54, "native": 0 },
+    "productionColumns": { "source": 3, "copy": 3, "native": 0 },
+    "productionLots": { "source": 3, "copy": 3, "native": 0 },
+    "productionLotItems": { "source": 7, "copy": 7, "native": 0 },
+    "inventoryMovements": { "source": 1, "copy": 1, "native": 0 },
+    "operationsMetadata": { "source": 0, "copy": 0, "native": 0 },
+    "supplyCodes": { "source": 0, "copy": 0, "native": 0 },
+    "productionComments": { "source": 0, "copy": 0, "native": 0 }
+  },
+  "stateAfter": {
+    "coreWriteModeExists": false,
+    "operationalSourceExists": false,
+    "blingWebhookQueuePending": 0
+  },
+  "driftWithoutBlocking": [
+    { "at": "2026-09-16T00:50:00Z", "missingInCopy": 3, "contentDivergent": 2, "total": 5 },
+    { "at": "2026-09-16T02:10:00Z", "missingInCopy": 5, "contentDivergent": 3, "total": 8 }
+  ],
+  "driftRatePerHour": 3,
+  "provisioning": {
+    "migrationsApplied": 7,
+    "temporaryLoginsExpireAt": "2026-09-17T23:00:00Z",
+    "initialImportRecords": 13058,
+    "initialImportCapturedAt": "2026-09-15T23:46:02Z",
+    "verifyBytesReread": 33675989,
+    "stagingVariablesWritten": ["BRSTEEL_OPERATIONAL_DATABASE_URL", "BRSTEEL_OPERATIONAL_CA"],
+    "productionVariablesPresent": [],
+    "importerMembershipNeededExplicitInherit": true
+  },
+  "limitations": [
+    "A troca da fonte nao aconteceu: exige escrever appConfig/operationalSource no Firestore da homologacao, projeto separado cuja credencial nao estava disponivel",
+    "A reversibilidade continua nao demonstrada; o retorno nos dois sentidos depende da troca da fonte",
+    "brsteel_write.audit e brsteel_write.idempotency seguem vazias: nenhuma gravacao de negocio real ocorreu no PostgreSQL hospedado",
+    "Nao ha teste cobrindo a selecao de pool do corte; a CI cobre o caminho local",
+    "A janela de 615s e desta carga: o reconcile reprocessa todos os registros, entao o tempo cresce com o volume, nao com o delta"
+  ]
+}
