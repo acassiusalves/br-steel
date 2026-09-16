@@ -6,7 +6,9 @@ O código do corte está pronto e testado: interruptor de manutenção, reconcil
 
 Guarde credenciais num arquivo privado fora do Git, com permissão `0600`. Nada deste roteiro deve ser colado em chat, issue ou PR.
 
-**Estado do destino conferido em 15/09/2026**, direto no banco: as sete migrations operacionais aplicadas, cópia do piloto `ready=true` (capturada 12/09 17:41 UTC), banco em 48 MB dos 500 MB do Free. `brsteel_write.audit` e `brsteel_write.idempotency` estão **vazias** — nenhuma gravação real jamais chegou ao PostgreSQL hospedado. Todo o teste de escrita da etapa 4 rodou em contêiner local descartável.
+**Estado em 15/09/2026, conferido direto no banco.** Os Passos 1 a 4 foram executados nessa data: as sete migrations aplicadas, os dois logins temporários provisionados com prazo até 17/09 23:00 UTC, cópia nova `ready=true` capturada às 23:46 UTC com 13.058 registros — 12.627 pedidos, 13.090 itens, 363 observações de estoque — `verify` aprovado, e as duas variáveis operacionais gravadas em homologação e ausentes de produção. Falta o Passo 5.
+
+`brsteel_write.audit` e `brsteel_write.idempotency` seguem **vazias**: nenhuma gravação real jamais chegou ao PostgreSQL hospedado. Todo o teste de escrita da etapa 4 rodou em contêiner local descartável.
 
 ---
 
@@ -118,6 +120,17 @@ node --env-file=/caminho/privado/cutover.env --conditions=react-server --import 
 
 O `verify` relê os payloads e confere contagens, referências e projeções de forma independente — os digests que o importador gravou não são evidência. **Só siga se ele passar.**
 
+**Espere o import terminar antes de rodar o `verify`.** Executado em paralelo — outra aba, enquanto a carga ainda corre — ele encontra a cópia com `ready=false` e falha. A mensagem é sanitizada de propósito e não distingue esse caso de uma divergência real de dados, então parece defeito grave quando é só ordem. O import só libera a cópia depois de reconciliar ausências e reler conteúdos. Para saber onde a carga está, consulte o destino, não a mensagem:
+
+```sql
+select status, next_index, total_records, completed_at from brsteel_import.runs where status = 'loading';
+select ready, completed_at from brsteel_import.state;
+```
+
+**O caminho do relatório é reservado com exclusividade.** Repetir um comando com um relatório que já existe devolve `EEXIST` antes de qualquer acesso ao banco — inclusive quando a tentativa anterior falhou. Use um caminho novo a cada execução; é a proteção que impede um erro de digitação de disparar uma importação.
+
+Em 15/09/2026 as duas coisas aconteceram nesta ordem, e as duas pareceram falha de dados antes de serem lidas com atenção.
+
 O importador usa lock de sessão, então precisa do pooler em **modo sessão (5432)** ou conexão direta. O pooler transacional (6543) não serve para importar.
 
 ---
@@ -162,9 +175,10 @@ alter role brsteel_ops_runtime nologin;
 select pg_terminate_backend(pid) from pg_stat_activity where usename = 'brsteel_ops_runtime';
 drop role brsteel_ops_runtime;
 
--- Importador do piloto, se provisionado
+-- Importador do piloto, se provisionado. O noinherit devolve o papel ao estado da migration,
+-- caso o provisionamento tenha alterado rolinherit para fazer a herança valer.
 revoke brsteel_ops_importer from brsteel_pilot_importer;
-alter role brsteel_pilot_importer nologin;
+alter role brsteel_pilot_importer nologin noinherit;
 select pg_terminate_backend(pid) from pg_stat_activity where usename = 'brsteel_pilot_importer';
 
 -- Deve devolver zero.
