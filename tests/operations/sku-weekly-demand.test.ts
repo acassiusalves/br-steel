@@ -2,6 +2,7 @@ import { beforeEach, expect, it, vi } from 'vitest';
 import { seedOperations } from './fixtures';
 import { adminDb } from '../helpers/firestore';
 import { readWeeklyHistory, resetWeeklyHistoryCache, rollUpPendingWeeks, rollUpWeek, WEEKLY_DEMAND } from '@/server/persistence/firestore-sku-weekly-demand';
+import { resetOperationalSource } from '@/server/persistence/source';
 
 /**
  * Conta quantos `.commit()` de batch acontecem durante `run` — não quantos `.batch()` são criados.
@@ -291,4 +292,26 @@ it('stops at the time budget and reports what is left, instead of running until 
   expect(run.remaining).toBe(2);
   expect((await checkpoint.get()).data()?.lastClosedWeek).toBe('2026-W35');
   expect(await weeksOf('CBA600')).toEqual({ '2026-W35': { units: 2, orders: 1 } });
+});
+
+/**
+ * O rollup lia `salesOrders` direto do Firestore, sem passar pelo repositório trocável e sem
+ * consultar `operationalSource`. Depois de um corte para PostgreSQL isso não quebra: ele continua
+ * somando a partir de uma coleção que parou de crescer, e devolve demanda cada vez mais defasada
+ * sem sinal nenhum de que algo está errado. Números errados em silêncio são piores que uma falha.
+ *
+ * Com a fonte em `postgres` e sem conexão configurada, a leitura tem de falhar alto. Este teste
+ * passa a valer quando o rollup lê pelo repositório; antes disso ele conclui normalmente, provando
+ * que a coleção do Firestore estava sendo lida apesar do seletor.
+ */
+it('recusa somar a partir do Firestore quando a fonte operacional é postgres', async () => {
+  await seedOperations();
+  await adminDb.collection('appConfig').doc('operationalSource').set({ source: 'postgres' });
+  resetOperationalSource();
+  try {
+    await expect(rollUpWeek('2026-W37')).rejects.toThrow();
+  } finally {
+    await adminDb.collection('appConfig').doc('operationalSource').delete();
+    resetOperationalSource();
+  }
 });
