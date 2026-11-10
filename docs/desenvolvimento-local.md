@@ -4,7 +4,7 @@ Use um checkout limpo e terminais sem variáveis ou credenciais de ambientes com
 
 ## Instalar as dependências
 
-Tenha Node.js 22, Java 21 e Firebase CLI 14.11.1 no PATH. Confira com `node -v`, `java -version` e `firebase --version`. Para instalar a versão da CLI usada pelo CI, use `npm install --global firebase-tools@14.11.1`.
+Tenha Node.js 22.13 ou superior na linha 22, Java 21 e Firebase CLI 14.11.1 no PATH. Confira com `node -v`, `java -version` e `firebase --version`. Para instalar a versão da CLI usada pelo CI, use `npm install --global firebase-tools@14.11.1`.
 
 ```sh
 npm ci
@@ -35,6 +35,7 @@ Em Vendas, selecione o período de 31/08/2026 a 02/09/2026 para ver os pedidos f
 Encerre o emulador usado na verificação manual antes de rodar as suítes. Ambas usam a porta 8188 e gerenciam o próprio emulador. Rode uma de cada vez. A integração PostgreSQL exige Docker em execução e a porta local 55436 livre.
 
 ```sh
+npm run lint
 npm run typecheck:ci
 npm run test:vitest
 npm run test:postgres

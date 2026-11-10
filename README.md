@@ -4,15 +4,16 @@ Sistema web para acompanhar vendas, estoque, produção, insumos, produtos e con
 
 ## Começar a desenvolver
 
-Use Node.js 22, Java 21 e Firebase CLI 14.11.1. O [guia de desenvolvimento local](docs/desenvolvimento-local.md) mostra como instalar as dependências, iniciar o Firestore emulado, carregar dados fictícios e abrir o aplicativo na porta 9003. Use o guia também em um checkout que já tenha configuração de Firebase.
+Use Node.js 22.13 ou superior na linha 22, Java 21 e Firebase CLI 14.11.1. O [guia de desenvolvimento local](docs/desenvolvimento-local.md) mostra como instalar as dependências, iniciar o Firestore emulado, carregar dados fictícios e abrir o aplicativo na porta 9003. Use o guia também em um checkout que já tenha configuração de Firebase.
 
 | Comando | Verificação |
 | --- | --- |
+| `npm run lint` | Verifica regras de Next.js, TypeScript e React Hooks. |
 | `npm run typecheck:ci` | Compara os diagnósticos TypeScript com a baseline do CI. |
 | `npm run test:vitest` | Roda a suíte com o Firestore emulado. |
 | `npm run test:postgres` | Roda a integração em PostgreSQL descartável, com Docker e Firestore emulado. |
 
-O comando `npm run typecheck` mostra todos os diagnósticos, inclusive os já registrados na baseline. O script `npm run lint` ainda abre o configurador de ESLint.
+O comando `npm run typecheck` mostra todos os diagnósticos, inclusive os já registrados na baseline. O [guia de qualidade](docs/qualidade.md) descreve as baselines e os critérios de revisão.
 
 ## Estrutura do projeto
 
@@ -27,4 +28,4 @@ O comando `npm run typecheck` mostra todos os diagnósticos, inclusive os já re
 | [`docs/`](docs/README.md) | Guias, procedimentos e histórico. |
 | [`scripts/`](scripts/README.md) | Catálogo de utilitários locais, verificações e rotinas operacionais. |
 
-Leia as [regras do projeto](AGENTS.md) antes de alterar código, dados ou documentação. Abra PR contra `main` com o escopo e as verificações executadas. O [CI](.github/workflows/ci.yml) verifica tipos, Vitest e integração PostgreSQL.
+Leia as [regras do projeto](AGENTS.md) antes de alterar código, dados ou documentação. Abra PR contra `main` com o escopo e as verificações executadas. O [CI](.github/workflows/ci.yml) verifica lint, tipos, Vitest e integração PostgreSQL.

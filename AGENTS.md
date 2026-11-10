@@ -23,6 +23,6 @@
 
 ## Validação
 
-- Use Node.js 22. Para reproduzir o CI, use Java 21, Firebase CLI 14.11.1 e Docker para a suíte PostgreSQL.
-- Rode `npm run typecheck:ci` e a suíte aplicável. Preserve a baseline de tipos ou reduza-a junto da correção correspondente. O build atual ignora erros de tipo e lint.
+- Use Node.js 22.13 ou superior na linha 22. Para reproduzir o CI, use Java 21, Firebase CLI 14.11.1 e Docker para a suíte PostgreSQL.
+- Rode `npm run lint`, `npm run typecheck:ci` e a suíte aplicável. Reduza as baselines junto das correções correspondentes. Consulte o [guia de qualidade](docs/qualidade.md) para os critérios de revisão e os limites do build.
 - Confira os links e os comandos ao alterar documentação. Para um fluxo de setup novo, valide-o em checkout limpo com o emulador.
