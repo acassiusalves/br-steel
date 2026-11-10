@@ -40,11 +40,17 @@ next-env.d.ts
 
 .genkit/*
 .env*
+!/.env.example
 
 # firebase
 firebase-debug.log
 firestore-debug.log
-service-account.json
+service-account*.json
+
+# Configuração e worktrees locais
+/.claude/settings.local.json
+/.claude/worktrees/
+/.worktrees/
 
 # Rascunho de execução por subagentes (briefs, relatórios, diffs de revisão)
 .superpowers/

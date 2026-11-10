@@ -1,5 +1,7 @@
 # **App Name**: MarketFlow
 
+> Registro histórico do protótipo no Firebase Studio. Consulte o [README atual](../../README.md) para desenvolver no BR Steel.
+
 ## Core Features:
 
 - Painel de Vendas: Painel de controle centralizado para visualizar o desempenho das vendas em todos os marketplaces.
