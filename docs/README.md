@@ -4,6 +4,8 @@
 
 - [Regras do projeto](../AGENTS.md) e [visão geral do repositório](../README.md).
 - [Desenvolvimento local](desenvolvimento-local.md) para instalação, fixtures e testes.
+- [Arquitetura](arquitetura.md) e [qualidade](qualidade.md) para localizar contratos e validar mudanças.
+- [Adoção do toolkit](setup-toolkit.md) para consultar as ferramentas, as escolhas e a verificação local.
 - [Regras e índices do Firestore](firestore.md) para mudanças versionadas e publicação com destino explícito.
 - [Catálogo de scripts](../scripts/README.md) para escolher o comando e entender seu efeito antes de executar.
 - [Provedor OAuth local do MCP](mcp-oauth-provider-local.md) para testar o fluxo com um provedor dedicado.

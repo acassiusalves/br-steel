@@ -34,6 +34,9 @@ jobs:
 
       - run: npm ci
 
+      - name: Lint
+        run: npm run lint
+
       # Compares against .github/typecheck-baseline.txt: the project carries 25 pre-existing
       # diagnostics, so a plain `tsc --noEmit` would fail every pull request.
       - name: Typecheck

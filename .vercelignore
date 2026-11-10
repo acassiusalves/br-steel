@@ -12,3 +12,4 @@ supabase/.temp/
 supabase/.branches/
 firebase-debug.log
 firestore-debug.log
+graphify-out/
