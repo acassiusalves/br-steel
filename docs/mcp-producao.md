@@ -11,7 +11,7 @@ Publicado e habilitado em 12/09/2026 UTC, conforme autorização do usuário. O 
 | Projeto Vercel | `prj_nKDQAAfkgJ7DePQsIZy5gMELWuWj`, Node 22.x |
 | Publicação ativa | `dpl_25QP3Q2cjkbABU45pB3tKJbMUhA5`, código `7f8c9a5` |
 | Banco operacional | Firestore `(default)`, projeto `marketflow-9h4tg`, região `nam5` |
-| Autenticação OAuth | Supabase `mlumbvxpaqfzpdjnvzxc` |
+| Autenticação OAuth | Supabase `mmewkphsrnttkzvpyddv` (organização BR Steel), desde 11/11/2026; antes, `mlumbvxpaqfzpdjnvzxc`. Ver a [migração do Supabase](migracao-supabase-2026-11.md) |
 
 O servidor MCP roda na aplicação Vercel. O Supabase emite os tokens OAuth; os dados de negócio e as permissões continuam no Firestore. As ferramentas MCP de estoque e demanda consultam somente os registros persistidos, sem Bling ao vivo nem seu cache. A tela web de estoque mantém seu comportamento existente com fontes combinadas.
 
