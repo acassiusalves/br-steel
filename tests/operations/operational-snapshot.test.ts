@@ -36,3 +36,24 @@ it('keeps unknown, null and zero fields in legacy supplies without inventing def
     data: { nome: 'Steel', estoqueAtual: 0, estoqueMinimo: null, nested: { limits: [1, null] } } }]));
   expect(result.records[0].data).toEqual({ nome: 'Steel', estoqueAtual: 0, estoqueMinimo: null, nested: { limits: [1, null] } });
 });
+
+const observation = { collection: 'stockObservations', id: 'obs-1', version: '1789214400000000001',
+  data: { sku: 'A', estoqueAtual: 3, observedAt: '2026-09-01T10:00:00.000Z', event: 'stock.updated',
+    source: 'webhook', expiresAt: '2028-09-01T10:00:00.000Z' } };
+const weekly = { collection: 'skuWeeklyDemand', id: 'A', version: '1789214400000000002',
+  data: { sku: 'A', description: 'Ralo', weeks: { '2026-W35': { units: 4, orders: 2 } },
+    lastClosedWeek: '2026-W35', updatedAt: '2026-09-01T10:00:00.000Z' } };
+
+it('accepts stock observation history and weekly demand as operational collections', () => {
+  const prepared = prepareSnapshot(snapshot([observation, weekly]));
+  expect(prepared.records.map(r => r.collection)).toEqual(['stockObservations', 'skuWeeklyDemand']);
+});
+it.each([
+  [{ ...observation, data: { ...observation.data, sku: '' } }],
+  [{ ...observation, data: { ...observation.data, estoqueAtual: 'x' } }],
+  [{ ...observation, data: { ...observation.data, observedAt: 'ontem' } }],
+  [{ ...weekly, data: { ...weekly.data, weeks: { '2026-W35': { units: 'x', orders: 1 } } } }],
+  [{ ...weekly, data: { ...weekly.data, weeks: { 'semana': { units: 1, orders: 1 } } } }],
+])('rejects history records the readers could not interpret', record => {
+  expect(() => prepareSnapshot(snapshot([record]))).toThrow();
+});

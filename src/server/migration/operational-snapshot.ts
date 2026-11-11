@@ -6,6 +6,7 @@ export const TABLES = {
   productionColumns: 'production_columns', operationsMetadata: 'production_counters',
   supplyCodes: 'supply_codes', inventoryMovements: 'inventory_movements',
   productionLots: 'production_lots', productionLotItems: 'production_lot_items', productionComments: 'production_comments',
+  stockObservations: 'stock_observation_log', skuWeeklyDemand: 'sku_weekly_demand',
 } as const;
 export type OperationalCollection = keyof typeof TABLES;
 export const COLLECTIONS = Object.keys(TABLES) as OperationalCollection[];
@@ -57,6 +58,18 @@ export function prepareSnapshot(raw: unknown): PreparedSnapshot {
         || !Number.isFinite(Date.parse(row.data.data)) || new Date(row.data.data).toISOString().slice(0, 10) !== row.data.data)) throw new Error(`Invalid sales date: ${key}`);
       if (row.data.itens != null && (!Array.isArray(row.data.itens)
         || row.data.itens.some((item: unknown) => !item || typeof item !== 'object' || Array.isArray(item)))) throw new Error(`Invalid order items: ${key}`);
+    }
+    if (row.collection === 'stockObservations') {
+      const { sku, estoqueAtual, observedAt } = row.data;
+      if (typeof sku !== 'string' || !sku || typeof estoqueAtual !== 'number' || !Number.isFinite(estoqueAtual)
+        || typeof observedAt !== 'string' || !Number.isFinite(Date.parse(observedAt))) throw new Error(`Invalid stock observation: ${key}`);
+    }
+    if (row.collection === 'skuWeeklyDemand') {
+      const weeks = row.data.weeks;
+      if (typeof row.data.sku !== 'string' || !row.data.sku || !weeks || typeof weeks !== 'object' || Array.isArray(weeks)
+        || Object.entries(weeks as Record<string, unknown>).some(([week, bucket]) => !/^\d{4}-W\d{2}$/.test(week)
+          || !bucket || typeof bucket !== 'object' || !Number.isFinite((bucket as { units?: unknown }).units)
+          || !Number.isInteger((bucket as { orders?: unknown }).orders))) throw new Error(`Invalid weekly demand: ${key}`);
     }
   }
   function reference(row: SourceRecord, collection: OperationalCollection, value: unknown) {

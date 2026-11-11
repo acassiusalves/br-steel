@@ -11,6 +11,8 @@ function requireReadCompatibleTypes(collection: OperationalCollection, data: Rec
   }
   if (collection === 'stockUpdates') {
     for (const field of ['sku','nome','webhookReceivedAt']) inspect(data[field]);
+  } else if (collection === 'stockObservations') {
+    for (const field of ['sku','estoqueAtual','observedAt','event','source']) inspect(data[field]);
   } else if (collection !== 'supplyCodes' && collection !== 'operationsMetadata') inspect(data);
 }
 

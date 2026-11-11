@@ -23,3 +23,13 @@ it('still preserves precise timestamps in stock metadata that never affects read
   const exported = await exportOperationalSnapshot(source('stockUpdates',{createdAt:timestamp}),'demo-brsteel-auth');
   expect(exported.records[0].data.createdAt).toBe('2026-09-12T10:00:00.123456000Z');
 });
+it('normalizes the retention timestamp of stock observation history', async () => {
+  const exported = await exportOperationalSnapshot(source('stockObservations',
+    { sku: 'A', estoqueAtual: 3, observedAt: '2026-09-01T10:00:00.000Z', expiresAt: timestamp }), 'demo-brsteel-auth');
+  expect(exported.records[0].data.expiresAt).toBe('2026-09-12T10:00:00.123456000Z');
+});
+it('still rejects a native timestamp in the observation instant itself', async () => {
+  await expect(exportOperationalSnapshot(source('stockObservations',
+    { sku: 'A', estoqueAtual: 3, observedAt: timestamp }), 'demo-brsteel-auth'))
+    .rejects.toThrow(/Source timestamp requires explicit normalization/);
+});
