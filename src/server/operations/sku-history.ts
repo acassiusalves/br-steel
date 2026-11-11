@@ -2,7 +2,8 @@ import 'server-only';
 import { z } from 'zod';
 import type { AccessContext } from '@/server/access/types';
 import { HISTORY_WEEKS } from '@/lib/iso-week';
-import { readWeeklyHistory } from '@/server/persistence/firestore-sku-weekly-demand';
+import { readOperationalSource } from '@/server/persistence/source';
+import { skuWeeklyDemandRepository } from '@/server/persistence/sku-weekly-demand';
 import { requireOperation, result } from './common';
 
 /**
@@ -27,8 +28,11 @@ const input = z.object({
 export async function skuHistory(context: AccessContext, raw: unknown) {
   requireOperation(context, 'producao:read', '/producao');
   const { sku, semanas } = input.parse(raw);
-  const points = (await readWeeklyHistory(semanas)).get(sku) ?? [];
-  return result(points, 'firestore', points.length ? [] : [
+  const [points, source] = await Promise.all([
+    skuWeeklyDemandRepository.readWeeklyHistory(semanas).then(series => series.get(sku) ?? []),
+    readOperationalSource(),
+  ]);
+  return result(points, source, points.length ? [] : [
     'Não há histórico consolidado para este SKU. O rollup cobre apenas semanas fechadas; um SKU novo ou sem venda faturada fica vazio, o que não indica falha.',
   ]);
 }

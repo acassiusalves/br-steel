@@ -8,6 +8,7 @@ import { closedWeeksSince, isoWeekRange } from '@/lib/iso-week';
 import { countsAsConsumption } from './demand-eligibility';
 import { salesReadRepository } from './sales';
 import type { HistoryPoint } from './production-demand-contract';
+import type { SkuWeeklyDemandRepository } from './sku-weekly-demand-contract';
 
 export const WEEKLY_DEMAND = 'skuWeeklyDemand';
 export const ROLLUP_CHECKPOINT = 'skuWeeklyDemandRollup';
@@ -244,3 +245,5 @@ export async function readWeeklyHistory(weeks: number): Promise<Map<string, Hist
   // que devolver vazio, não virar sinônimo de "sem limite".
   return new Map([...cached.series].map(([sku, points]) => [sku, weeks > 0 ? points.slice(-weeks) : []]));
 }
+
+export const firestoreSkuWeeklyDemandRepository: SkuWeeklyDemandRepository = { rollUpPendingWeeks, readWeeklyHistory };
