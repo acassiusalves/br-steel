@@ -24,6 +24,18 @@ it.each(['anonymous', 'firebase-admin-claim'])('protects users and permissions f
   await assertFails(setDoc(doc(db, 'appSettings/general'), { permissions: {} }));
   await assertFails(setDoc(doc(db, 'users/user-a/private/secret'), { secret: 'x' }));
 });
+// appConfig holds the cutover switches (operationalSource, coreWriteMode) and integration credentials
+// (geminiCredentials, legacy Mercado Livre tokens, OAuth states). Only the Admin SDK may touch it; a
+// client that could flip operationalSource would take the whole core offline.
+it.each(['anonymous', 'firebase-auth-user'])('closes appConfig and dead legacy collections to the %s client', async mode => {
+  const db = mode === 'anonymous' ? env.unauthenticatedContext().firestore() : env.authenticatedContext('user-a').firestore();
+  for (const path of ['appConfig/operationalSource', 'appConfig/coreWriteMode', 'appConfig/geminiCredentials',
+    'appConfig/mercadoLivreCredentials', 'appConfig/mlOAuthStates/pending/any', 'appConfig/stockCacheVersion',
+    'appConfig/anything-new', 'feed_entries/any', 'product_match_training/any']) {
+    await assertFails(getDoc(doc(db, path)));
+    await assertFails(setDoc(doc(db, path), { source: 'postgres' }));
+  }
+});
 it('allows server-side access with emulator rules disabled', async () => {
   await env.withSecurityRulesDisabled(async context => {
     const snap = await assertSucceeds(getDoc(doc(context.firestore(), 'users/user-a')));

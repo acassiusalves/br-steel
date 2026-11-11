@@ -46,8 +46,10 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
-    match /appConfig/{configId}/{document=**} {
-      allow read, write: if !(configId in ['blingCredentials', 'syncProgress', 'webhookStatus', 'stockWebhookStatus']) && legacyClientAccess();
+    // Chaves do corte (operationalSource, coreWriteMode), credenciais de integrações e estados OAuth.
+    // Nenhum código do navegador lê appConfig: todo acesso passa pelo Admin SDK no servidor.
+    match /appConfig/{document=**} {
+      allow read, write: if false;
     }
 
     // Índices internos e sequência transacional: somente Admin SDK.
@@ -113,14 +115,16 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // Sem chamadores no código (src/services/ml-firestore.ts).
     match /feed_entries/{document=**} {
-      allow read, write: if legacyClientAccess();
+      allow read, write: if false;
     }
 
     match /product_match_training/{document=**} {
-      allow read, write: if legacyClientAccess();
+      allow read, write: if false;
     }
 
+    // Ainda lido e gravado pelo SDK cliente (curva ABC); fecha quando o acesso for para o servidor.
     match /productGroups/{document=**} {
       allow read, write: if legacyClientAccess();
     }
