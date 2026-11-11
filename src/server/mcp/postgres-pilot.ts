@@ -29,8 +29,10 @@ const PERMANENTLY_LIVE_TOOLS = new Set(['consultar_meu_acesso']);
 // metadata falsa. Em vez de forçar o wrapper ou mentir na descrição, essas ferramentas são
 // removidas inteiramente da lista do piloto: um agente em modo piloto nunca as vê. Tire uma entrada
 // daqui quando sua leitura ganhar cópia no Postgres — ela passa a ser empacotada como as demais.
-// `consultar_historico_sku` lê o rollup semanal, que existe só no Firestore (mesma decisão já
-// tomada para o campo `history` embutido em ProductionDemand, que o leitor Postgres devolve vazio).
+// `consultar_historico_sku` continua fora do piloto por outro motivo: o PostgreSQL já tem o rollup
+// semanal, mas a operação o lê pelo repositório escolhido pela fonte operacional
+// (`skuWeeklyDemandRepository`), não pelo pool do piloto. Incluí-la serviria a série da fonte ao
+// vivo sob a etiqueta de "cópia datada", que é a metadata falsa que esta lista existe para evitar.
 const PENDING_POSTGRES_COVERAGE_TOOLS = new Set(['consultar_historico_sku']);
 
 export function createPostgresReadTools(pool: Pool, policy: PilotSnapshotPolicy) {

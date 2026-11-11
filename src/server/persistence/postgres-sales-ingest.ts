@@ -96,6 +96,9 @@ export function createPostgresSalesIngestRepository(pool: Pool): SalesIngestRepo
         if (typeof balance === 'number' && Number.isFinite(balance) && previous?.estoqueAtual !== balance && Number.isFinite(at)) {
           const entry = { sku, estoqueAtual: balance, observedAt, event: String(observation.lastEvent ?? ''),
             source: 'webhook', expiresAt: new Date(at + OBSERVATION_TTL_MS).toISOString() };
+          // Diverge do Firestore de propósito: lá uma falha ao gravar o histórico não derruba o saldo; aqui o
+          // insert está na mesma transação, então a falha aborta a gravação do saldo. Falha alta com retry do
+          // webhook é melhor que perder histórico em silêncio.
           await client.query(
             `insert into brsteel_ops.stock_observation_log (source_id, payload, source_version, source_hash, import_run_id)
              values ($1, $2, $3, $4, $5)`,

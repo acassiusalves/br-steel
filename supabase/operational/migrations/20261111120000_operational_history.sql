@@ -1,5 +1,7 @@
 -- Histórico de saldo por SKU e demanda semanal: as duas séries que até aqui só existiam no Firestore.
 -- Mesmo formato genérico das demais coleções, para que carga, reconciliação e comparador as cubram.
+begin;
+
 create table brsteel_ops.stock_observation_log (
   source_id text collate "C" primary key check (length(source_id) between 1 and 200),
   payload jsonb not null check (jsonb_typeof(payload) = 'object'),
@@ -41,3 +43,5 @@ grant select, insert, update, delete on brsteel_ops.sku_weekly_demand to brsteel
 create policy writer on brsteel_ops.sku_weekly_demand for all to brsteel_ops_writer using (true) with check (true);
 grant select on brsteel_ops.sku_weekly_demand to brsteel_ops_backup;
 create policy backup_reader on brsteel_ops.sku_weekly_demand for select to brsteel_ops_backup using (true);
+
+commit;
