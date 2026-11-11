@@ -2,7 +2,7 @@ import { lstat, realpath } from 'node:fs/promises';
 import { isAbsolute, relative, sep } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 
-export const project='mlumbvxpaqfzpdjnvzxc';
+export const project='mmewkphsrnttkzvpyddv';
 export const sourceProject='marketflow-9h4tg';
 export const tables = ['brsteel_import.runs','brsteel_import.state',
   ...['inventory_movements','production_columns','production_comments','production_counters',
@@ -10,7 +10,7 @@ export const tables = ['brsteel_import.runs','brsteel_import.state',
 
 export function backupConnection(value, ca) {
   const u=new URL(value);
-  if (!['postgres:','postgresql:'].includes(u.protocol) || u.hostname!=='aws-0-sa-east-1.pooler.supabase.com'
+  if (!['postgres:','postgresql:'].includes(u.protocol) || u.hostname!=='aws-1-sa-east-1.pooler.supabase.com'
     || u.port!=='5432' || u.pathname!=='/postgres' || u.search || u.hash || !u.password || !ca?.trim()
     || decodeURIComponent(u.username)!==`brsteel_backup_probe.${project}`) throw new Error('Invalid backup connection');
   return {host:u.hostname,port:5432,user:decodeURIComponent(u.username),password:decodeURIComponent(u.password),

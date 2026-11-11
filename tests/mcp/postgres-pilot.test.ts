@@ -10,7 +10,7 @@ import { withOperationalSnapshot } from '@/server/persistence/postgres-read';
 const now = Date.parse('2026-09-12T19:00:00Z');
 const context = { actor: { userId: 'pilot', source: 'mcp' } } as AccessContext;
 const env = { MCP_PG_PILOT_ENABLED:'true', MCP_PG_PILOT_USER_IDS:'pilot', MCP_PG_PILOT_SNAPSHOT_HASH:'a'.repeat(64),
-  MCP_PG_PILOT_EXPIRES_AT:'2026-09-12T20:00:00Z', MCP_PG_PILOT_DATABASE_URL:'postgres://brsteel_pilot_reader:p@db.mlumbvxpaqfzpdjnvzxc.supabase.co:5432/postgres', MCP_PG_PILOT_CA:'test CA' };
+  MCP_PG_PILOT_EXPIRES_AT:'2026-09-12T20:00:00Z', MCP_PG_PILOT_DATABASE_URL:'postgres://brsteel_pilot_reader:p@db.mmewkphsrnttkzvpyddv.supabase.co:5432/postgres', MCP_PG_PILOT_CA:'test CA' };
 const policy = { sourceProject:'marketflow-9h4tg', snapshotHash:'a'.repeat(64), expiresAt:Date.parse(env.MCP_PG_PILOT_EXPIRES_AT) };
 // Tool-list tests only inspect static metadata (name/description) and never call `.run`, so a real
 // pool is unnecessary: every repository factory only touches the pool lazily inside

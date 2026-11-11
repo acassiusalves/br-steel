@@ -1,5 +1,7 @@
 # Hook OAuth da homologação hospedada
 
+> **Projeto atual: `mmewkphsrnttkzvpyddv`** (organização BR Steel), desde 11/11/2026. O que está datado de setembro neste documento se refere ao projeto antigo `mlumbvxpaqfzpdjnvzxc`. Estes artefatos foram reaplicados no projeto atual na ordem original e conferidos; os comandos abaixo registram a aplicação no projeto antigo. Ver a [migração do Supabase](../../docs/migracao-supabase-2026-11.md).
+
 Artefatos exclusivos do projeto Supabase `mlumbvxpaqfzpdjnvzxc` e do recurso MCP `https://br-steel-mcp-staging.vercel.app/api/mcp`.
 
 O projeto Vercel dedicado é `prj_YD3ATzBPFQo4bD1ZlojrDTigUZp8`. O domínio foi verificado na tarefa principal. Estes arquivos não alteram a audiência local `http://localhost:9003/api/mcp`, as migrations locais, `supabase/config.toml` ou os testes locais.

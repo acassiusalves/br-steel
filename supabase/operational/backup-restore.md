@@ -21,7 +21,7 @@ Definir as variáveis no ambiente privado do processo:
 |---|---|
 | `BRSTEEL_BACKUP_DIRECTORY` | Diretório novo, absoluto, privado e fora do repositório |
 | `BRSTEEL_BACKUP_IDENTITY` | Arquivo privado da identidade age, fora do diretório do arquivo |
-| `BRSTEEL_BACKUP_URL` | URL do login temporário no pooler `aws-0-sa-east-1.pooler.supabase.com:5432`, usuário `brsteel_backup_probe.mlumbvxpaqfzpdjnvzxc`, banco `postgres`; sem query string |
+| `BRSTEEL_BACKUP_URL` | URL do login temporário no pooler `aws-1-sa-east-1.pooler.supabase.com:5432`, usuário `brsteel_backup_probe.mmewkphsrnttkzvpyddv`, banco `postgres`; sem query string |
 | `BRSTEEL_BACKUP_CA` | CA obtida do projeto; TLS verifica cadeia e hostname |
 | `BRSTEEL_BACKUP_SNAPSHOT_HASH` | Hash de 64 caracteres minúsculos da cópia esperada |
 | `BRSTEEL_BACKUP_PRIVILEGED_MANIFEST` | JSON agregado capturado pela conexão administrativa confiável |

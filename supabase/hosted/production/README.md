@@ -1,5 +1,7 @@
 # Audiência OAuth de produção
 
+> **Projeto atual: `mmewkphsrnttkzvpyddv`** (organização BR Steel), desde 11/11/2026. O que está datado de setembro neste documento se refere ao projeto antigo `mlumbvxpaqfzpdjnvzxc`. Estes artefatos foram reaplicados no projeto atual na ordem original e conferidos; os comandos abaixo registram a aplicação no projeto antigo. Ver a [migração do Supabase](../../../docs/migracao-supabase-2026-11.md).
+
 Configuração exclusiva para Supabase `mlumbvxpaqfzpdjnvzxc`. O recurso de produção é `https://br-steel.vercel.app/api/mcp`; o legado é `https://br-steel-mcp-staging.vercel.app/api/mcp`. Nenhum arquivo de homologação foi alterado. Estes artefatos ficam fora da cadeia local `supabase/migrations`; não usar `db push`.
 
 Somente `claims.client_id` não vazio aciona a seleção. Dentro de `claims.app_metadata`, `brsteel_mcp_resource` exatamente igual ao recurso de produção seleciona produção; exatamente igual a homologação seleciona homologação. Chave ausente, JSON `null` e string vazia selecionam homologação para preservar o piloto. Qualquer outro valor não vazio, incluindo espaços, URL com barra extra, número, objeto ou array, aborta com SQLSTATE `22023`. `user_metadata` e `client_id` fora de `claims` nunca autorizam nem selecionam audiência. Sem cliente OAuth, o objeto `claims` permanece JSONB-idêntico, inclusive sua audiência; o envelope de retorno continua `{claims: ...}`, como no hook anterior. A saída OAuth tem uma única audiência string, nunca um array.

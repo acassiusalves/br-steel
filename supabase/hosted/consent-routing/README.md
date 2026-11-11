@@ -1,5 +1,7 @@
 # OAuth consent routing
 
+> **Projeto atual: `mmewkphsrnttkzvpyddv`** (organização BR Steel), desde 11/11/2026. O que está datado de setembro neste documento se refere ao projeto antigo `mlumbvxpaqfzpdjnvzxc`. Estes artefatos foram reaplicados no projeto atual na ordem original e conferidos; os comandos abaixo registram a aplicação no projeto antigo. Ver a [migração do Supabase](../../../docs/migracao-supabase-2026-11.md).
+
 Production and staging share the hosted OAuth provider. Its Site URL remains
 `https://br-steel.vercel.app` and its Authorization Path remains `/oauth/consent`.
 The application resolves the pending authorization's stored `resource` before

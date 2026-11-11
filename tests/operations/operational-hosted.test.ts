@@ -2,8 +2,8 @@ import { expect, it } from 'vitest';
 import { createLocalImportPool } from '@/server/migration/operational-import';
 import { hostedPoolConfig, assertHostedIdentity, assertHostedSource } from '@/server/migration/operational-hosted';
 
-const direct = 'postgresql://brsteel_pilot_importer:secret@db.mlumbvxpaqfzpdjnvzxc.supabase.co:5432/postgres';
-const session = 'postgresql://brsteel_pilot_importer.mlumbvxpaqfzpdjnvzxc:secret@aws-0-sa-east-1.pooler.supabase.com:5432/postgres';
+const direct = 'postgresql://brsteel_pilot_importer:secret@db.mmewkphsrnttkzvpyddv.supabase.co:5432/postgres';
+const session = 'postgresql://brsteel_pilot_importer.mmewkphsrnttkzvpyddv:secret@aws-1-sa-east-1.pooler.supabase.com:5432/postgres';
 
 it('requires the selected project and purpose-specific login with verified TLS', () => {
   for (const url of [direct, session]) {
@@ -12,9 +12,9 @@ it('requires the selected project and purpose-specific login with verified TLS',
     expect(config.max).toBe(1);
     expect(config.connectionString).toBeUndefined(); // URL parameters cannot override TLS.
   }
-  for (const url of [direct.replace('mlumbvxpaqfzpdjnvzxc','another-project'), direct.replace('brsteel_pilot_importer','postgres'),
+  for (const url of [direct.replace('mmewkphsrnttkzvpyddv','another-project'), direct.replace('brsteel_pilot_importer','postgres'),
     direct.replace('/postgres','/other'), direct+'?sslmode=disable', direct+'#fragment',direct.replace(':secret',''),
-    session.replace(':5432',':6543'),session.replace('mlumbvxpaqfzpdjnvzxc','another-project')]) {
+    session.replace(':5432',':6543'),session.replace('mmewkphsrnttkzvpyddv','another-project')]) {
     expect(() => hostedPoolConfig(url,'importer')).toThrow();
   }
   expect(() => createLocalImportPool(direct)).toThrow();

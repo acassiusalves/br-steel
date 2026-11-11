@@ -7,10 +7,10 @@ export const STAGING = Object.freeze({
   vercel: 'prj_YD3ATzBPFQo4bD1ZlojrDTigUZp8',
   origin: 'https://br-steel-mcp-staging.vercel.app',
   firebase: 'brsteel-mcp-staging',
-  supabase: 'mlumbvxpaqfzpdjnvzxc',
-  supabaseUrl: 'https://mlumbvxpaqfzpdjnvzxc.supabase.co',
-  issuer: 'https://mlumbvxpaqfzpdjnvzxc.supabase.co/auth/v1',
-  jwks: 'https://mlumbvxpaqfzpdjnvzxc.supabase.co/auth/v1/.well-known/jwks.json',
+  supabase: 'mmewkphsrnttkzvpyddv',
+  supabaseUrl: 'https://mmewkphsrnttkzvpyddv.supabase.co',
+  issuer: 'https://mmewkphsrnttkzvpyddv.supabase.co/auth/v1',
+  jwks: 'https://mmewkphsrnttkzvpyddv.supabase.co/auth/v1/.well-known/jwks.json',
   resource: 'https://br-steel-mcp-staging.vercel.app/api/mcp',
 });
 

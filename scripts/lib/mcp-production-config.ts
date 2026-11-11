@@ -1,7 +1,7 @@
 import { createPrivateKey } from 'node:crypto';
 type Environment = Record<string, string | undefined>;
 export const PRODUCTION = Object.freeze({
- vercel: 'prj_nKDQAAfkgJ7DePQsIZy5gMELWuWj', firebase: 'marketflow-9h4tg', supabase: 'mlumbvxpaqfzpdjnvzxc',
+ vercel: 'prj_nKDQAAfkgJ7DePQsIZy5gMELWuWj', firebase: 'marketflow-9h4tg', supabase: 'mmewkphsrnttkzvpyddv',
  origin: 'https://br-steel.vercel.app', resource: 'https://br-steel.vercel.app/api/mcp',
 });
 const crons = [
