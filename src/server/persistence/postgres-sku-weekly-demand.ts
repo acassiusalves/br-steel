@@ -30,7 +30,13 @@ export function createPostgresSkuWeeklyDemandRepository(pool: Pool): SkuWeeklyDe
     for (const order of orders) {
       if (!countsAsConsumption(order)) continue;
       for (const item of order.itens ?? []) {
-        if (!item.codigo || !Number.isFinite(item.quantidade) || item.quantidade <= 0) continue;
+        if (!Number.isFinite(item.quantidade) || item.quantidade <= 0) continue;
+        // O SKU vira `source_id` (1 a 200 caracteres): um código corrompido não pode travar a semana nem
+        // virar chave de outro SKU. Pula o item e fecha a semana para os demais (como no Firestore).
+        if (typeof item.codigo !== 'string' || item.codigo.length < 1 || item.codigo.length > 200) {
+          console.warn('[SKU-ROLLUP] SKU inválido ignorado nesta semana.', { week, sku: item.codigo });
+          continue;
+        }
         const description = typeof item.descricao === 'string' ? item.descricao : '';
         const bucket = buckets.get(item.codigo) ?? { description, orders: new Set<number>(), units: 0 };
         bucket.orders.add(order.id); bucket.units += item.quantidade; buckets.set(item.codigo, bucket);

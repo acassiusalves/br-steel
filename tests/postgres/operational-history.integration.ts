@@ -190,3 +190,24 @@ test('SQL weekly rollup updates an imported row with a sanitized id in place and
   assert.deepEqual([...series.keys()], ['CHAPA/10']);
   assert.deepEqual(series.get('CHAPA/10'), [{ week: '2026-W30', units: 7, orders: 2 }, { week: '2026-W36', units: 5, orders: 1 }]);
 });
+
+test('SQL weekly rollup skips an unusable SKU, closes the week for the rest and does not retry it', async () => {
+  await reset();
+  await seedOrder(1, '2026-09-01', [
+    { codigo: 'A', quantidade: 2, descricao: 'Ralo' },
+    { codigo: 123 as unknown as string, quantidade: 3 },
+    { codigo: 'X'.repeat(201), quantidade: 4 },
+  ]);
+  const repository = createPostgresSkuWeeklyDemandRepository(writerPool);
+  const warnings: unknown[][] = [];
+  const original = console.warn;
+  console.warn = (...args: unknown[]) => { warnings.push(args); };
+  try { await repository.rollUpPendingWeeks(now, 600_000); } finally { console.warn = original; }
+  const rows = (await pool.query(`select source_id from brsteel_ops.sku_weekly_demand where not source_deleted order by source_id`)).rows;
+  assert.deepEqual(rows.map(row => row.source_id), ['A']);
+  assert.deepEqual((await repository.readWeeklyHistory(104)).get('A'), [{ week: '2026-W36', units: 2, orders: 1 }]);
+  assert.equal(warnings.filter(call => String(call[0]).includes('[SKU-ROLLUP]')).length, 2);
+  const again = await repository.rollUpPendingWeeks(now, 600_000);
+  assert.deepEqual(again.weeks, []);
+  assert.equal(again.remaining, 0);
+});
