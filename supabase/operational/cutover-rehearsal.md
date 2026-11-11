@@ -2,6 +2,8 @@
 
 > **Projeto atual: `mmewkphsrnttkzvpyddv`** (organização BR Steel), desde 11/11/2026. O que está datado de setembro neste documento se refere ao projeto antigo `mlumbvxpaqfzpdjnvzxc`. As sete migrations já estão no projeto atual; a cópia dos dados ainda não. O host do pooler passou a ser `aws-1-sa-east-1.pooler.supabase.com`. Ver a [migração do Supabase](../../docs/migracao-supabase-2026-11.md).
 
+> **Histórico de estoque e demanda semanal (11/11/2026).** O log de observações de estoque e a série semanal de demanda por SKU passaram a existir em PostgreSQL **no código**, na branch `claude/fase1-historico-postgres`: a migration [`20261111120000_operational_history.sql`](migrations/20261111120000_operational_history.sql) cria `stock_observation_log` e `sku_weekly_demand`, e o export, o import, o `verify`, a reconciliação e o comparador cobrem as duas. Ainda falta aplicar essa migration em `mmewkphsrnttkzvpyddv` e fazer uma exportação e importação novas, para o histórico existente ser copiado. Enquanto isso, o projeto hospedado não tem as duas tabelas.
+
 O código do corte está pronto e testado: interruptor de manutenção, reconciliação, comparador e seletor trocável em runtime. O que falta é provisionamento, que envolve credenciais e por isso é seu.
 
 **Nada aqui toca produção.** O destino é o Supabase `mmewkphsrnttkzvpyddv` e o ambiente é a Vercel de homologação `br-steel-mcp-staging`. A aplicação de produção continua em Firestore o tempo todo — `appConfig/operationalSource` nem existe lá.
@@ -235,6 +237,8 @@ As gravações estão corretas: `saveSalesOrdersOptimized` delega a `salesIngest
 Todos foram resolvidos em 16/09/2026. Dois eram código morto e foram apagados. Dois são ferramentas administrativas destrutivas sem equivalente na outra fonte: passaram a recusar por `requireFirestoreSource`, porque apagar a base que ninguém mais usa enquanto o operador vê "pronto" é pior que não apagar. Os outros quatro ganharam roteamento — três métodos novos em `SalesReadRepository` e o uso de `stockReadRepository.snapshot()` no caminho vivo do estoque.
 
 O teste de equivalência entre os adaptadores pagou-se na hora: o SQL filtrava exclusões lógicas enquanto o Firestore conta todo documento, e a mesma tela mostraria totais diferentes conforme a fonte.
+
+**Histórico de estoque e demanda semanal.** Em 11/11/2026 o pré-requisito de dados do corte — o log append-only de estoque no destino — foi atendido no código: `applyStockObservation` do caminho PostgreSQL grava em `stock_observation_log` com a mesma regra do log do Firestore, e a série semanal de demanda tem repositório próprio em PostgreSQL (`skuWeeklyDemandRepository`), usado pelo cron `/api/cron/sku-weekly-rollup`, por `consultar_historico_sku` e pela tela de produção. O checkpoint do rollup é derivado das linhas vivas; o documento `appConfig/skuWeeklyDemandRollup` não é copiado. O `scripts/backfill-sku-weekly-demand.ts` continua só no Firestore, de propósito: roda antes do corte. Pendente no projeto hospedado: aplicar a migration `20261111120000_operational_history.sql` e copiar o histórico na reconciliação.
 
 **Nada disto aparece num ensaio.** O ensaio prova que a cópia fica idêntica no instante do bloqueio; ele não exercita a aplicação depois do corte. O que revelaria estes casos é a troca da fonte em homologação, com a aplicação servindo do PostgreSQL — o passo que segue pendente.
 

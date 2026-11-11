@@ -58,7 +58,7 @@ Pelos objetos, não pelo registro. Cada consulta devolve o valor esperado quando
 
 | Migration | Consulta | Esperado |
 | --- | --- | ---: |
-| `operational_core` | `select count(*) from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='brsteel_ops' and c.relkind='r'` | 11 |
+| `operational_core` | `select count(*) from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='brsteel_ops' and c.relkind='r' and c.relname in ('sales_orders','sales_order_items','stock_observations','supplies','supply_codes','inventory_movements','production_columns','production_counters','production_lots','production_lot_items','production_comments')` | 11 |
 | `operational_read_models` | `select count(*) from information_schema.columns where table_schema='brsteel_ops' and table_name='stock_observations' and column_name in ('stock_read','observed_at_ms','sku_order')` | 3 |
 | `operational_pilot_roles` | `select count(*) from pg_roles where rolname in ('brsteel_pilot_reader','brsteel_pilot_importer')` | 2 |
 | `operational_copy_metadata` | `select count(*) from pg_constraint where conname='ready_copy_metadata'` | 1 |
@@ -67,7 +67,7 @@ Pelos objetos, não pelo registro. Cada consulta devolve o valor esperado quando
 | `operational_native_run` | `select count(*) from brsteel_import.runs where id = repeat('0', 64)` | 1 |
 | `operational_history` | `select count(*) from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='brsteel_ops' and c.relname in ('stock_observation_log','sku_weekly_demand') and c.relrowsecurity` | 2 |
 
-Em 13/09/2026 as sete devolviam o valor esperado: a cadeia está inteira no destino.
+Em 13/09/2026 as sete devolviam o valor esperado: a cadeia está inteira no destino. A oitava, `operational_history`, ainda não foi executada contra nenhum banco hospedado: a migration só existe no repositório.
 
 Ao acrescentar uma migration nova, acrescente também a linha correspondente nesta tabela. Uma verificação que não cobre o arquivo novo não é verificação.
 
