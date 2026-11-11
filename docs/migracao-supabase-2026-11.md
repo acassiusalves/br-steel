@@ -39,7 +39,7 @@ Os papéis `brsteel_*` têm os mesmos atributos. O antigo ainda tem o resíduo `
 
 ## Troca nos ambientes
 
-A troca muda o emissor dos tokens. Por isso, **toda conexão do conector no Claude precisa ser refeita** depois de cada publicação: o Claude guarda o servidor de autorização e o cliente registrado no projeto antigo.
+As duas trocas foram feitas em 11/11/2026. A troca muda o emissor dos tokens. Por isso, **toda conexão do conector no Claude precisa ser refeita** depois de cada publicação: o Claude guarda o servidor de autorização e o cliente registrado no projeto antigo.
 
 ### Homologação: trocada em 11/11/2026
 
@@ -52,12 +52,25 @@ A troca muda o emissor dos tokens. Por isso, **toda conexão do conector no Clau
 
 **A chave secreta precisa de `--reveal`.** Sem a flag, `supabase projects api-keys` devolve a chave secreta mascarada, com o prefixo `sb_secret_` correto. A primeira gravação na homologação usou esse valor, e a consulta de consentimento falhou com `Invalid API key` até a troca. Confira a chave contra a API REST do projeto antes de gravá-la.
 
-### Produção: pendente
+### Produção: trocada em 11/11/2026
 
-1. No mesmo momento da publicação, voltar o Site URL do projeto novo para `https://br-steel.vercel.app`. A partir daí, a produção roteia os consentimentos da homologação, como fazia no projeto antigo.
-2. Trocar `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY` e `SUPABASE_SECRET_KEY` no projeto `br-steel`, rodar o preflight `scripts/mcp-production-check.ts` e publicar junto com este código.
-3. Cada usuário precisa usar "Desvincular" e depois "Vincular" no conector de produção do Claude: o Claude guarda a autorização da URL e não refaz o OAuth sozinho. Depois, conferir código, refresh e revogação. Depois disso, atualizar a tabela de destinos em [MCP em produção](mcp-producao.md).
-4. Encerrar o antigo depois de alguns dias sem uso: revogar sessões e papéis `brsteel_*` e pausar o projeto. A decisão de apagá-lo é do dono da organização Lunneta Ads.
+- O Site URL do projeto novo voltou para `https://br-steel.vercel.app`. A produção passa a rotear os consentimentos da homologação, como fazia no projeto antigo.
+- `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY` e `SUPABASE_SECRET_KEY` do projeto `br-steel` apontam para o projeto novo. Elas existem só no destino Production e ficaram gravadas como Secret.
+- A publicação `dpl_BTjGPVFDWr2c9zd64BneVYSxMY7D` foi uma republicação da que saiu do merge (`b5c7f7a`) e já está em `br-steel.vercel.app`.
+- Conferido:
+  - os metadados do recurso de produção e de homologação anunciam o emissor novo;
+  - o MCP sem token responde 401 e o login responde 200;
+  - uma autorização de teste com recurso de produção chegou ao login da produção;
+  - uma com recurso de homologação passou pela produção e foi redirecionada ao login da homologação. Os clientes de teste foram apagados.
+- Aceite real pelo Claude: o conector "BR Steel" passou por "Desvincular" e "Vincular", login e consentimento, e listou as 13 ferramentas. "Meu acesso" e o resumo de vendas de 05/11 a 11/11 responderam com dados reais e fonte `firestore`.
+
+Pendente:
+
+1. Cada outra pessoa que usa o conector de produção precisa usar "Desvincular" e depois "Vincular" no Claude. O token antigo é recusado desde a publicação.
+2. Observar um refresh real e uma revogação pelo Claude.
+3. Encerrar o antigo depois de alguns dias sem uso: revogar sessões e papéis `brsteel_*` e pausar o projeto. A decisão de apagá-lo é do dono da organização Lunneta Ads.
+
+Para voltar atrás: repor no projeto `br-steel` a URL e as chaves do projeto antigo (`supabase projects api-keys --project-ref mlumbvxpaqfzpdjnvzxc --reveal`) e republicar. O projeto antigo continua intacto.
 
 ## Próxima etapa: sair do Firebase
 
