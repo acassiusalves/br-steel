@@ -237,7 +237,7 @@ As gravações estão corretas: `saveSalesOrdersOptimized` delega a `salesIngest
 | `order-service.ts` `orderExists` | `actions.ts` | detecção de duplicata deixa de funcionar | **corrigido** |
 | `order-service.ts` `getExistingOrderIds` | sem chamador encontrado | possivelmente código morto | **corrigido** |
 
-Todos foram resolvidos em 16/09/2026. Dois eram código morto e foram apagados. Dois são ferramentas administrativas destrutivas sem equivalente na outra fonte: passaram a recusar por `requireFirestoreSource`, porque apagar a base que ninguém mais usa enquanto o operador vê "pronto" é pior que não apagar. Os outros quatro ganharam roteamento — três métodos novos em `SalesReadRepository` e o uso de `stockReadRepository.snapshot()` no caminho vivo do estoque.
+Os itens originais foram resolvidos em 16/09/2026; a leitura direta de `supplies`, acrescentada em 11/11/2026, segue pendente. Dois eram código morto e foram apagados. Dois são ferramentas administrativas destrutivas sem equivalente na outra fonte: passaram a recusar por `requireFirestoreSource`, porque apagar a base que ninguém mais usa enquanto o operador vê "pronto" é pior que não apagar. Os outros quatro ganharam roteamento — três métodos novos em `SalesReadRepository` e o uso de `stockReadRepository.snapshot()` no caminho vivo do estoque.
 
 O teste de equivalência entre os adaptadores pagou-se na hora: o SQL filtrava exclusões lógicas enquanto o Firestore conta todo documento, e a mesma tela mostraria totais diferentes conforme a fonte.
 
@@ -246,7 +246,7 @@ O teste de equivalência entre os adaptadores pagou-se na hora: o SQL filtrava e
 **Retorno PostgreSQL → Firestore dos dados nativos novos.** O retorno (Passo 5 do plano da etapa 5) precisa tratar o que só existe no PostgreSQL depois do corte:
 
 - **Log de estoque.** As linhas nativas de `stock_observation_log` (ids UUID) existem só no PostgreSQL. Têm de ser copiadas de volta para `stockObservations`, com `expiresAt` convertido em `Timestamp` do Firestore: a política de TTL ignora strings e as observações nunca expirariam.
-- **Novo corte depois do retorno.** Para não duplicar nem colidir, mantenha os mesmos ids na volta; senão espere "Native row collision" ou linhas duplicadas, inclusive ids saneados da demanda semanal (`CHAPA_10~hash`) ao lado de linhas nativas `CHAPA/10`.
+- **Novo corte depois do retorno.** Manter os ids na volta transforma um novo corte numa recusa explícita ("Native row collision") em vez de duplicatas silenciosas. Antes de um novo corte, as linhas nativas de `stock_observation_log` (copiadas de volta) e de `sku_weekly_demand` (recalculadas no Firestore) precisam ser resolvidas explicitamente — por exemplo, removidas da cópia. Sem isso, espere colisão (mesmo id) ou duplicata (`CHAPA_10~hash` ao lado de `CHAPA/10`).
 - **Demanda semanal.** A série se cura no retorno por recomputação: o checkpoint do Firestore fica no valor de antes do corte e o rollup do Firestore recalcula as semanas a partir de `salesOrders`. Este é o caminho reverso pretendido para esta série; não há cópia de volta.
 
 **Nada disto aparece num ensaio.** O ensaio prova que a cópia fica idêntica no instante do bloqueio; ele não exercita a aplicação depois do corte. O que revelaria estes casos é a troca da fonte em homologação, com a aplicação servindo do PostgreSQL — o passo que segue pendente.
