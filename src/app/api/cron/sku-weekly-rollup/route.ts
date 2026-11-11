@@ -9,7 +9,7 @@
  * pelo mesmo motivo que o dreno de webhooks: nada de gravação de negócio com o núcleo bloqueado.
  */
 import { NextResponse } from 'next/server';
-import { rollUpPendingWeeks } from '@/server/persistence/firestore-sku-weekly-demand';
+import { skuWeeklyDemandRepository } from '@/server/persistence/sku-weekly-demand';
 import { readCoreWriteMode } from '@/server/operations/maintenance';
 
 export const dynamic = 'force-dynamic';
@@ -39,7 +39,7 @@ export async function GET(request: Request) {
     }
     // `remaining > 0` significa que o orçamento acabou antes das semanas: o checkpoint já guardou o
     // que fechou e a execução seguinte continua daí — nada aqui precisa ser refeito à mão.
-    const { weeks, skus, remaining } = await rollUpPendingWeeks();
+    const { weeks, skus, remaining } = await skuWeeklyDemandRepository.rollUpPendingWeeks();
     return NextResponse.json({ ok: true, suspended: false, weeks, skus, remaining });
   } catch (error) {
     // Nunca devolver a mensagem crua do driver: pode carregar payload ou credencial.

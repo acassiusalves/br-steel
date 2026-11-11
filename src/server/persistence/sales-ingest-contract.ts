@@ -6,7 +6,7 @@ export interface SalesIngestRepository {
   upsertOrders(orders: SourceOrder[]): Promise<IngestCounts>;
   /**
    * Última observação vence por SKU na projeção `stockUpdates`; um saldo físico desconhecido continua
-   * nulo, nunca zero. A implementação Firestore também registra cada mudança em `stockObservations`.
+   * nulo, nunca zero. As duas implementações também registram cada mudança de saldo no histórico (`stockObservations`).
    */
   applyStockObservation(sku: string, observation: Record<string, unknown>): Promise<void>;
   /** Logical deletion, distinct from an absent record. */

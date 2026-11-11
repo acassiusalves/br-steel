@@ -27,6 +27,7 @@ import { getFirestore } from 'firebase-admin/firestore';
 import { reconcileFromFirestore, compareSources } from '../src/server/migration/operational-reconcile';
 import { resetCoreWriteModeCache } from '../src/server/operations/maintenance';
 import { createCutoverPool } from './lib/cutover-pool';
+import { HISTORY_MIGRATION, missingOperationalTables } from './lib/cutover-preflight';
 
 const log = (m: string) => console.log(`${new Date().toISOString()}  ${m}`);
 const espera = (s: number) => new Promise(r => setTimeout(r, s * 1000));
@@ -65,6 +66,13 @@ async function main() {
       return;
     }
     log(`  ok  identidade ${id.actor}, superuser=false`);
+
+    const missing = await missingOperationalTables(pool);
+    if (missing.length) {
+      log(`ABORTADO: faltam tabelas no destino (${missing.join(', ')}). Aplique a migration ${HISTORY_MIGRATION} antes do ensaio.`);
+      return;
+    }
+    log('  ok  todas as tabelas da cópia existem em brsteel_ops');
 
     const copia = (await pool.query('select ready, captured_at, source_project from brsteel_import.state')).rows[0];
     if (!copia?.ready) { log('ABORTADO: a cópia não está pronta (ready=false)'); return; }

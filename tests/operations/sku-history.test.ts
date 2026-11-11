@@ -31,3 +31,8 @@ it('returns the series for a SKU containing a slash instead of throwing', async 
   const response = await skuHistory(context(), { sku: 'CHAPA/10', semanas: 12 });
   expect(response.data).toEqual([{ week: '2026-W36', units: 6, orders: 1 }]);
 });
+
+it('reports the active operational source instead of a hard-coded one', async () => {
+  const response = await skuHistory(context(), { sku: 'NADA', semanas: 4 });
+  expect(response.source).toBe('firestore');
+});
