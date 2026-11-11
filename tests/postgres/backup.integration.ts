@@ -19,6 +19,8 @@ const tables = [
   'brsteel_ops.production_lot_items',
   'brsteel_ops.production_comments',
   'brsteel_ops.sales_order_items',
+  'brsteel_ops.stock_observation_log',
+  'brsteel_ops.sku_weekly_demand',
   'brsteel_write.audit',
   'brsteel_write.idempotency',
 ] as const;

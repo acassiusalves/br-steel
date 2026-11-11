@@ -6,7 +6,7 @@ export const project='mmewkphsrnttkzvpyddv';
 export const sourceProject='marketflow-9h4tg';
 export const tables = ['brsteel_import.runs','brsteel_import.state',
   ...['inventory_movements','production_columns','production_comments','production_counters',
-    'production_lot_items','production_lots','sales_order_items','sales_orders','stock_observations','supplies','supply_codes'].map(n=>'brsteel_ops.'+n)];
+    'production_lot_items','production_lots','sales_order_items','sales_orders','sku_weekly_demand','stock_observation_log','stock_observations','supplies','supply_codes'].map(n=>'brsteel_ops.'+n)];
 
 export function backupConnection(value, ca) {
   const u=new URL(value);
@@ -76,7 +76,7 @@ export function tableManifestSql(table) {
 export async function manifest(query) {
   await query("set timezone='UTC'; set extra_float_digits=3; set search_path=pg_catalog");
   const catalog=(await query(catalogSql)).rows[0].catalog;
-  if (catalog.tables?.length!==13 || catalog.tables.some(t=>!t[2]) || catalog.constraints.filter(c=>c[3]==='f').length!==18)
+  if (catalog.tables?.length!==15 || catalog.tables.some(t=>!t[2]) || catalog.constraints.filter(c=>c[3]==='f').length!==20)
     throw new Error('Unexpected operational catalog');
   const rows=[];
   for (const name of tables) rows.push({name,...(await query(tableManifestSql(name))).rows[0]});

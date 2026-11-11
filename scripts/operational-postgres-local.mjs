@@ -98,7 +98,7 @@ try {
       (select count(*)::int from pg_constraint c join pg_namespace n on n.oid=c.connamespace
         where n.nspname in ('brsteel_ops','brsteel_import') and c.contype='f') as foreign_keys,
       (select count(*)::int from pg_indexes where schemaname in ('brsteel_ops','brsteel_import')) as indexes`)).rows[0];
-    if (catalog.tables !== 13 || catalog.rls_tables !== 13 || catalog.foreign_keys !== 18 || catalog.indexes < 20) {
+    if (catalog.tables !== 15 || catalog.rls_tables !== 15 || catalog.foreign_keys !== 20 || catalog.indexes < 20) {
       throw new Error('Operational schema catalog verification failed');
     }
     console.log('Operational schema catalog:', JSON.stringify(catalog));
