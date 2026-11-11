@@ -614,6 +614,23 @@ test('SQL stock observations rebuild the read projection instead of drifting', a
   assert.deepEqual(merged, { sku: 'A', virtual: '9' }, 'a partial observation merges instead of dropping known fields');
 });
 
+test('SQL stock observations append to the history only when the balance changes', async () => {
+  await seedReadyCopy();
+  await pool.query('delete from brsteel_ops.stock_observation_log');
+  await ingest.applyStockObservation('A', { sku: 'A', estoqueAtual: 5, webhookReceivedAt: '2026-09-01T00:00:00Z', lastEvent: 'stock.updated' });
+  await ingest.applyStockObservation('A', { sku: 'A', estoqueAtual: 5, webhookReceivedAt: '2026-09-01T01:00:00Z' });
+  await ingest.applyStockObservation('A', { sku: 'A', estoqueAtual: 7, webhookReceivedAt: '2026-09-01T02:00:00Z' });
+  await ingest.applyStockObservation('A', { sku: 'A', estoqueAtual: Number.NaN, webhookReceivedAt: '2026-09-01T03:00:00Z' });
+  await ingest.applyStockObservation('A', { sku: 'A', estoqueAtual: 8, webhookReceivedAt: 'quebrado' });
+  const rows = (await pool.query(`select payload, import_run_id from brsteel_ops.stock_observation_log
+    order by payload->>'observedAt'`)).rows;
+  assert.deepEqual(rows.map(r => [r.payload.estoqueAtual, r.payload.observedAt]),
+    [[5, '2026-09-01T00:00:00Z'], [7, '2026-09-01T02:00:00Z']]);
+  assert.ok(rows.every(r => r.import_run_id === NATIVE_RUN_ID));
+  assert.equal(rows[0].payload.event, 'stock.updated');
+  assert.equal(rows[0].payload.expiresAt, new Date(Date.parse('2026-09-01T00:00:00Z') + 730 * 86_400_000).toISOString());
+});
+
 async function ingestTrace(repository: SalesIngestRepository) {
   const steps: unknown[] = [];
   steps.push(await repository.upsertOrders([order(1, 100), order(2, 200)]));

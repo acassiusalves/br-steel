@@ -1,4 +1,5 @@
 import 'server-only';
+import { randomUUID } from 'node:crypto';
 import type { Pool, PoolClient } from 'pg';
 import { serialize } from '@/server/operations/common';
 import { NATIVE_RUN_ID, contentHash } from '@/server/migration/operational-snapshot';
@@ -7,6 +8,7 @@ import { prepareStockReadModels } from './stored-stock-model';
 import { withOperationalWrite } from './postgres-write';
 
 type Doc = Record<string, unknown>;
+const OBSERVATION_TTL_MS = 730 * 86_400_000;
 const nativeVersion = () => String(BigInt(Date.now()) * BigInt(1000000));
 
 /**
@@ -78,13 +80,28 @@ export function createPostgresSalesIngestRepository(pool: Pool): SalesIngestRepo
       await withOperationalWrite(pool, async client => {
         const current = (await client.query(
           'select payload from brsteel_ops.stock_observations where source_id = $1 for update', [sku])).rows[0];
-        const payload = { ...(current?.payload as Doc | undefined), ...observation };
+        const previous = current?.payload as Doc | undefined;
+        // JSON round-trip: what jsonb stores (NaN becomes null) is what gets hashed; canonicalJson rejects NaN.
+        const payload = JSON.parse(JSON.stringify({ ...previous, ...observation })) as Doc;
         await client.query(
           `insert into brsteel_ops.stock_observations (source_id, payload, source_version, source_hash, import_run_id)
            values ($1, $2, $3, $4, $5)
            on conflict (source_id) do update set payload = excluded.payload, source_version = excluded.source_version,
              source_hash = excluded.source_hash, source_deleted = false`,
           [sku, JSON.stringify(payload), nativeVersion(), contentHash(payload), NATIVE_RUN_ID]);
+        // Same rule as the Firestore log (firestore-sales-ingest.ts): only a numeric balance that changed,
+        // with a readable instant. Bling often redelivers the same number.
+        const balance = observation.estoqueAtual;
+        const observedAt = String(observation.webhookReceivedAt ?? '');
+        const at = Date.parse(observedAt);
+        if (typeof balance === 'number' && Number.isFinite(balance) && previous?.estoqueAtual !== balance && Number.isFinite(at)) {
+          const entry = { sku, estoqueAtual: balance, observedAt, event: String(observation.lastEvent ?? ''),
+            source: 'webhook', expiresAt: new Date(at + OBSERVATION_TTL_MS).toISOString() };
+          await client.query(
+            `insert into brsteel_ops.stock_observation_log (source_id, payload, source_version, source_hash, import_run_id)
+             values ($1, $2, $3, $4, $5)`,
+            [randomUUID(), JSON.stringify(entry), nativeVersion(), contentHash(entry), NATIVE_RUN_ID]);
+        }
         await rebuildStockProjection(client);
       });
     },
