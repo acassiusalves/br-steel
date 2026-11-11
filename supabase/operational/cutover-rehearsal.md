@@ -30,7 +30,9 @@ Guarde credenciais num arquivo privado fora do Git, com permissão `0600`. Nada 
 
 ## Passo 1 — Conferir a cadeia de migrations
 
-**As sete migrations operacionais já estão no destino.** Este passo pedia a aplicação de `20260912234410_operational_writer_role.sql` e `20260912235500_operational_native_run.sql`; as duas foram aplicadas antes de 13/09/2026. O `README.md` registrou isso na época, este roteiro não acompanhou. Reconferido em 15/09/2026: as sete devolvem o valor esperado.
+**A cadeia tem oito migrations; as sete primeiras já estão no destino, a oitava não.** A oitava, `20261111120000_operational_history.sql` (cria `stock_observation_log` e `sku_weekly_demand`), só existe no repositório: aplique-a antes de seguir e confira com a consulta `operational_history` da tabela do `README.md` (deve devolver 2). **A migration precisa estar aplicada antes de habilitar o piloto MCP em PostgreSQL ou de trocar `operationalSource`: o leitor de demanda em PostgreSQL e os webhooks de estoque em SQL passam a depender das duas tabelas novas.** O ensaio (`scripts/operational-cutover-rehearsal.ts`) recusa abrir a janela se alguma tabela da cópia estiver ausente.
+
+**As sete primeiras migrations operacionais já estão no destino.** Este passo pedia a aplicação de `20260912234410_operational_writer_role.sql` e `20260912235500_operational_native_run.sql`; as duas foram aplicadas antes de 13/09/2026. O `README.md` registrou isso na época, este roteiro não acompanhou. Reconferido em 15/09/2026: as sete devolvem o valor esperado.
 
 **Não reaplique.** `operational_writer_role` falha com o schema já existente — e uma falha aqui pareceria defeito do destino, quando seria só ordem errada de leitura. A tabela completa das sete conferências está no `README.md`.
 
@@ -225,6 +227,7 @@ As gravações estão corretas: `saveSalesOrdersOptimized` delega a `salesIngest
 | Onde | Chamado por | Efeito após o corte | Situação |
 | --- | --- | --- | --- |
 | `firestore-sku-weekly-demand.ts` `rollUpWeek` | cron semanal | demanda silenciosamente errada; alimenta `consultar_historico_sku` e a tela de produção | **corrigido** |
+| `firestore-production-demand.ts` `adminDb.collection('supplies').get()` | tela de produção (`readFirestoreProductionDemand`) | os limites mínimo/máximo de estoque (`estoqueMinimo`/`estoqueMaximo`) passam a vir de uma coleção que não é mais atualizada: congelam sem erro | **pendente** |
 | `operations/stock.ts` (observações de webhook) | tela de estoque do site | o caminho vivo perde observações novas; o MCP não é afetado, usa o caminho armazenado | **corrigido** |
 | `actions.ts` `deleteAllSalesOrders` | `api-settings` | **destrutivo**: apagaria a base que não está mais em uso | **corrigido** |
 | `actions.ts` `countImportedOrders` | `api-settings` | contagem congelada na tela | **corrigido** |
@@ -238,7 +241,13 @@ Todos foram resolvidos em 16/09/2026. Dois eram código morto e foram apagados. 
 
 O teste de equivalência entre os adaptadores pagou-se na hora: o SQL filtrava exclusões lógicas enquanto o Firestore conta todo documento, e a mesma tela mostraria totais diferentes conforme a fonte.
 
-**Histórico de estoque e demanda semanal.** Em 11/11/2026 o pré-requisito de dados do corte — o log append-only de estoque no destino — foi atendido no código: `applyStockObservation` do caminho PostgreSQL grava em `stock_observation_log` com a mesma regra do log do Firestore, e a série semanal de demanda tem repositório próprio em PostgreSQL (`skuWeeklyDemandRepository`), usado pelo cron `/api/cron/sku-weekly-rollup`, por `consultar_historico_sku` e pela tela de produção. O checkpoint do rollup é derivado das linhas vivas; o documento `appConfig/skuWeeklyDemandRollup` não é copiado. O `scripts/backfill-sku-weekly-demand.ts` continua só no Firestore, de propósito: roda antes do corte. Pendente no projeto hospedado: aplicar a migration `20261111120000_operational_history.sql` e copiar o histórico na reconciliação.
+**Histórico de estoque e demanda semanal.** Em 11/11/2026 o pré-requisito de dados do corte — o log append-only de estoque no destino — foi atendido no código: `applyStockObservation` do caminho PostgreSQL grava em `stock_observation_log` com a mesma regra do log do Firestore, e a série semanal de demanda tem repositório próprio em PostgreSQL (`skuWeeklyDemandRepository`), usado pelo cron `/api/cron/sku-weekly-rollup`, por `consultar_historico_sku` e pela tela de produção (`readFirestoreProductionDemand` lê as semanas fechadas por `skuWeeklyDemandRepository.readWeeklyHistory`, não mais direto do módulo do Firestore; teste em `tests/operations/production-demand-source.test.ts`). O checkpoint do rollup é derivado das linhas vivas; o documento `appConfig/skuWeeklyDemandRollup` não é copiado. O `scripts/backfill-sku-weekly-demand.ts` continua só no Firestore, de propósito: roda antes do corte. Pendente no projeto hospedado: aplicar a migration `20261111120000_operational_history.sql` e copiar o histórico na reconciliação.
+
+**Retorno PostgreSQL → Firestore dos dados nativos novos.** O retorno (Passo 5 do plano da etapa 5) precisa tratar o que só existe no PostgreSQL depois do corte:
+
+- **Log de estoque.** As linhas nativas de `stock_observation_log` (ids UUID) existem só no PostgreSQL. Têm de ser copiadas de volta para `stockObservations`, com `expiresAt` convertido em `Timestamp` do Firestore: a política de TTL ignora strings e as observações nunca expirariam.
+- **Novo corte depois do retorno.** Para não duplicar nem colidir, mantenha os mesmos ids na volta; senão espere "Native row collision" ou linhas duplicadas, inclusive ids saneados da demanda semanal (`CHAPA_10~hash`) ao lado de linhas nativas `CHAPA/10`.
+- **Demanda semanal.** A série se cura no retorno por recomputação: o checkpoint do Firestore fica no valor de antes do corte e o rollup do Firestore recalcula as semanas a partir de `salesOrders`. Este é o caminho reverso pretendido para esta série; não há cópia de volta.
 
 **Nada disto aparece num ensaio.** O ensaio prova que a cópia fica idêntica no instante do bloqueio; ele não exercita a aplicação depois do corte. O que revelaria estes casos é a troca da fonte em homologação, com a aplicação servindo do PostgreSQL — o passo que segue pendente.
 
