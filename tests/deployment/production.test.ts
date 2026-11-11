@@ -13,7 +13,7 @@ const credential = { type: 'service_account', project_id: 'marketflow-9h4tg', cl
 const fixture = (): Record<string, string> => ({
  BRSTEEL_DEPLOYMENT_ENV: 'production', VERCEL_PROJECT_ID: 'prj_nKDQAAfkgJ7DePQsIZy5gMELWuWj',
  APP_ORIGIN: 'https://br-steel.vercel.app', MCP_PUBLIC_URL: 'https://br-steel.vercel.app/api/mcp',
- SUPABASE_URL: 'https://mlumbvxpaqfzpdjnvzxc.supabase.co', SUPABASE_PUBLISHABLE_KEY: 'sb_publishable_fixture', SUPABASE_SECRET_KEY: 'sb_secret_fixture',
+ SUPABASE_URL: 'https://mmewkphsrnttkzvpyddv.supabase.co', SUPABASE_PUBLISHABLE_KEY: 'sb_publishable_fixture', SUPABASE_SECRET_KEY: 'sb_secret_fixture',
  MCP_ENABLED: 'false', MCP_OAUTH_ENABLED: 'false', MCP_WRITES_ENABLED: 'false', MCP_USER_ACCESS_MODE: 'authenticated',
  AUTH_SESSION_SECRET: 'session-secret-fixture-32-characters', CRON_SECRET: 'cron-secret-fixture-at-least-32-characters',
  NEXT_PUBLIC_FIREBASE_PROJECT_ID: 'marketflow-9h4tg', NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN: 'marketflow-9h4tg.firebaseapp.com',

@@ -1,8 +1,10 @@
 # Provisionamento para o ensaio do corte (etapa 5, Task 3)
 
+> **Projeto atual: `mmewkphsrnttkzvpyddv`** (organização BR Steel), desde 11/11/2026. O que está datado de setembro neste documento se refere ao projeto antigo `mlumbvxpaqfzpdjnvzxc`. As sete migrations já estão no projeto atual; a cópia dos dados ainda não. O host do pooler passou a ser `aws-1-sa-east-1.pooler.supabase.com`. Ver a [migração do Supabase](../../docs/migracao-supabase-2026-11.md).
+
 O código do corte está pronto e testado: interruptor de manutenção, reconciliação, comparador e seletor trocável em runtime. O que falta é provisionamento, que envolve credenciais e por isso é seu.
 
-**Nada aqui toca produção.** O destino é o Supabase `mlumbvxpaqfzpdjnvzxc` e o ambiente é a Vercel de homologação `br-steel-mcp-staging`. A aplicação de produção continua em Firestore o tempo todo — `appConfig/operationalSource` nem existe lá.
+**Nada aqui toca produção.** O destino é o Supabase `mmewkphsrnttkzvpyddv` e o ambiente é a Vercel de homologação `br-steel-mcp-staging`. A aplicação de produção continua em Firestore o tempo todo — `appConfig/operationalSource` nem existe lá.
 
 Guarde credenciais num arquivo privado fora do Git, com permissão `0600`. Nada deste roteiro deve ser colado em chat, issue ou PR.
 
@@ -16,7 +18,7 @@ Guarde credenciais num arquivo privado fora do Git, com permissão `0600`. Nada 
 
 | Item | Onde |
 | --- | --- |
-| Acesso de administrador ao Supabase `mlumbvxpaqfzpdjnvzxc` | SQL Editor do painel |
+| Acesso de administrador ao Supabase `mmewkphsrnttkzvpyddv` | SQL Editor do painel |
 | Certificado raiz TLS do projeto | Painel → Settings → Database → SSL Configuration |
 | Credencial de serviço do Firebase `marketflow-9h4tg` | para exportar os dados reais |
 | Acesso ao projeto Vercel `br-steel-mcp-staging` | `prj_YD3ATzBPFQo4bD1ZlojrDTigUZp8` |
@@ -99,7 +101,7 @@ Prepare um arquivo privado de ambiente (`0600`, fora do Git) com os logins de pi
 
 ```
 BRSTEEL_PG_SOURCE_PROJECT=marketflow-9h4tg
-BRSTEEL_PG_PILOT_IMPORTER_URL=postgres://brsteel_pilot_importer.mlumbvxpaqfzpdjnvzxc:<SENHA>@aws-0-sa-east-1.pooler.supabase.com:5432/postgres
+BRSTEEL_PG_PILOT_IMPORTER_URL=postgres://brsteel_pilot_importer.mmewkphsrnttkzvpyddv:<SENHA>@aws-1-sa-east-1.pooler.supabase.com:5432/postgres
 BRSTEEL_PG_CA_FILE=/caminho/privado/supabase-ca.crt
 GOOGLE_APPLICATION_CREDENTIALS=/caminho/privado/marketflow-service-account.json
 ```
@@ -141,7 +143,7 @@ No projeto Vercel `br-steel-mcp-staging`, **não** em produção:
 
 | Variável | Valor |
 | --- | --- |
-| `BRSTEEL_OPERATIONAL_DATABASE_URL` | `postgres://brsteel_ops_runtime.mlumbvxpaqfzpdjnvzxc:<SENHA>@aws-0-sa-east-1.pooler.supabase.com:5432/postgres` |
+| `BRSTEEL_OPERATIONAL_DATABASE_URL` | `postgres://brsteel_ops_runtime.mmewkphsrnttkzvpyddv:<SENHA>@aws-1-sa-east-1.pooler.supabase.com:5432/postgres` |
 | `BRSTEEL_OPERATIONAL_CA` | conteúdo do certificado raiz, não o caminho |
 
 Use **modo sessão (5432)** também aqui no ensaio. O modo transacional (6543) é o que a especificação recomenda para runtime serverless, mas ele rejeita alguns parâmetros de inicialização — entre eles o `statement_timeout` que o pool define. Validar o modo transacional é um item do ensaio, não uma premissa dele.

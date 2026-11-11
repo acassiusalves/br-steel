@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { backupConnection, assertSameManifest, privateLocation, localDockerEndpoint, copyHash } from '../../scripts/lib/operational-backup.mjs';
 
-const valid='postgresql://brsteel_backup_probe.mlumbvxpaqfzpdjnvzxc:secret@aws-0-sa-east-1.pooler.supabase.com:5432/postgres';
+const valid='postgresql://brsteel_backup_probe.mmewkphsrnttkzvpyddv:secret@aws-1-sa-east-1.pooler.supabase.com:5432/postgres';
 test('Docker restore rejects remote daemons and pins an absolute local socket',()=>{
   assert.equal(localDockerEndpoint('unix:///Users/test/.colima/docker.sock'),'unix:///Users/test/.colima/docker.sock');
   for(const value of ['ssh://server','tcp://127.0.0.1:2375','unix://relative.sock','unix:///tmp/a.sock?remote=true'])
@@ -18,8 +18,8 @@ test('copy identity requires exactly a lowercase SHA256',()=>{
 test('accepts only the dedicated backup identity on the verified session endpoint', () => {
   assert.equal(backupConnection(valid, 'CERT').ssl.rejectUnauthorized, true);
   for (const value of [valid.replace('5432','6543'), valid.replace('backup_probe','pilot_importer'),
-    valid.replace('mlumbvxpaqfzpdjnvzxc','anotherproject'), valid+'?sslmode=disable', valid+'#fragment',
-    valid.replace('aws-0-sa-east-1.pooler.supabase.com','127.0.0.1'), valid.replace(':secret','')]) {
+    valid.replace('mmewkphsrnttkzvpyddv','anotherproject'), valid+'?sslmode=disable', valid+'#fragment',
+    valid.replace('aws-1-sa-east-1.pooler.supabase.com','127.0.0.1'), valid.replace(':secret','')]) {
     assert.throws(()=>backupConnection(value,'CERT'));
   }
   assert.throws(()=>backupConnection(valid,''));

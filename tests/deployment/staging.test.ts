@@ -68,6 +68,8 @@ describe('isolated MCP staging configuration', () => {
    { MCP_ALLOWED_ORIGINS: '*' }, { NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY: 'do-not-print-this-secret' }, { MCP_WRITES_ENABLED: 'true' }, { MCP_ALLOWED_USER_IDS: '' }, { BRSTEEL_DEPLOYMENT_ENV: '' },
    { APP_ORIGIN: 'http://localhost:9003', MCP_PUBLIC_URL: 'http://localhost:9003/api/mcp' },
    { SUPABASE_URL: 'http://127.0.0.1:55321' }, { SUPABASE_URL: 'https://ewooyjtdryvhoxalvjja.supabase.co' },
+   // Retired provider (Lunneta Ads org); the OAuth provider now lives in the BR Steel org.
+   { BRSTEEL_STAGING_SUPABASE_PROJECT_REF: 'mlumbvxpaqfzpdjnvzxc', SUPABASE_URL: 'https://mlumbvxpaqfzpdjnvzxc.supabase.co' },
    { MCP_PUBLIC_URL: 'https://different.example.test/api/mcp' }, { AUTH_SESSION_SECRET: 'short' },
   ]) {
    const result = validateMcpStaging({ ...fixture(), ...patch }, config); expect(result.errors.length).toBeGreaterThan(0);

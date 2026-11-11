@@ -20,6 +20,7 @@ Confirme o destino e o estado atual antes de seguir um procedimento datado. Vali
 | MCP em produção | [Registro de publicação e recuperação](mcp-producao.md) e [exemplo de ambiente](../config/mcp-production.env.example). Confira os crons atuais no [vercel.json](../vercel.json). |
 | OAuth local | [Guia do provedor](mcp-oauth-provider-local.md) e [migrations locais](../supabase/migrations/). |
 | OAuth hospedado | Procedimentos SQL de [homologação](../supabase/hosted/README.md), [produção](../supabase/hosted/production/README.md) e [roteamento de consentimento](../supabase/hosted/consent-routing/README.md). |
+| Migração do Supabase | [Registro de 11/11/2026 e troca pendente em produção](migracao-supabase-2026-11.md). |
 | Banco operacional | [Visão geral e cadeia SQL manual](../supabase/operational/README.md), [ensaio de cutover](../supabase/operational/cutover-rehearsal.md) e [ensaio de backup e restauração](../supabase/operational/backup-restore.md). |
 
 As trilhas de OAuth local, OAuth hospedado e banco operacional têm destinos e ciclos de aplicação próprios. A fonte operacional ativa depende do seletor em runtime. O código do [seletor de persistência](../src/server/persistence/source.ts) descreve o contrato, e o procedimento operacional orienta como verificar o ambiente.

@@ -1,6 +1,6 @@
 import { Pool, type PoolClient, type PoolConfig } from 'pg';
 
-export const HOSTED_PROJECT = 'mlumbvxpaqfzpdjnvzxc';
+export const HOSTED_PROJECT = 'mmewkphsrnttkzvpyddv';
 export const HOSTED_SOURCE = 'marketflow-9h4tg';
 type Purpose = 'reader' | 'importer';
 const hostedPools = new WeakMap<Pool, Purpose>();
@@ -9,7 +9,7 @@ const hostedPools = new WeakMap<Pool, Purpose>();
 export function hostedPoolConfig(connectionString: string, purpose: Purpose, ca?: string): PoolConfig {
   const url = new URL(connectionString), role = `brsteel_pilot_${purpose}`;
   const direct = url.hostname === `db.${HOSTED_PROJECT}.supabase.co`;
-  const pooled = url.hostname === 'aws-0-sa-east-1.pooler.supabase.com';
+  const pooled = url.hostname === 'aws-1-sa-east-1.pooler.supabase.com';
   if (!['postgres:', 'postgresql:'].includes(url.protocol) || (!direct && !pooled)
     || url.pathname !== '/postgres' || url.search || url.hash || !url.password
     || decodeURIComponent(url.username) !== (direct ? role : `${role}.${HOSTED_PROJECT}`)

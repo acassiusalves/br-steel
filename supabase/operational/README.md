@@ -1,5 +1,7 @@
 # Banco operacional: preparação e piloto de leitura
 
+> **Projeto atual: `mmewkphsrnttkzvpyddv`** (organização BR Steel), desde 11/11/2026. O que está datado de setembro neste documento se refere ao projeto antigo `mlumbvxpaqfzpdjnvzxc`. Ver a [migração do Supabase](../../docs/migracao-supabase-2026-11.md).
+
 Esta pasta contém a base SQL e as ferramentas de importação do núcleo operacional. Por padrão, a aplicação e o MCP usam Firestore. O MCP também possui um seletor restrito para o piloto PostgreSQL descrito abaixo. O OAuth permanece na configuração Supabase existente; as migrations operacionais ficam fora da cadeia `supabase/migrations` para impedir aplicação incidental ao provedor de identidade.
 
 O [piloto hospedado de 12/09/2026](../../docs/evidence/operational-postgres-hosted-pilot.md) copiou e conferiu 12.967 registros reais e mediu os leitores candidatos. Os acessos temporários foram revogados ao encerrar o ensaio. Não houve ativação dos leitores nos endpoints de produção. O [ensaio dos endpoints](../../docs/evidence/operational-postgres-endpoint-pilot.md) validou depois OAuth, perfis e leitura PostgreSQL pela Vercel de homologação; ao final, acessos e variáveis foram retirados e o deployment anterior foi restaurado.
@@ -74,7 +76,7 @@ O [roteiro de provisionamento](cutover-rehearsal.md) lista, passo a passo, o que
 
 ## Ensaio hospedado
 
-`scripts/operational-hosted-pilot.ts` oferece `import`, `verify` e `measure` com origem fixa `marketflow-9h4tg` e destino fixo `mlumbvxpaqfzpdjnvzxc`. Usa snapshot novo produzido por `exportOperationalSnapshot` com a credencial da origem e validação dos tipos nativos. Não usar um JSON antigo como prova de compatibilidade.
+`scripts/operational-hosted-pilot.ts` oferece `import`, `verify` e `measure` com origem fixa `marketflow-9h4tg` e destino fixo `mmewkphsrnttkzvpyddv`. Usa snapshot novo produzido por `exportOperationalSnapshot` com a credencial da origem e validação dos tipos nativos. Não usar um JSON antigo como prova de compatibilidade.
 
 ```sh
 # Configure um arquivo privado de ambiente fora do Git, com permissão 0600:

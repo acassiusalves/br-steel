@@ -3,7 +3,7 @@ type Environment = Record<string, string | undefined>;
 type DeploymentConfig = { crons?: unknown[]; buildCommand?: string };
 const productionVercel = 'prj_nKDQAAfkgJ7DePQsIZy5gMELWuWj';
 const existingFirebase = new Set(['marketflow-9h4tg', 'marketflow-flmb6']);
-const otherSupabase = new Set(['ewooyjtdryvhoxalvjja', 'yekfxhtvhzriesqcfogz']);
+const otherSupabase = new Set(['ewooyjtdryvhoxalvjja', 'yekfxhtvhzriesqcfogz', 'mlumbvxpaqfzpdjnvzxc']);
 function httpsRoot(raw: string | undefined) {
  try { const url = new URL(raw ?? ''); return url.protocol === 'https:' && url.pathname === '/' && !url.username && !url.password && !url.search && !url.hash && !['localhost','127.0.0.1'].includes(url.hostname) ? url.origin : null; } catch { return null; }
 }

@@ -11,7 +11,7 @@ Situação em 11/09/2026: recursos dedicados publicados, OAuth conectado pelo Cl
 | Firebase | Projeto novo `brsteel-mcp-staging`, número `630645228381`, app web `1:630645228381:web:86595a74e18a064824deb4` |
 | Firestore | Banco `(default)`, modo nativo, edição Standard, região `southamerica-east1`; regras publicadas e 11 índices compostos confirmados `READY` |
 | Conta de serviço | `mcp-staging-server@brsteel-mcp-staging.iam.gserviceaccount.com`, somente `roles/datastore.user` no novo projeto |
-| Supabase | Projeto existente escolhido pelo usuário: `mlumbvxpaqfzpdjnvzxc`, nome `BR Stell MCP / Sistema`, organização Lunneta Ads, região São Paulo |
+| Supabase | Desde 11/11/2026: `mmewkphsrnttkzvpyddv`, nome `Brsteel`, organização BR Steel, região São Paulo. Até então: `mlumbvxpaqfzpdjnvzxc`, organização Lunneta Ads. Ver a [migração do Supabase](migracao-supabase-2026-11.md) |
 | MCP | Recurso `https://br-steel-mcp-staging.vercel.app/api/mcp`, escrita desligada e lista restrita a um usuário sintético temporário |
 
 O destino `production` da Vercel pertence ao novo projeto de homologação. O projeto principal `br-steel`, seu domínio e seu Firebase não foram alterados. Previews do projeto principal compartilham integrações de produção e não são usados nesta prova. A proteção padrão de previews foi preservada.
