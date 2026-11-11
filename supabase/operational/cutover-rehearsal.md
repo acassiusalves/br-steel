@@ -1,8 +1,8 @@
 # Provisionamento para o ensaio do corte (etapa 5, Task 3)
 
-> **Projeto atual: `mmewkphsrnttkzvpyddv`** (organização BR Steel), desde 11/11/2026. O que está datado de setembro neste documento se refere ao projeto antigo `mlumbvxpaqfzpdjnvzxc`. As oito migrations já estão no projeto atual; a cópia dos dados ainda não. O host do pooler passou a ser `aws-1-sa-east-1.pooler.supabase.com`. Ver a [migração do Supabase](../../docs/migracao-supabase-2026-11.md).
+> **Projeto atual: `mmewkphsrnttkzvpyddv`** (organização BR Steel), desde 11/11/2026. O que está datado de setembro neste documento se refere ao projeto antigo `mlumbvxpaqfzpdjnvzxc`. As oito migrations já estão no projeto atual, e uma cópia dos dados foi carregada em 11/11/2026 (ver Passo 3). O host do pooler passou a ser `aws-1-sa-east-1.pooler.supabase.com`. Ver a [migração do Supabase](../../docs/migracao-supabase-2026-11.md).
 
-> **Histórico de estoque e demanda semanal (11/11/2026).** O log de observações de estoque e a série semanal de demanda por SKU passaram a existir em PostgreSQL com o PR [#34](https://github.com/acassiusalves/br-steel/pull/34), em produção desde 11/11/2026: a migration [`20261111120000_operational_history.sql`](migrations/20261111120000_operational_history.sql) cria `stock_observation_log` e `sku_weekly_demand`, e o export, o import, o `verify`, a reconciliação e o comparador cobrem as duas. A migration foi aplicada em `mmewkphsrnttkzvpyddv` em 11/11/2026, e as duas tabelas estão vazias. Falta uma exportação e importação novas, para o histórico existente ser copiado.
+> **Histórico de estoque e demanda semanal (11/11/2026).** O log de observações de estoque e a série semanal de demanda por SKU passaram a existir em PostgreSQL com o PR [#34](https://github.com/acassiusalves/br-steel/pull/34), em produção desde 11/11/2026: a migration [`20261111120000_operational_history.sql`](migrations/20261111120000_operational_history.sql) cria `stock_observation_log` e `sku_weekly_demand`, e o export, o import, o `verify`, a reconciliação e o comparador cobrem as duas. A migration foi aplicada em `mmewkphsrnttkzvpyddv` em 11/11/2026. A carga do mesmo dia copiou o histórico: 3.706 observações de estoque e 208 semanas de demanda.
 
 O código do corte está pronto e testado: interruptor de manutenção, reconciliação, comparador e seletor trocável em runtime. O que falta é provisionamento, que envolve credenciais e por isso é seu.
 
@@ -95,13 +95,35 @@ O papel escritor já cobre leitura **e** escrita do núcleo: conferido em 15/09/
 
 ## Passo 3 — Copiar os dados reais para o destino
 
-**A cópia do piloto ainda está no destino.** O que foi encerrado no piloto foram os *acessos*, não os dados — reconferido em 15/09/2026 direto no banco: 12.538 pedidos, 12.999 itens, 361 observações de estoque, 54 insumos, 3 lotes, `ready=true`, capturada em 12/09 17:41 UTC e concluída às 17:54.
+**A primeira carga no projeto atual partiu do zero.** As cópias do piloto (12/09 e 15/09) ficaram no projeto antigo `mlumbvxpaqfzpdjnvzxc` e não foram trazidas: a fonte de verdade é o Firestore. Depois da primeira carga, toda importação nova **reconcilia sobre a cópia existente** em vez de carregar do zero, e a guarda de colisão entre linha nativa e documento de snapshot protege esse caminho.
 
-Mesmo assim é preciso uma exportação nova, por dois motivos: a cópia é de 12/09 e o schema mudou desde então. **Não reaproveite um JSON antigo** — ele não prova compatibilidade com o schema atual.
+**Carga de 11/11/2026, conferida.** A exportação foi capturada às 22:21 UTC, com 18.998 registros. O import terminou às 22:37 UTC, depois de 12 minutos pelo pooler em modo sessão, e o `verify` passou. A cópia tem `ready=true` e contém:
+- 14.603 pedidos e 15.166 itens;
+- 413 registros de estoque atual, 3.706 observações de estoque e 208 semanas de demanda;
+- 54 insumos, 1 movimentação, 3 lotes, 7 itens de lote e 3 colunas de produção.
 
-A importação vai **reconciliar sobre a cópia existente**, não carregar do zero. É exatamente o caminho que a guarda de colisão entre linha nativa e documento de snapshot protege.
+O snapshot e os relatórios ficaram fora do Git. Produção e homologação continuam lendo o Firestore, então a cópia envelhece. Antes do ensaio e antes do corte, uma importação nova reconcilia sobre ela.
 
-Prepare um arquivo privado de ambiente (`0600`, fora do Git) com os logins de piloto de importação, provisionados do mesmo jeito que o do Passo 2 mas associados a `brsteel_ops_importer`:
+Toda carga sai de uma exportação nova. **Não reaproveite um JSON antigo:** ele não prova compatibilidade com o schema atual.
+
+**O login de importação já existe, sem permissão de entrar.** A migration `operational_pilot_roles` cria `brsteel_pilot_importer` como `NOLOGIN`, associado a `brsteel_ops_importer`, com limite de duas conexões. O importador confere que a sessão é exatamente esse papel e assume `brsteel_ops_importer` com `set local role`. Não crie outro papel. Habilite o login só durante a carga, com senha aleatória e prazo curto:
+
+```sql
+alter role brsteel_pilot_importer login password '<SENHA>' valid until '<PRAZO>';
+```
+
+Ao terminar, mesmo se a carga falhar:
+
+```sql
+alter role brsteel_pilot_importer nologin password null valid until 'epoch';
+select pg_terminate_backend(pid) from pg_stat_activity where usename = 'brsteel_pilot_importer';
+```
+
+O `nologin` não derruba sessões abertas. Depois da carga de 11/11, o Supavisor manteve uma conexão do importador ociosa, e foi preciso encerrá-la. Confira que esta consulta devolve zero: `select count(*) from pg_stat_activity where usename like 'brsteel_pilot%'`.
+
+**O certificado raiz é o "Supabase Root 2021 CA".** Baixe-o pelo painel (Settings → Database → SSL Configuration) ou de `https://supabase-downloads.s3-ap-southeast-1.amazonaws.com/prod/ssl/prod-ca-2021.crt`. Confira a impressão SHA-256: `80:70:25:AD:50:D4:ED:21:9D:2C:9C:7D:29:9C:00:4F:82:4E:B0:0C:F7:F6:5A:FE:F6:07:D0:7B:72:E6:CA:FA`. O pooler apresenta a cadeia completa, mas a raiz que vem do próprio servidor não serve de prova.
+
+Prepare um arquivo privado de ambiente (`0600`, fora do Git):
 
 ```
 BRSTEEL_PG_SOURCE_PROJECT=marketflow-9h4tg
@@ -109,6 +131,8 @@ BRSTEEL_PG_PILOT_IMPORTER_URL=postgres://brsteel_pilot_importer.mmewkphsrnttkzvp
 BRSTEEL_PG_CA_FILE=/caminho/privado/supabase-ca.crt
 GOOGLE_APPLICATION_CREDENTIALS=/caminho/privado/marketflow-service-account.json
 ```
+
+A exportação lê o Firestore com as credenciais padrão do Google. Sem `GOOGLE_APPLICATION_CREDENTIALS`, ela usa o login de `gcloud auth application-default login` de uma conta com leitura em `marketflow-9h4tg`. Antes de exportar, confira que `FIRESTORE_EMULATOR_HOST` não está definido: com ele, a exportação leria o emulador.
 
 Depois:
 
