@@ -119,8 +119,9 @@ export async function importSnapshot(pool: Pool, raw: unknown, options: {
           }
         }
         // Three collections derive their ids the same way on both sides — the annual lot counter, the
-        // SKU key hash and the default column ids — so a snapshot document can land on a row this
-        // application wrote itself. Refuse loudly: letting the snapshot win would walk the lot counter
+        // SKU key hash and the default column ids — and plain-SKU weekly demand rows (a SKU that needs no
+        // sanitizing keeps its own id on both sides) are another such case, so a snapshot document can
+        // land on a row this application wrote itself. Refuse loudly: letting the snapshot win would walk the lot counter
         // backwards and mint duplicate numbers, and there is no merge rule that is obviously right.
         // Resolving a collision is a deliberate act, not something an import should decide.
         const collided = await client.query(
@@ -174,7 +175,7 @@ export async function importSnapshot(pool: Pool, raw: unknown, options: {
       }
       await client.query('delete from brsteel_ops.sales_order_items i using brsteel_ops.sales_orders o where i.order_id=o.source_id and o.source_deleted');
       const compared = await compare(client, snapshot);
-      await client.query("update brsteel_import.runs set status='complete',completed_at=now() where id=$1", [snapshot.hash]);
+      await client.query("update brsteel_import.runs set status='complete',completed_at=greatest(now(),captured_at) where id=$1", [snapshot.hash]);
       await client.query('update brsteel_import.state s set ready=true,completed_at=r.completed_at from brsteel_import.runs r where s.singleton and s.active_run=$1 and r.id=s.active_run', [snapshot.hash]);
       return compared;
     });

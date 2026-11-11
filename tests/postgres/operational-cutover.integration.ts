@@ -34,12 +34,17 @@ const seedNativeRun = () => pool.query(
 before(async () => { assert.equal(process.env.FIRESTORE_EMULATOR_HOST, '127.0.0.1:8188'); });
 after(async () => { await importPool.end(); await pool.end(); await deleteApp(app); });
 
+// Half an hour back: the Node clock can run ahead of the container's `now()`, which stamps completed_at,
+// and the ready_copy_metadata constraint requires captured_at <= completed_at.
+const backdated = <T extends { capturedAt: string }>(snapshot: T): T =>
+  ({ ...snapshot, capturedAt: new Date(Date.now() - 30 * 60 * 1000).toISOString() });
+
 test('the comparator finds every seeded divergence and never invents one', async () => {
   await resetBoth();
   await db.collection('salesOrders').doc('1').set(order(1, 100));
   await db.collection('salesOrders').doc('2').set(order(2, 200));
   await db.collection('supplies').doc('s1').set({ nome: 'Chapa', codigo: 'SKU', estoqueAtual: 5 });
-  await importSnapshot(importPool, await exportOperationalSnapshot(db, PROJECT));
+  await importSnapshot(importPool, await backdated(await exportOperationalSnapshot(db, PROJECT)));
   await seedNativeRun();
 
   // Identical sides: anything reported here would be the comparator inventing a difference.
@@ -69,7 +74,7 @@ test('the comparator finds every seeded divergence and never invents one', async
 test('reconciliation refuses unless the core is blocked, then brings divergence to zero', async () => {
   await resetBoth();
   await db.collection('salesOrders').doc('1').set(order(1, 100));
-  await importSnapshot(importPool, await exportOperationalSnapshot(db, PROJECT));
+  await importSnapshot(importPool, await backdated(await exportOperationalSnapshot(db, PROJECT)));
   await seedNativeRun();
 
   // Changes that happened after the previous load, including a deletion.
@@ -90,4 +95,10 @@ test('reconciliation refuses unless the core is blocked, then brings divergence 
   const after = await compareSources(pool, db, PROJECT);
   assert.deepEqual(after.divergences, [], JSON.stringify(after.divergences));
   assert.deepEqual(after.counts.salesOrders, { source: 2, copy: 2, native: 0 });
+});
+
+test('cutover preflight names the copy tables missing from the target', async () => {
+  const { missingOperationalTables } = await import('../../scripts/lib/cutover-preflight');
+  assert.deepEqual(await missingOperationalTables(pool), []);
+  assert.deepEqual(await missingOperationalTables(pool, ['sales_orders', 'sku_weekly_demand_missing']), ['sku_weekly_demand_missing']);
 });
