@@ -81,8 +81,7 @@ export function createPostgresSalesIngestRepository(pool: Pool): SalesIngestRepo
         const current = (await client.query(
           'select payload from brsteel_ops.stock_observations where source_id = $1 for update', [sku])).rows[0];
         const previous = current?.payload as Doc | undefined;
-        // JSON round-trip: what jsonb stores (NaN becomes null) is what gets hashed; canonicalJson rejects NaN.
-        const payload = JSON.parse(JSON.stringify({ ...previous, ...observation })) as Doc;
+        const payload = { ...previous, ...observation };
         await client.query(
           `insert into brsteel_ops.stock_observations (source_id, payload, source_version, source_hash, import_run_id)
            values ($1, $2, $3, $4, $5)

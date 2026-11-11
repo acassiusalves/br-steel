@@ -620,7 +620,7 @@ test('SQL stock observations append to the history only when the balance changes
   await ingest.applyStockObservation('A', { sku: 'A', estoqueAtual: 5, webhookReceivedAt: '2026-09-01T00:00:00Z', lastEvent: 'stock.updated' });
   await ingest.applyStockObservation('A', { sku: 'A', estoqueAtual: 5, webhookReceivedAt: '2026-09-01T01:00:00Z' });
   await ingest.applyStockObservation('A', { sku: 'A', estoqueAtual: 7, webhookReceivedAt: '2026-09-01T02:00:00Z' });
-  await ingest.applyStockObservation('A', { sku: 'A', estoqueAtual: Number.NaN, webhookReceivedAt: '2026-09-01T03:00:00Z' });
+  await ingest.applyStockObservation('A', { sku: 'A', estoqueAtual: null, webhookReceivedAt: '2026-09-01T03:00:00Z' });
   await ingest.applyStockObservation('A', { sku: 'A', estoqueAtual: 8, webhookReceivedAt: 'quebrado' });
   const rows = (await pool.query(`select payload, import_run_id from brsteel_ops.stock_observation_log
     order by payload->>'observedAt'`)).rows;
