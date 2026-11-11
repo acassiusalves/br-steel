@@ -102,6 +102,7 @@ test('SQL weekly rollup closes weeks, drops stale buckets and serves the series'
   await repository.rollUpPendingWeeks(now, 600_000);
   series = await repository.readWeeklyHistory(104);
   assert.equal(series.get('B'), undefined);
+  assert.equal((await pool.query(`select source_deleted from brsteel_ops.sku_weekly_demand where source_id = 'B'`)).rows[0]?.source_deleted, true);
   assert.deepEqual(series.get('A'), [{ week: '2026-W36', units: 1, orders: 1 }]);
   const native = (await pool.query(`select count(*)::int as n from brsteel_ops.sku_weekly_demand where import_run_id <> $1`, [NATIVE_RUN_ID])).rows[0].n;
   assert.equal(native, 0);
@@ -113,9 +114,17 @@ test('SQL weekly rollup keeps the description, is idempotent and does not rewrit
   await seedOrder(2, '2026-09-01', [{ codigo: 'B', quantidade: 4 }]);
   const repository = createPostgresSkuWeeklyDemandRepository(writerPool);
   await repository.rollUpPendingWeeks(now, 600_000);
+  // Um item sem `descricao` não pode apagar a descrição guardada: grava-se um bucket novo para ele.
+  // O pedido 1 (que trazia 'Ralo') sai; o único bucket novo de A em W35 vem de um item sem descrição.
+  await seedOrder(3, '2026-08-26', [{ codigo: 'A', quantidade: 2 }]);
+  await pool.query(`update brsteel_ops.sales_orders set payload = jsonb_set(payload, '{itens,0}', (payload#>'{itens,0}') - 'descricao') where source_id = '3'`);
+  await cancelOrder(1);
+  await pool.query(`update brsteel_ops.sku_weekly_demand set payload = payload - 'lastClosedWeek'`);
+  await repository.rollUpPendingWeeks(now, 600_000);
   const snapshot = async () => (await pool.query(
     `select source_id, source_version::text as version, payload->>'description' as description
        from brsteel_ops.sku_weekly_demand order by source_id`)).rows;
+  assert.deepEqual((await repository.readWeeklyHistory(104)).get('A'), [{ week: '2026-W35', units: 2, orders: 1 }]);
   const before = await snapshot();
   assert.equal(before[0].description, 'Ralo');
   // Reprocessa só W36 (a marca volta para W35): A não vendeu nela e tem as semanas intactas, então não é regravado.
@@ -124,10 +133,10 @@ test('SQL weekly rollup keeps the description, is idempotent and does not rewrit
   const after = await snapshot();
   assert.equal(after.find(row => row.source_id === 'A')?.version, before.find(row => row.source_id === 'A')?.version);
   assert.equal(after.find(row => row.source_id === 'A')?.description, 'Ralo');
-  assert.deepEqual((await repository.readWeeklyHistory(104)).get('A'), [{ week: '2026-W35', units: 3, orders: 1 }]);
+  assert.deepEqual((await repository.readWeeklyHistory(104)).get('A'), [{ week: '2026-W35', units: 2, orders: 1 }]);
   // Nova execução: só W36 em diante, nada além disso fica pendente.
   const again = await repository.rollUpPendingWeeks(now, 600_000);
-  assert.ok(again.weeks.every(week => week >= '2026-W36'));
+  assert.deepEqual(again.weeks, []);
   assert.equal(again.remaining, 0);
   assert.deepEqual((await repository.readWeeklyHistory(104)).get('B'), [{ week: '2026-W36', units: 4, orders: 1 }]);
 });
@@ -159,4 +168,25 @@ test('SQL weekly rollup stops at the time budget and reports what is left', asyn
   const partial = await repository.rollUpPendingWeeks(now, 0);
   assert.equal(partial.weeks.length, 1);
   assert.ok(partial.remaining > 0);
+});
+
+test('SQL weekly rollup updates an imported row with a sanitized id in place and keeps its run', async () => {
+  await reset();
+  const importRun = 'e'.repeat(64);
+  await pool.query(`insert into brsteel_import.runs (id, source_project, captured_at, status, next_index, total_records, completed_at)
+    values ($1, 'demo-brsteel-auth', now() - interval '2 hours', 'complete', 0, 0, now() - interval '2 hours')`, [importRun]);
+  const imported = { sku: 'CHAPA/10', weeks: { '2026-W30': { units: 7, orders: 2 } }, lastClosedWeek: '2026-W30' };
+  await pool.query(`insert into brsteel_ops.sku_weekly_demand (source_id, payload, source_version, source_hash, import_run_id)
+    values ('CHAPA_10~abcdef123456', $1, 1, $2, $3)`, [JSON.stringify(imported), 'c'.repeat(64), importRun]);
+  await seedOrder(1, '2026-09-01', [{ codigo: 'CHAPA/10', quantidade: 5 }]);
+  const repository = createPostgresSkuWeeklyDemandRepository(writerPool);
+  await repository.rollUpPendingWeeks(now, 600_000);
+  const rows = (await pool.query(`select source_id, import_run_id, payload from brsteel_ops.sku_weekly_demand where not source_deleted`)).rows;
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].source_id, 'CHAPA_10~abcdef123456');
+  assert.equal(rows[0].payload.sku, 'CHAPA/10');
+  assert.equal(rows[0].import_run_id, importRun);
+  const series = await repository.readWeeklyHistory(104);
+  assert.deepEqual([...series.keys()], ['CHAPA/10']);
+  assert.deepEqual(series.get('CHAPA/10'), [{ week: '2026-W30', units: 7, orders: 2 }, { week: '2026-W36', units: 5, orders: 1 }]);
 });

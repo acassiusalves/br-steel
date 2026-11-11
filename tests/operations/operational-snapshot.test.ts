@@ -54,6 +54,7 @@ it.each([
   [{ ...observation, data: { ...observation.data, observedAt: 'ontem' } }],
   [{ ...weekly, data: { ...weekly.data, weeks: { '2026-W35': { units: 'x', orders: 1 } } } }],
   [{ ...weekly, data: { ...weekly.data, weeks: { 'semana': { units: 1, orders: 1 } } } }],
+  [{ ...weekly, data: { ...weekly.data, lastClosedWeek: 'ontem' } }],
 ])('rejects history records the readers could not interpret', record => {
   expect(() => prepareSnapshot(snapshot([record]))).toThrow();
 });

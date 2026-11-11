@@ -69,7 +69,9 @@ export function prepareSnapshot(raw: unknown): PreparedSnapshot {
       if (typeof row.data.sku !== 'string' || !row.data.sku || !weeks || typeof weeks !== 'object' || Array.isArray(weeks)
         || Object.entries(weeks as Record<string, unknown>).some(([week, bucket]) => !/^\d{4}-W\d{2}$/.test(week)
           || !bucket || typeof bucket !== 'object' || !Number.isFinite((bucket as { units?: unknown }).units)
-          || !Number.isInteger((bucket as { orders?: unknown }).orders))) throw new Error(`Invalid weekly demand: ${key}`);
+          || !Number.isInteger((bucket as { orders?: unknown }).orders))
+        || (row.data.lastClosedWeek !== undefined && (typeof row.data.lastClosedWeek !== 'string'
+          || !/^\d{4}-W\d{2}$/.test(row.data.lastClosedWeek)))) throw new Error(`Invalid weekly demand: ${key}`);
     }
   }
   function reference(row: SourceRecord, collection: OperationalCollection, value: unknown) {

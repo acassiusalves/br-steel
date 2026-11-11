@@ -41,9 +41,13 @@ export function createPostgresSkuWeeklyDemandRepository(pool: Pool): SkuWeeklyDe
     await withOperationalWrite(pool, async client => {
       const rows = (await client.query(
         'select source_id, payload from brsteel_ops.sku_weekly_demand where not source_deleted for update')).rows;
-      const stored = new Map(rows.map(row => [row.source_id as string, row.payload as Stored]));
+      // Chaveado pelo SKU verdadeiro: uma linha importada pode ter o id saneado do Firestore
+      // (`CHAPA_10~<hash>`), com o SKU em `payload.sku`. Atualiza-se sempre pela linha existente.
+      const stored = new Map(rows.map(row => [String((row.payload as Stored).sku || row.source_id),
+        { sourceId: row.source_id as string, payload: row.payload as Stored }]));
       for (const sku of new Set([...stored.keys(), ...buckets.keys()])) {
-        const previous = stored.get(sku);
+        const previous = stored.get(sku)?.payload;
+        const sourceId = stored.get(sku)?.sourceId ?? sku;
         const fresh = buckets.get(sku);
         const weeks = { ...(previous?.weeks ?? {}) };
         // Fechamento autoritativo: poda fora da retenção e tira o bucket da semana de quem não vendeu nela.
@@ -52,8 +56,8 @@ export function createPostgresSkuWeeklyDemandRepository(pool: Pool): SkuWeeklyDe
         if (!fresh && previous && Object.keys(weeks).length === Object.keys(previous.weeks ?? {}).length) continue;
         if (!Object.keys(weeks).length) {
           await client.query(
-            `update brsteel_ops.sku_weekly_demand set source_deleted = true, source_version = $2, import_run_id = $3
-             where source_id = $1`, [sku, nativeVersion(), NATIVE_RUN_ID]);
+            `update brsteel_ops.sku_weekly_demand set source_deleted = true, source_version = $2
+             where source_id = $1`, [sourceId, nativeVersion()]);
           continue;
         }
         const payload = serialize({ ...previous, sku, weeks,
@@ -63,8 +67,8 @@ export function createPostgresSkuWeeklyDemandRepository(pool: Pool): SkuWeeklyDe
           `insert into brsteel_ops.sku_weekly_demand (source_id, payload, source_version, source_hash, import_run_id)
            values ($1, $2, $3, $4, $5)
            on conflict (source_id) do update set payload = excluded.payload, source_version = excluded.source_version,
-             source_hash = excluded.source_hash, import_run_id = excluded.import_run_id, source_deleted = false`,
-          [sku, JSON.stringify(payload), nativeVersion(), contentHash(payload), NATIVE_RUN_ID]);
+             source_hash = excluded.source_hash, source_deleted = false`,
+          [sourceId, JSON.stringify(payload), nativeVersion(), contentHash(payload), NATIVE_RUN_ID]);
       }
     });
     cached = null;
@@ -74,9 +78,12 @@ export function createPostgresSkuWeeklyDemandRepository(pool: Pool): SkuWeeklyDe
   return {
     async rollUpPendingWeeks(now = new Date(), budgetMs = ROLLUP_BUDGET_MS): Promise<RollupResult> {
       const startedAt = Date.now();
-      // Sem documento de checkpoint: a semana mais recente gravada serve de marca. Uma semana sem
-      // nenhuma venda não avança a marca e é reprocessada na execução seguinte, o que é inofensivo,
-      // porque o fechamento é idempotente.
+      // Sem documento de checkpoint: a semana mais recente gravada serve de marca. Diferenças residuais
+      // em relação ao Firestore:
+      //  - semanas finais sem nenhuma venda não avançam a marca e são reprocessadas a cada execução
+      //    (inofensivo: o fechamento é idempotente);
+      //  - o documento de checkpoint do Firestore não é levado na migração, então a primeira execução
+      //    depois do corte parte do maior `lastClosedWeek` presente nas linhas.
       const last = (await withOperationalSnapshot(pool, client => client.query(
         `select max(payload->>'lastClosedWeek') as week from brsteel_ops.sku_weekly_demand where not source_deleted`))).rows[0]?.week ?? null;
       const pending = closedWeeksSince(typeof last === 'string' ? last : null, now);
@@ -92,7 +99,7 @@ export function createPostgresSkuWeeklyDemandRepository(pool: Pool): SkuWeeklyDe
     async readWeeklyHistory(weeks: number) {
       if (!cached || Date.now() - cached.at > CACHE_TTL_MS) {
         const rows = (await withOperationalSnapshot(pool, client => client.query(
-          'select source_id, payload from brsteel_ops.sku_weekly_demand where not source_deleted'))).rows;
+          'select source_id, payload from brsteel_ops.sku_weekly_demand where not source_deleted order by source_id'))).rows;
         const series = new Map<string, HistoryPoint[]>();
         for (const row of rows) {
           const stored = ((row.payload as Stored).weeks ?? {});
