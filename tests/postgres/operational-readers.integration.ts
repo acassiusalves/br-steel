@@ -22,6 +22,7 @@ import { withPilotSnapshot } from '../../src/server/persistence/pilot-snapshot';
 import { createPostgresReadTools } from '../../src/server/mcp/postgres-pilot';
 import { prepareSnapshot } from '../../src/server/migration/operational-snapshot';
 import { pagePermissions } from '../../src/lib/permissions';
+import { isoWeekOf, saoPauloDay } from '../../src/lib/iso-week';
 import type { AccessContext } from '../../src/server/access/types';
 
 assert.equal(process.env.FIRESTORE_EMULATOR_HOST,'127.0.0.1:8188');
@@ -125,6 +126,43 @@ test('SQL demand preserves billed quantities, distinct business IDs, first descr
   const fortnight = {from:'2026-09-01',to:'2026-09-14'};
   assert.deepEqual(normalize(await demand.read(fortnight)),normalize(await firestoreProductionDemandReadRepository.read(fortnight)));
   assert.equal((await demand.read(fortnight)).data[0].weeklyAverage,7);
+});
+test('SQL demand serves the weekly series: closed weeks from the rollup plus the open current week', async () => {
+  // Datas relativas a hoje: o ponto aberto depende da semana corrente real.
+  const today = saoPauloDay(new Date()), currentWeek = isoWeekOf(new Date());
+  const runId = (await pool.query('select active_run from brsteel_import.state')).rows[0].active_run as string;
+  const hash = 'b'.repeat(64);
+  const seedWeekly = (sourceId: string, payload: unknown, deleted = false) => pool.query(
+    `insert into brsteel_ops.sku_weekly_demand (source_id,payload,source_version,source_hash,import_run_id,source_deleted)
+     values ($1,$2,1,$3,$4,$5)`, [sourceId,JSON.stringify(payload),hash,runId,deleted]);
+  const orderPayload = { id:9001,numero:9001,data:today,total:10,notaFiscal:{id:1},situacao:{id:9},
+    itens:[{codigo:'HIST_A',quantidade:2,descricao:'Hist A',valor:1},{codigo:'HIST/B',quantidade:4,descricao:'Hist B',valor:1}] };
+  try {
+    await seedWeekly('HIST_A',{ sku:'HIST_A',weeks:{ '2026-W35':{units:3,orders:1},[currentWeek]:{units:99,orders:9} },lastClosedWeek:'2026-W35' });
+    // Id sanitizado (importado do Firestore): a série é do SKU em payload.sku, não do source_id.
+    await seedWeekly('HIST_B~abcdef123456',{ sku:'HIST/B',weeks:{ '2026-W34':{units:5,orders:2} } });
+    await seedWeekly('HIST_GONE',{ sku:'HIST_GONE',weeks:{ '2026-W33':{units:1,orders:1} } },true);
+    await pool.query(`insert into brsteel_ops.sales_orders (source_id,payload,source_version,source_hash,import_run_id) values ('hist-9001',$1,1,$2,$3)`,
+      [JSON.stringify(orderPayload),hash,runId]);
+    for (const [position,itemPayload] of orderPayload.itens.entries()) {
+      await pool.query(`insert into brsteel_ops.sales_order_items (order_id,position,payload) values ('hist-9001',$1,$2)`,[position,JSON.stringify(itemPayload)]);
+    }
+    const response = await demand.read({ from:today,to:today });
+    const a = response.data.find(row=>row.sku==='HIST_A')!;
+    assert.deepEqual(a.history,[{week:'2026-W35',units:3,orders:1},{week:currentWeek,units:2,orders:1,open:true}]);
+    assert.ok(!response.warnings.some(warning=>/série semanal por SKU/.test(warning)));
+    const b = response.data.find(row=>row.sku==='HIST/B')!;
+    assert.deepEqual(b.history,[{week:'2026-W34',units:5,orders:2},{week:currentWeek,units:4,orders:1,open:true}]);
+    assert.ok(!response.data.some(row=>row.sku==='HIST_GONE'));
+    // Período que não alcança a semana corrente: só pontos fechados, sem ponto aberto.
+    const past = await demand.read({ from:'2026-09-01',to:'2026-09-02' });
+    assert.ok(past.data.every(row=>!row.history.some(point=>point.open)));
+    assert.ok(!past.warnings.some(warning=>/série semanal por SKU/.test(warning)));
+  } finally {
+    await pool.query("delete from brsteel_ops.sales_order_items where order_id='hist-9001'");
+    await pool.query("delete from brsteel_ops.sales_orders where source_id='hist-9001'");
+    await pool.query("delete from brsteel_ops.sku_weekly_demand where source_id in ('HIST_A','HIST_B~abcdef123456','HIST_GONE')");
+  }
 });
 test('rejects native timestamp legacies before export can change stock or movement eligibility', async () => {
   const native = new Timestamp(Date.parse('2026-09-12T03:00:00Z')/1000,123456000);
