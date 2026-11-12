@@ -31,7 +31,21 @@ A sequência rodou por um script local que segue o mesmo desenho do retorno: tro
 **Depois da janela:**
 - Os webhooks voltaram a ser processados na hora e gravam no PostgreSQL. Às 12:06, um pedido, a projeção de estoque e uma linha de `stock_observation_log` já tinham versão posterior ao corte.
 - A Vercel não registrou erros de execução.
-- **Os 13 eventos que ficaram na fila durante a janela não foram drenados.** Na produção, 5.550 falhas com tentativas esgotadas vinham na frente na consulta do dreno, que gastava todos os lugares do lote com elas. A correção (PR [#43](https://github.com/acassiusalves/br-steel/pull/43)) drena primeiro as entregas novas e ignora as falhas esgotadas. Os eventos continuaram guardados como `received` até a correção ser publicada.
+- **Os 13 eventos que ficaram na fila durante a janela não foram drenados.** Na produção, 5.550 falhas com tentativas esgotadas vinham na frente na consulta do dreno, que gastava todos os lugares do lote com elas. A correção (PR [#43](https://github.com/acassiusalves/br-steel/pull/43)) drena primeiro as entregas novas e ignora as falhas esgotadas. Os eventos continuaram guardados como `received` até a correção ser publicada. Depois da publicação, os 13 foram aplicados.
+
+**Falha nos webhooks de estoque depois do corte, das 12:04 às 16:00 UTC.**
+- **O que aconteceu:**
+  - 71 avisos de estoque chegaram, de 46 produtos. 57 falharam e 14 foram aplicados.
+  - Os avisos de pedido não falharam: 60 aplicados.
+  - Os erros foram `deadlock detected`, `canceling statement due to statement timeout` e `timeout exceeded when trying to connect`, em rajadas às 12:53, 13:18, 14:25 e 15:22–15:27.
+- **Causa:** `rebuildStockProjection` regravava as cerca de 414 linhas de `stock_observations` uma por uma, numa transação serializável, a cada aviso. Da região da Vercel até o banco, isso levava dezenas de segundos e travava a tabela inteira. Nas rajadas, as transações se bloqueavam e ocupavam as conexões.
+- **Por que os testes não pegaram:** a suíte de integração roda com um banco local, sem latência de rede e sem rajadas.
+- **Correção:** o PR [#44](https://github.com/acassiusalves/br-steel/pull/44) passou a regravar só as linhas que mudaram, numa única instrução. Está na produção desde as 16:00 UTC (`dpl_XWrxotruYxjxWeuf8kYnb1msLkpW`).
+- **Reaplicação dispensada pelo dono do projeto.** O saldo de produto no sistema é só informativo, porque nenhum código envia estoque ao Bling ou aos marketplaces. Por isso os 57 avisos que falharam não foram reaplicados, e o saldo de cada produto se corrige no próximo aviso do Bling. Os avisos continuam na fila como `failed`. O dreno pode tentar algum deles de novo, fora de ordem, o que pode devolver um saldo anterior até a próxima movimentação do produto.
+- **Depois da correção, das 16:01 às 17:22 UTC:** 43 avisos de estoque foram aplicados e 15 falharam. Todos os 15 deram `could not serialize access due to read/write dependencies`, em rajadas de 8 a 10 avisos no mesmo segundo (16:16, 16:45 e 16:48). Cada aviso ainda lê a tabela inteira de estoque numa transação serializável, e as quatro novas tentativas de `withOperationalWrite`, com intervalo de milissegundos, não bastam numa rajada. Uma trava consultiva por sessão, adquirida antes de abrir a transação, poria as gravações de estoque em fila e eliminaria o conflito.
+- **Segue em aberto:**
+  - os conflitos de serialização nas rajadas de estoque, descritos acima;
+  - a busca por falhas a tentar de novo, que continua competindo com as 5.550 falhas esgotadas pela janela de leitura do dreno. Marcar as esgotadas com um status próprio resolveria isso.
 
 **Para voltar ao Firestore,** use a ferramenta de retorno com `BRSTEEL_RETURN_TARGET_PROJECT=marketflow-9h4tg` (ver "Retorno PostgreSQL → Firestore").
 
