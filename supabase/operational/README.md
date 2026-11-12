@@ -93,15 +93,19 @@ Relatórios são criados de forma exclusiva (0600), contêm somente métricas/ha
 
 As fábricas rejeitam `postgres`, outro projeto/banco, parâmetros que alterem TLS e pooler transacional no importador, que depende de lock de sessão. TLS verifica CA e hostname. Os papéis de piloto nascem sem login. Uma execução autorizada deve provisionar senha aleatória/expiração e associação somente a `brsteel_ops_reader` ou `brsteel_ops_importer`.
 
-**A associação do importador precisa de `with inherit true` explícito.** `brsteel_pilot_importer` é criado `noinherit` pela migration, e no PostgreSQL 16+ a herança passou a ser propriedade da **associação**, não do papel: `grant` sem opção copia o atributo do papel, e `alter role ... inherit` **não** corrige uma associação já existente. Sem isso o login conecta normalmente e não enxerga privilégio nenhum — nem `usage` nos schemas — e a importação falha por permissão. `brsteel_pilot_reader` não tem o problema porque a migration o cria `inherit`.
+**O importador funciona sem herança.** `brsteel_pilot_importer` é criado `noinherit` pela migration, e no PostgreSQL 16+ a herança é propriedade da **associação**, não do papel. Sozinho, o login não enxerga privilégio nenhum, nem `usage` nos schemas. Todo código que usa esse login assume o papel numa transação, com `set local role brsteel_ops_importer`:
+- o import, o `verify` e o `reconcile`;
+- o `compare`, desde 12/11/2026;
+- a conferência prévia do ensaio do corte;
+- o retorno.
+
+Isso exige só a opção `set` da associação, que vem por padrão. Não conceda `with inherit true`. A versão anterior deste README pedia essa concessão, mas no projeto atual a associação está com `inherit_option = false`, e a carga de 11/11/2026 e o ensaio do retorno de 12/11/2026 rodaram assim. `brsteel_pilot_reader` nasce `inherit`.
 
 ```sql
-grant brsteel_ops_importer to brsteel_pilot_importer with inherit true;
--- Deve devolver true nas quatro.
-select has_table_privilege('brsteel_pilot_importer','brsteel_ops.sales_orders','insert'),
-       has_table_privilege('brsteel_pilot_importer','brsteel_import.runs','insert'),
-       has_table_privilege('brsteel_pilot_importer','brsteel_import.state','update'),
-       has_schema_privilege('brsteel_pilot_importer','brsteel_ops','usage');
+-- Deve devolver false e true: sem herança, com troca de papel.
+select m.inherit_option, m.set_option from pg_auth_members m
+join pg_roles g on g.oid = m.roleid join pg_roles r on r.oid = m.member
+where r.rolname = 'brsteel_pilot_importer' and g.rolname = 'brsteel_ops_importer';
 ```
 
 Ao terminar, desativar logins, remover senhas, revogar as associações e encerrar as sessões desses dois logins. Se `rolinherit` do importador tiver sido alterado durante o provisionamento, devolvê-lo a `noinherit`. Esse encerramento foi executado **pela metade** no primeiro ensaio: os logins foram desativados, mas as associações permaneceram e o papel de runtime continuou de pé até 15/09/2026. Conferir a lista inteira, não só a ausência de sessão.
