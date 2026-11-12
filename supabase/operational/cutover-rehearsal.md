@@ -42,7 +42,10 @@ A sequência rodou por um script local que segue o mesmo desenho do retorno: tro
 - **Por que os testes não pegaram:** a suíte de integração roda com um banco local, sem latência de rede e sem rajadas.
 - **Correção:** o PR [#44](https://github.com/acassiusalves/br-steel/pull/44) passou a regravar só as linhas que mudaram, numa única instrução. Está na produção desde as 16:00 UTC (`dpl_XWrxotruYxjxWeuf8kYnb1msLkpW`).
 - **Reaplicação dispensada pelo dono do projeto.** O saldo de produto no sistema é só informativo, porque nenhum código envia estoque ao Bling ou aos marketplaces. Por isso os 57 avisos que falharam não foram reaplicados, e o saldo de cada produto se corrige no próximo aviso do Bling. Os avisos continuam na fila como `failed`. O dreno pode tentar algum deles de novo, fora de ordem, o que pode devolver um saldo anterior até a próxima movimentação do produto.
-- **Segue em aberto:** a busca por falhas a tentar de novo continua competindo com as 5.550 falhas esgotadas, que ocupam a janela de leitura do dreno. Marcar as esgotadas com um status próprio resolveria isso.
+- **Depois da correção, das 16:01 às 17:22 UTC:** 43 avisos de estoque foram aplicados e 15 falharam. Todos os 15 deram `could not serialize access due to read/write dependencies`, em rajadas de 8 a 10 avisos no mesmo segundo (16:16, 16:45 e 16:48). Cada aviso ainda lê a tabela inteira de estoque numa transação serializável, e as quatro novas tentativas de `withOperationalWrite`, com intervalo de milissegundos, não bastam numa rajada. Uma trava consultiva por sessão, adquirida antes de abrir a transação, poria as gravações de estoque em fila e eliminaria o conflito.
+- **Segue em aberto:**
+  - os conflitos de serialização nas rajadas de estoque, descritos acima;
+  - a busca por falhas a tentar de novo, que continua competindo com as 5.550 falhas esgotadas pela janela de leitura do dreno. Marcar as esgotadas com um status próprio resolveria isso.
 
 **Para voltar ao Firestore,** use a ferramenta de retorno com `BRSTEEL_RETURN_TARGET_PROJECT=marketflow-9h4tg` (ver "Retorno PostgreSQL → Firestore").
 
