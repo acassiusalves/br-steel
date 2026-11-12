@@ -6,7 +6,34 @@
 
 O código do corte está pronto e testado: interruptor de manutenção, reconciliação, comparador e seletor trocável em runtime. O que falta é provisionamento, que envolve credenciais e por isso é seu.
 
-**Nada aqui toca produção.** O destino é o Supabase `mmewkphsrnttkzvpyddv` e o ambiente é a Vercel de homologação `br-steel-mcp-staging`. A aplicação de produção continua em Firestore o tempo todo — `appConfig/operationalSource` nem existe lá.
+> **A produção foi cortada para o PostgreSQL em 12/11/2026.** Desde as 12:04:36 UTC, `appConfig/operationalSource` em `marketflow-9h4tg` vale `postgres`, e o núcleo operacional da produção lê e grava em `mmewkphsrnttkzvpyddv`. O registro do corte está em "Corte da produção, 12/11/2026", logo abaixo. O texto que segue, escrito para os ensaios, descreve o caminho até ali.
+
+## Corte da produção, 12/11/2026
+
+**Preparação, com o núcleo aberto:**
+- Foi criado o login de runtime da produção, `brsteel_ops_production`:
+  - `login`, `valid until 'infinity'`, `inherit` e `connection limit 20`;
+  - membro de `brsteel_ops_writer` com `inherit true`;
+  - `statement_timeout` de 30 s fixado no papel, porque o pooler descarta o parâmetro de inicialização;
+  - o banco recebeu só o verificador SCRAM, e a senha não passou pelo servidor nem pelos logs.
+- O login de runtime da homologação, `brsteel_ops_runtime`, foi desligado (`nologin`). O banco passou a guardar dados de produção, e a homologação não pode gravar nele. Com a chave ainda em `postgres`, o núcleo da homologação responde 503.
+- `BRSTEEL_OPERATIONAL_DATABASE_URL`, com o pooler de sessão na porta 5432, e `BRSTEEL_OPERATIONAL_CA` foram gravadas como Secret no destino Production de `br-steel`. A produção foi republicada em `dpl_BiH3agdJm7oqTZeLnojhLBxCvcUd`, ainda servindo do Firestore.
+
+**Janela, das 11:53:48 às 12:04:46 UTC (10 min 58 s):**
+1. `draining` por 20 s, depois `blocked` por 10 s.
+2. `reconcile` de 19.040 registros e 15.191 itens, em 568 s.
+3. `compare` com divergência zero.
+4. `operationalSource = postgres`, gravado numa transação que exigia `blocked`.
+5. Espera de 10 s pelo cache do seletor, e então a reabertura.
+
+A sequência rodou por um script local que segue o mesmo desenho do retorno: troca a fonte só com divergência zero e só reabre depois da troca. O login do importador foi aberto pela conexão direta e fechado ao fim.
+
+**Depois da janela:**
+- Os webhooks voltaram a ser processados na hora e gravam no PostgreSQL. Às 12:06, um pedido, a projeção de estoque e uma linha de `stock_observation_log` já tinham versão posterior ao corte.
+- A Vercel não registrou erros de execução.
+- **Os 13 eventos que ficaram na fila durante a janela não foram drenados.** Na produção, 5.550 falhas com tentativas esgotadas vinham na frente na consulta do dreno, que gastava todos os lugares do lote com elas. A correção (PR [#43](https://github.com/acassiusalves/br-steel/pull/43)) drena primeiro as entregas novas e ignora as falhas esgotadas. Os eventos continuaram guardados como `received` até a correção ser publicada.
+
+**Para voltar ao Firestore,** use a ferramenta de retorno com `BRSTEEL_RETURN_TARGET_PROJECT=marketflow-9h4tg` (ver "Retorno PostgreSQL → Firestore").
 
 Guarde credenciais num arquivo privado fora do Git, com permissão `0600`. Nada deste roteiro deve ser colado em chat, issue ou PR.
 
@@ -104,7 +131,12 @@ O papel escritor já cobre leitura **e** escrita do núcleo: conferido em 15/09/
 
 **A primeira carga no projeto atual partiu do zero.** As cópias do piloto (12/09 e 15/09) ficaram no projeto antigo `mlumbvxpaqfzpdjnvzxc` e não foram trazidas: a fonte de verdade é o Firestore. Depois da primeira carga, toda importação nova **reconcilia sobre a cópia existente** em vez de carregar do zero, e a guarda de colisão entre linha nativa e documento de snapshot protege esse caminho.
 
-**Carga de 11/11/2026, conferida.** A exportação foi capturada às 22:21 UTC, com 18.998 registros. O import terminou às 22:37 UTC, depois de 12 minutos pelo pooler em modo sessão, e o `verify` passou. A cópia tem `ready=true` e contém:
+**Recarga do zero em 12/11/2026, conferida.** As gravações de ensaio deixaram a cópia de 11/11 diferente da produção (ver "Retorno PostgreSQL → Firestore"). Por isso ela foi esvaziada como administrador: `truncate` de todas as tabelas de `brsteel_ops`, `delete` de `brsteel_import.state` e das execuções de `brsteel_import.runs`, exceto a sentinela nativa, e `truncate` de `brsteel_write.audit` e `brsteel_write.idempotency`. Depois, uma exportação nova foi importada.
+- A exportação foi capturada às 11:26:32 UTC, com 19.040 registros.
+- O import levou 8 min 36 s pela conexão direta e o `verify` passou. A cópia tem 14.628 pedidos, 3.723 observações de estoque, 54 insumos e auditoria vazia.
+- Logo depois, `npm run cutover -- compare` rodou contra o hospedado com o login do importador sem herança e apontou 12 divergências de conteúdo. São pedidos alterados no Firestore desde a exportação, porque o núcleo estava aberto. A reconciliação dentro da janela do corte resolve esse atraso.
+
+**Carga de 11/11/2026, conferida, substituída pela recarga acima.** A exportação foi capturada às 22:21 UTC, com 18.998 registros. O import terminou às 22:37 UTC, depois de 12 minutos pelo pooler em modo sessão, e o `verify` passou. A cópia tem `ready=true` e contém:
 - 14.603 pedidos e 15.166 itens;
 - 413 registros de estoque atual, 3.706 observações de estoque e 208 semanas de demanda;
 - 54 insumos, 1 movimentação, 3 lotes, 7 itens de lote e 3 colunas de produção.
@@ -294,7 +326,7 @@ A janela dura 40 s mais o tempo do `apply` e do `verify`. Os dois leem as duas b
 - Em seguida, a homologação voltou a ler do PostgreSQL (`operationalSource = postgres`). Nada foi gravado entre o retorno e a volta, então a cópia segue reflexo do `marketflow-9h4tg`. Os 18.790 documentos continuam no Firebase da homologação, sem uso enquanto a fonte for `postgres`.
 - **O Firebase da homologação está no plano gratuito,** com cerca de 20 mil gravações por dia. A cota zera à meia-noite do Pacífico. O ensaio usou quase toda a cota. Uma segunda carga completa no mesmo dia falharia no meio. Como a fonte só muda depois de divergência zero, o ambiente continuaria no PostgreSQL.
 - **Com o login vencido, o pooler não diz que a senha venceu.** Ele responde `unsupported or invalid secret format`, e a conexão direta responde `password authentication failed`. Antes de investigar o pooler, confira `rolvaliduntil > now()`. A conexão direta (`db.mmewkphsrnttkzvpyddv.supabase.co:5432`, usuário sem o sufixo do projeto) também é aceita pelo CLI.
-- Falta o Passo 5: o retorno depois de gravações oficiais. Ele exige gravar pelo site da homologação, com login de usuário, e recarregar a cópia do zero antes do corte da produção.
+- **O Passo 5, o retorno depois de gravações oficiais, foi dispensado pelo dono do projeto em 12/11/2026.** As gravações foram feitas pela camada de escrita da aplicação, com o login de runtime: um insumo criado, um insumo importado editado, um lote importado apagado com seus itens, uma observação de estoque e um pedido de teste. Três delas ficaram em `brsteel_write.audit`. O retorno com essas diferenças não rodou porque a cota diária do Firebase gratuito da homologação se esgotou com o ensaio anterior. Ativar a cobrança foi descartado. Esse caminho segue coberto pela suíte de integração (`tests/postgres/operational-return.integration.ts`). A cópia foi recarregada do zero em seguida (ver Passo 3).
 
 ---
 
@@ -391,7 +423,7 @@ O teste de equivalência entre os adaptadores pagou-se na hora: o SQL filtrava e
 - **Novo corte depois do retorno.** Manter os ids na volta transforma um novo corte numa recusa explícita ("Native row collision") em vez de duplicatas silenciosas. Antes de um novo corte, as linhas nativas de `stock_observation_log` (copiadas de volta) e de `sku_weekly_demand` (recalculadas no Firestore) precisam ser resolvidas explicitamente — por exemplo, removidas da cópia. Sem isso, espere colisão (mesmo id) ou duplicata (`CHAPA_10~hash` ao lado de `CHAPA/10`).
 - **Demanda semanal.** A série se cura no retorno por recomputação: o checkpoint do Firestore fica no valor de antes do corte e o rollup do Firestore recalcula as semanas a partir de `salesOrders`. Este é o caminho reverso pretendido para esta série; não há cópia de volta.
 
-**Nada disto aparece num ensaio.** O ensaio prova que a cópia fica idêntica no instante do bloqueio; ele não exercita a aplicação depois do corte. O que revelaria estes casos é a troca da fonte em homologação, com a aplicação servindo do PostgreSQL. A troca foi feita em 11/11/2026, e as leituras do MCP responderam da cópia. Falta exercitar as telas do site. O retorno sem gravações foi ensaiado em 12/11/2026 (ver "Retorno PostgreSQL → Firestore"). Falta o retorno depois de gravações oficiais.
+**Nada disto aparece num ensaio.** O ensaio prova que a cópia fica idêntica no instante do bloqueio; ele não exercita a aplicação depois do corte. O que revelaria estes casos é a troca da fonte em homologação, com a aplicação servindo do PostgreSQL. A troca foi feita em 11/11/2026, e as leituras do MCP responderam da cópia. Falta exercitar as telas do site. O retorno sem gravações foi ensaiado em 12/11/2026 (ver "Retorno PostgreSQL → Firestore"). O retorno depois de gravações oficiais foi dispensado.
 
 ---
 
