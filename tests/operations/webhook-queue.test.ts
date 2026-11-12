@@ -24,6 +24,21 @@ it('persists before acknowledging and ignores a duplicate id', async () => {
   expect(stored?.payload).toEqual({ id: 1 });
 });
 
+// Production had thousands of exhausted failures sorting ahead of new deliveries: the drain spent every
+// slot reclaiming them and never reached the events queued during the cutover window.
+it('drains new deliveries ahead of exhausted failures and leaves the exhausted ones untouched', async () => {
+  for (const id of ['a-dead-1', 'a-dead-2', 'a-dead-3']) {
+    await adminDb.collection(WEBHOOK_EVENTS).doc(id).set({ status: 'failed', attempts: 5, error: 'old' });
+  }
+  await enqueueWebhookEvent(event('z-new'));
+  const handler = vi.fn().mockResolvedValue(undefined);
+
+  expect(await drainWebhookEvents(2, handler)).toEqual({ processed: 1, failed: 0, suspended: false });
+  expect(handler).toHaveBeenCalledTimes(1);
+  expect((await adminDb.collection(WEBHOOK_EVENTS).doc('z-new').get()).data()).toMatchObject({ status: 'processed' });
+  expect((await adminDb.collection(WEBHOOK_EVENTS).doc('a-dead-1').get()).data()).toMatchObject({ status: 'failed', attempts: 5 });
+});
+
 it('keeps a failed event retryable instead of losing it', async () => {
   await enqueueWebhookEvent(event('e2'));
   const handler = vi.fn().mockRejectedValueOnce(new Error('Bling indisponível')).mockResolvedValueOnce(undefined);
