@@ -238,6 +238,8 @@ Em `operationsMetadata`, só entram os contadores `production-lots-AAAA`, como n
 | `BRSTEEL_CUTOVER_DATABASE_URL` | login `brsteel_pilot_importer` no pooler de sessão (5432), **sem query string** |
 | `BRSTEEL_CUTOVER_CA_FILE` | caminho do certificado raiz |
 
+As leituras do PostgreSQL assumem `brsteel_ops_importer` numa transação somente leitura, como o import e o `verify` da carga. Assim o login do importador serve como a migration o cria, sem herança de privilégios.
+
 O projeto de destino é obrigatório e não tem valor padrão. A gravação usa as credenciais padrão do Google (o login de `gcloud auth application-default login` de uma conta com acesso ao projeto), sem `FIRESTORE_EMULATOR_HOST`. Os comandos imprimem o projeto de destino e a origem da cópia (`brsteel_import.state.source_project`). Quando os dois diferem, imprimem "destino diferente da origem da cópia: ensaio". Na homologação, isso é o esperado: a cópia veio de `marketflow-9h4tg`.
 
 **Comandos:**
@@ -250,16 +252,16 @@ O projeto de destino é obrigatório e não tem valor padrão. A gravação usa 
 - se `appConfig/operationalSource` não for `postgres`. Assim a ferramenta nunca grava num Firestore que ainda é a fonte viva;
 - se `appConfig/coreWriteMode` não for `blocked`. Com o núcleo aberto, a cópia mudaria durante o espelhamento.
 
-**A sequência.** `npm run cutover:return -- --confirm` começa por um pré-voo que não grava nada. Ele confere a identidade no PostgreSQL (o login da sessão, sem superusuário), a fonte `postgres`, a ausência de `appConfig/coreWriteMode` e a cópia com `ready=true`, e imprime o plano. Depois:
+**A sequência.** `npm run cutover:return -- --confirm` começa por um pré-voo que não grava nada. Ele confere a identidade no PostgreSQL (o próprio login, sem superusuário e membro de `brsteel_ops_importer`), a fonte `postgres`, a ausência de `appConfig/coreWriteMode` e a cópia com `ready=true`, e imprime o plano. Depois:
 
-1. grava `draining` e espera 20 s pelas chamadas em trânsito;
+1. cria `draining` e espera 20 s pelas chamadas em trânsito. Se outra execução criou `appConfig/coreWriteMode` depois do pré-voo, o comando aborta e não apaga esse registro;
 2. grava `blocked` e espera 10 s;
 3. roda o `apply`;
 4. roda o `verify`;
 5. com divergência zero, apaga `appConfig/operationalSource` e espera 10 s com o núcleo ainda bloqueado, porque o cache do seletor é de 5 s;
 6. apaga `appConfig/coreWriteMode`, e o núcleo volta a aceitar escritas.
 
-A janela dura 40 s mais o tempo do `apply` e do `verify`. Os dois leem as duas bases inteiras, e o primeiro `apply` de um ambiente também grava a cópia inteira. Meça esse tempo no ensaio. A reabertura está num `finally` e cobre erro, divergência e Ctrl-C, mas não `SIGKILL`. Nesse caso, apague `appConfig/coreWriteMode` à mão.
+A janela dura 40 s mais o tempo do `apply` e do `verify`. Os dois leem as duas bases inteiras, e o primeiro `apply` de um ambiente também grava a cópia inteira. Meça esse tempo no ensaio. A reabertura está num `finally` e cobre erro, divergência e Ctrl-C, mas não `SIGKILL`. Nesse caso, apague `appConfig/coreWriteMode` à mão. Num Ctrl-C durante o `apply`, um lote já enviado ainda pode chegar ao Firestore depois da reabertura. A fonte continua `postgres`, e repetir o retorno corrige o que tiver ficado diferente.
 
 **Com divergência ou erro, a fonte não muda.** O comando reabre o núcleo, e o ambiente continua servindo do PostgreSQL, sem perda. A saída lista até 50 divergências, com coleção, id e tipo, e termina com código 1. Para resolver:
 - rode `npm run cutover:return-tool -- plan` para ver o estado atual;

@@ -16,7 +16,7 @@
  */
 import { returnErrorMessage } from '../src/server/migration/operational-return';
 import { runReturn } from '../src/server/migration/operational-return-run';
-import { RETURN_ENV_HINT, describeReturnTarget, openReturnTarget } from './lib/return-target';
+import { RETURN_ENV_HINT, describeReturnTarget, openReturnTarget, returnIdentityRefusal } from './lib/return-target';
 
 const log = (line: string) => console.log(`${new Date().toISOString()}  ${line}`);
 const wait = (seconds: number) => new Promise<void>(resolve => setTimeout(resolve, seconds * 1000));
@@ -37,21 +37,22 @@ async function main() {
   const modeRef = target.db.collection('appConfig').doc('coreWriteMode');
   try {
     log('=== DESTINO ===');
-    await describeReturnTarget(target, line => log(`  ${line}`));
-    const id = (await target.pool.query(`select current_user actor, session_user login,
-      (select rolsuper from pg_roles where rolname = current_user) superuser`)).rows[0];
-    if (id.actor !== id.login || id.superuser) {
-      log(`ABORTADO: identidade inesperada no PostgreSQL (${id.actor}/${id.login}, superuser=${id.superuser})`);
+    const refusal = await returnIdentityRefusal(target.pool);
+    if (refusal) {
+      log(`ABORTADO: ${refusal}`);
       log('Nada foi gravado.');
       process.exitCode = 1;
       return;
     }
-    log(`  ok  identidade ${id.actor}, superuser=false`);
+    log('  ok  identidade: o próprio login, sem superusuário, membro de brsteel_ops_importer');
+    await describeReturnTarget(target, line => log(`  ${line}`));
 
     // A record that already exists makes runReturn abort; a Ctrl-C must not delete it either.
     const preexisting = (await modeRef.get()).exists;
     for (const signal of ['SIGINT', 'SIGTERM'] as const) {
       process.on(signal, () => {
+        // Known limit: a batch the apply already sent may still land after the core reopens. The apply
+        // is idempotent, and the source stays postgres unless the verify had already passed.
         log(`sinal ${signal}`);
         const reopen = preexisting ? Promise.resolve() : modeRef.delete().then(
           () => log('REABERTO: coreWriteMode removido — o núcleo aceita escritas de novo'),

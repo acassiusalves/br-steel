@@ -1,7 +1,7 @@
 import { applicationDefault, deleteApp, initializeApp } from 'firebase-admin/app';
 import { getFirestore, type Firestore } from 'firebase-admin/firestore';
 import type { Pool } from 'pg';
-import { ReturnError } from '../../src/server/migration/operational-return';
+import { ReturnError, withImporterSnapshot } from '../../src/server/migration/operational-return';
 import { createCutoverPool } from './cutover-pool';
 
 /**
@@ -36,9 +36,25 @@ export function openReturnTarget(connectionString: string, project: string): Ret
   };
 }
 
+/**
+ * A recusa do retorno inteiro, ou `null`. A sessão precisa ser o próprio login, sem superusuário, e
+ * membro de `brsteel_ops_importer`: as leituras assumem esse papel numa transação.
+ */
+export async function returnIdentityRefusal(pool: Pool): Promise<string | null> {
+  const id = (await pool.query(`select current_user actor, session_user login,
+    (select rolsuper from pg_roles where rolname = current_user) superuser,
+    pg_has_role(current_user, 'brsteel_ops_importer', 'member') importer`)).rows[0];
+  if (id.actor !== id.login || id.superuser) {
+    return `identidade inesperada no PostgreSQL (${id.actor}/${id.login}, superuser=${id.superuser}).`;
+  }
+  if (!id.importer) return `o login ${id.login} não é membro de brsteel_ops_importer. Use o login do importador.`;
+  return null;
+}
+
 /** O projeto de destino e a origem da cópia. Quando diferem, o retorno é um ensaio sobre outro Firebase. */
 export async function describeReturnTarget(target: ReturnTarget, print: (line: string) => void) {
-  const copy = (await target.pool.query('select source_project from brsteel_import.state')).rows[0];
+  const copy = await withImporterSnapshot(target.pool, async client =>
+    (await client.query('select source_project from brsteel_import.state')).rows[0]);
   print(`projeto de destino: ${target.project}`);
   print(`origem da cópia: ${copy?.source_project ?? 'nenhuma cópia'}`);
   if (copy?.source_project !== target.project) print('destino diferente da origem da cópia: ensaio');

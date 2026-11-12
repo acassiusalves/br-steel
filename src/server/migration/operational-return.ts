@@ -1,5 +1,5 @@
 import { FieldPath, Timestamp, type DocumentData, type Firestore } from 'firebase-admin/firestore';
-import type { Pool } from 'pg';
+import type { Pool, PoolClient } from 'pg';
 import { parseCoreWriteMode, parseOperationalSource, type CoreWriteMode, type OperationalSource } from '../operations/switch-values';
 import { COLLECTIONS, TABLES, contentHash, type OperationalCollection } from './operational-snapshot';
 import { jsonValue } from './operational-export';
@@ -85,9 +85,34 @@ async function readFirestore(db: Firestore, collection: OperationalCollection) {
   return documents;
 }
 
-async function readPostgres(pool: Pool, collection: OperationalCollection) {
+/**
+ * Runs `read` in one read-only, repeatable-read transaction that assumes the importer role, as the
+ * import and `verifySnapshot` do. The hosted importer login is NOINHERIT and holds no privilege of its
+ * own, and RLS on `brsteel_import.state` admits only the operational roles. The single snapshot also
+ * makes the tables read for one plan agree with each other.
+ */
+export async function withImporterSnapshot<T>(pool: Pool, read: (client: PoolClient) => Promise<T>): Promise<T> {
+  const client = await pool.connect();
+  let broken = false;
+  try {
+    await client.query('begin isolation level repeatable read read only');
+    try {
+      await client.query('set local role brsteel_ops_importer');
+      const value = await read(client);
+      await client.query('commit');
+      return value;
+    } catch (error) {
+      await client.query('rollback').catch(() => { broken = true; });
+      throw error;
+    }
+  } finally {
+    client.release(broken);
+  }
+}
+
+async function readPostgres(client: PoolClient, collection: OperationalCollection) {
   const rows = new Map<string, Record<string, unknown>>();
-  const result = await pool.query(
+  const result = await client.query(
     `select source_id, payload from brsteel_ops.${TABLES[collection]} where not source_deleted order by source_id`);
   for (const row of result.rows) {
     const id = row.source_id as string;
@@ -109,9 +134,16 @@ function digest(side: string, collection: OperationalCollection, id: string, val
  */
 async function computeReturn(pool: Pool, db: Firestore) {
   const changes: ReturnChange[] = [], counts: ReturnCounts = {}, pending: PendingWrite[] = [];
+  // The whole copy is read first, in one snapshot. Firestore is paged afterwards, outside the
+  // transaction, so the importer's idle-in-transaction timeout never runs during that paging.
+  const copy = await withImporterSnapshot(pool, async client => {
+    const tables = new Map<OperationalCollection, Map<string, Record<string, unknown>>>();
+    for (const collection of RETURN_COLLECTIONS) tables.set(collection, await readPostgres(client, collection));
+    return tables;
+  });
   for (const collection of RETURN_COLLECTIONS) {
     const firestore = await readFirestore(db, collection);
-    const postgres = await readPostgres(pool, collection);
+    const postgres = copy.get(collection)!;
     const tally = { postgres: postgres.size, firestore: firestore.size, create: 0, update: 0, delete: 0 };
     const add = (write: PendingWrite) => { changes.push(write.change); pending.push(write); tally[write.change.kind]++; };
     for (const [id, payload] of postgres) {

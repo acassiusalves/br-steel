@@ -1,6 +1,6 @@
 import type { Firestore } from 'firebase-admin/firestore';
 import type { Pool } from 'pg';
-import { applyReturn, planReturn, readSwitches, returnErrorMessage, verifyReturn,
+import { applyReturn, planReturn, readSwitches, returnErrorMessage, verifyReturn, withImporterSnapshot,
   type ReturnChange, type ReturnCounts, type ReturnPlan } from './operational-return';
 
 export type ReturnRunOutcome = {
@@ -25,11 +25,16 @@ export function describeChanges(changes: ReturnChange[]): string[] {
   return lines;
 }
 
+/** The gRPC status Firestore returns when `create` finds the document already there. */
+const ALREADY_EXISTS = 6;
+
 /**
- * The whole return in one window. The pre-flight writes nothing; from `draining` on, the core is
- * reopened in a `finally`. The source goes back to Firestore only after a verification with zero
- * divergences, so a divergence or a failure leaves the environment serving from PostgreSQL, where
- * nothing is lost, and the return is resolved by running it again.
+ * The whole return in one window. The pre-flight writes nothing, and every PostgreSQL read assumes the
+ * importer role inside a transaction (`withImporterSnapshot`). The window opens by *creating* the
+ * maintenance record, so a window someone else opened after the pre-flight aborts the return and is
+ * left alone; from then on, the core is reopened in a `finally`. The source goes back to Firestore only
+ * after a verification with zero divergences, so a divergence or a failure leaves the environment
+ * serving from PostgreSQL, where nothing is lost, and the return is resolved by running it again.
  */
 export async function runReturn({ pool, db, wait, log }: {
   pool: Pool; db: Firestore; wait: (seconds: number) => Promise<void>; log: (line: string) => void;
@@ -53,7 +58,7 @@ export async function runReturn({ pool, db, wait, log }: {
       return abort('appConfig/coreWriteMode já existe; uma execução anterior pode ter deixado o núcleo travado.');
     }
     log('  ok  coreWriteMode ausente');
-    const copy = (await pool.query('select ready from brsteel_import.state')).rows[0];
+    const copy = await withImporterSnapshot(pool, async client => (await client.query('select ready from brsteel_import.state')).rows[0]);
     if (copy?.ready !== true) return abort('a cópia não está pronta (ready=false).');
     log('  ok  cópia pronta');
     plan = await planReturn(pool, db);
@@ -64,12 +69,19 @@ export async function runReturn({ pool, db, wait, log }: {
   for (const line of [...describeCounts(plan.counts), ...describeChanges(plan.changes)]) log(`    ${line}`);
   log('PRÉ-VOO APROVADO — a partir daqui as escritas do núcleo são afetadas');
 
-  const setMode = (mode: 'draining' | 'blocked') => modeRef.set({ mode, updatedAt: new Date().toISOString() });
+  const record = (mode: 'draining' | 'blocked') => ({ mode, updatedAt: new Date().toISOString() });
+  let opened = true;
   try {
-    await setMode('draining');
+    try {
+      await modeRef.create(record('draining'));
+    } catch (error) {
+      if ((error as { code?: unknown } | null)?.code !== ALREADY_EXISTS) throw error;
+      opened = false;
+      return abort('appConfig/coreWriteMode foi criado por outra execução depois do pré-voo.');
+    }
     log('1/5 draining — aguardando as chamadas em trânsito (20 s)');
     await wait(20);
-    await setMode('blocked');
+    await modeRef.set(record('blocked'));
     log('2/5 blocked — escritas do núcleo recusadas a partir de agora (10 s)');
     await wait(10);
 
@@ -95,12 +107,15 @@ export async function runReturn({ pool, db, wait, log }: {
     log(`ERRO: ${reason}`);
     return { status: 'failed', reason };
   } finally {
-    // The pre-flight saw no record, so deleting it restores the state found, whatever got written.
-    try {
-      await modeRef.delete();
-      log('REABERTO: coreWriteMode removido — o núcleo aceita escritas de novo');
-    } catch (error) {
-      log(`FALHA AO REABRIR: ${returnErrorMessage(error)} Apague appConfig/coreWriteMode à mão.`);
+    // Unless another window owns the record, the pre-flight saw none: deleting it restores the state
+    // found, even when the outcome of the create itself is unknown.
+    if (opened) {
+      try {
+        await modeRef.delete();
+        log('REABERTO: coreWriteMode removido — o núcleo aceita escritas de novo');
+      } catch (error) {
+        log(`FALHA AO REABRIR: ${returnErrorMessage(error)} Apague appConfig/coreWriteMode à mão.`);
+      }
     }
   }
 }

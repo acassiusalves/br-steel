@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { randomBytes } from 'node:crypto';
 import { after, before, test } from 'node:test';
 import { Pool } from 'pg';
 import { initializeApp, deleteApp } from 'firebase-admin/app';
@@ -10,11 +11,25 @@ import { exportOperationalSnapshot, jsonValue } from '../../src/server/migration
 import { RETURN_COLLECTIONS, applyReturn, planReturn, returnBatches, timestampFromIso, verifyReturn,
   type ReturnPlan } from '../../src/server/migration/operational-return';
 import { runReturn } from '../../src/server/migration/operational-return-run';
+import { describeReturnTarget, returnIdentityRefusal } from '../../scripts/lib/return-target';
 
 const url = process.env.BRSTEEL_PG_LOCAL_URL;
 assert.ok(url, 'Run through scripts/operational-postgres-local.mjs');
 const pool = new Pool({ connectionString: url, max: 2 });
 const importPool = createLocalImportPool(url);
+/**
+ * The hosted return runs as `brsteel_pilot_importer`, which is NOINHERIT and holds no privilege of its own.
+ * Its login is enabled only for this file, with a throwaway password, and disabled again in `after`.
+ */
+const PILOT_PASSWORD = randomBytes(18).toString('hex');
+const pilotPool = (role: string) => {
+  const login = new URL(url);
+  login.username = role;
+  login.password = PILOT_PASSWORD;
+  return new Pool({ connectionString: login.toString(), max: 1 });
+};
+const PILOT_ROLES = ['brsteel_pilot_importer', 'brsteel_pilot_reader'];
+let importerLogin: Pool, readerLogin: Pool;
 const app = initializeApp({ projectId: 'demo-brsteel-auth' }, 'return-integration');
 const db = getFirestore(app);
 const PROJECT = 'demo-brsteel-auth';
@@ -49,10 +64,18 @@ const setSwitches = async (source: string | null, mode: string | null) => {
   await (mode === null ? config.doc('coreWriteMode').delete() : config.doc('coreWriteMode').set({ mode }));
 };
 
-before(async () => { assert.equal(process.env.FIRESTORE_EMULATOR_HOST, '127.0.0.1:8188'); });
+before(async () => {
+  assert.equal(process.env.FIRESTORE_EMULATOR_HOST, '127.0.0.1:8188');
+  for (const role of PILOT_ROLES) await pool.query(`alter role ${role} login password '${PILOT_PASSWORD}'`);
+  importerLogin = pilotPool('brsteel_pilot_importer');
+  readerLogin = pilotPool('brsteel_pilot_reader');
+});
 after(async () => {
   // The files share the emulator, and a later one would read a blocked core served from PostgreSQL.
   await setSwitches(null, null);
+  await importerLogin.end(); await readerLogin.end();
+  // Pilot logins start disabled, and a later file asserts it.
+  for (const role of PILOT_ROLES) await pool.query(`alter role ${role} nologin password null`);
   await importPool.end(); await pool.end(); await deleteApp(app);
 });
 
@@ -269,16 +292,30 @@ function recorder() {
   return { waits, states, lines, wait, log: (line: string) => { lines.push(line); } };
 }
 
+/** `target` with some members replaced; everything else is forwarded, bound to the real object. */
+const forward = <T extends object>(target: T, overrides: object) => new Proxy(target, {
+  get(object, property) {
+    if (Object.prototype.hasOwnProperty.call(overrides, property)) return Reflect.get(overrides, property);
+    const value = Reflect.get(object, property, object);
+    return typeof value === 'function' ? value.bind(object) : value;
+  },
+});
+
 /** The real database, except that every batch goes through `wrap`; reads and the appConfig records are untouched. */
 function withBatches(real: Firestore, wrap: (batch: WriteBatch) => object): Firestore {
-  const forward = <T extends object>(target: T, overrides: object) => new Proxy(target, {
-    get(object, property) {
-      if (Object.prototype.hasOwnProperty.call(overrides, property)) return Reflect.get(overrides, property);
-      const value = Reflect.get(object, property, object);
-      return typeof value === 'function' ? value.bind(object) : value;
-    },
-  });
   return forward(real, { batch: () => { const batch = real.batch(); return forward(batch, wrap(batch)); } });
+}
+
+/** The real database, except that another window writes `coreWriteMode` just before the return creates it. */
+function withRacingWindow(real: Firestore, seeded: DocumentData): Firestore {
+  return forward(real, { collection: (name: string) => {
+    const collection = real.collection(name);
+    return name !== 'appConfig' ? collection : forward(collection, { doc: (id: string) => {
+      const ref = collection.doc(id);
+      return id !== 'coreWriteMode' ? ref
+        : forward(ref, { create: async (data: DocumentData) => { await ref.set(seeded); return ref.create(data); } });
+    } });
+  } });
 }
 
 test('the automated return mirrors PostgreSQL, switches the source back and reopens the core', async () => {
@@ -386,4 +423,49 @@ test('a divergence after the apply keeps the source on PostgreSQL, names the doc
   assert.ok(run.lines.some(line => line.includes(`${dropped}: create`)));
   assert.deepEqual(run.waits, [20, 10]);
   assert.deepEqual(await switchRecords(), { source: { source: 'postgres' }, mode: undefined });
+});
+
+test('a window opened by someone else after the pre-flight aborts the return and is left in place', async () => {
+  await seedScenario();
+  await setSwitches('postgres', null);
+  const seeded = { mode: 'blocked', updatedAt: '2026-11-11T10:00:00.000Z' };
+  const run = recorder();
+
+  const outcome = await runReturn({ pool, db: withRacingWindow(db, seeded), wait: run.wait, log: run.log });
+  assert.equal(outcome.status, 'aborted');
+  assert.match(outcome.reason!, /coreWriteMode/);
+  assert.deepEqual(run.waits, []);
+  assert.deepEqual(await switchRecords(), { source: { source: 'postgres' }, mode: seeded });
+});
+
+test('the plan and the whole return work through the NOINHERIT importer login', async () => {
+  await seedScenario();
+  const identity = (await importerLogin.query(`select session_user::text login,
+    pg_has_role(session_user, 'brsteel_ops_importer', 'usage') inherited`)).rows[0];
+  assert.deepEqual(identity, { login: 'brsteel_pilot_importer', inherited: false }, 'the login holds no privilege of its own');
+  assert.deepEqual(listed(await planReturn(importerLogin, db)), EXPECTED_CHANGES);
+
+  await setSwitches('postgres', null);
+  const run = recorder();
+  const outcome = await runReturn({ pool: importerLogin, db, wait: run.wait, log: run.log });
+  assert.equal(outcome.status, 'returned', outcome.reason);
+  assert.deepEqual((await verifyReturn(importerLogin, db)).changes, []);
+});
+
+test('the CLI reads the copy origin through the importer login', async () => {
+  await seedScenario();
+  const describe = async (project: string) => {
+    const lines: string[] = [];
+    await describeReturnTarget({ project, db, pool: importerLogin, close: async () => undefined }, line => { lines.push(line); });
+    return lines;
+  };
+  assert.deepEqual(await describe(PROJECT), [`projeto de destino: ${PROJECT}`, `origem da cópia: ${PROJECT}`]);
+  assert.deepEqual(await describe('demo-outro'),
+    ['projeto de destino: demo-outro', `origem da cópia: ${PROJECT}`, 'destino diferente da origem da cópia: ensaio']);
+});
+
+test('the CLI identity check accepts only the importer login itself', async () => {
+  assert.equal(await returnIdentityRefusal(importerLogin), null);
+  assert.match((await returnIdentityRefusal(pool))!, /superuser=true/);
+  assert.match((await returnIdentityRefusal(readerLogin))!, /brsteel_pilot_reader não é membro de brsteel_ops_importer/);
 });
