@@ -5,6 +5,7 @@ import { readCoreWriteMode } from '@/server/operations/maintenance';
 import { COLLECTIONS, NATIVE_RUN_ID, TABLES, contentHash, type OperationalCollection } from './operational-snapshot';
 import { exportOperationalSnapshot } from './operational-export';
 import { importSnapshot } from './operational-import';
+import { withImporterSnapshot } from './operational-return';
 
 export type DivergenceKind = 'missing-in-copy' | 'missing-in-source' | 'content';
 export type Divergence = { collection: OperationalCollection; id: string; kind: DivergenceKind };
@@ -21,12 +22,21 @@ export async function compareSources(pool: Pool, db: Firestore, sourceProject: s
   const snapshot = await exportOperationalSnapshot(db, sourceProject);
   const divergences: Divergence[] = [];
   const counts: ComparisonCounts = {};
+  // One read-only snapshot under the importer role: the hosted importer login is NOINHERIT and holds no
+  // privilege of its own, and a single transaction keeps the tables consistent with each other.
+  const copyRows = await withImporterSnapshot(pool, async client => {
+    const byCollection = new Map<OperationalCollection, { source_id: string; payload: unknown; import_run_id: string }[]>();
+    for (const collection of COLLECTIONS) {
+      byCollection.set(collection, (await client.query(
+        `select source_id, payload, import_run_id from brsteel_ops.${TABLES[collection]} where not source_deleted`)).rows);
+    }
+    return byCollection;
+  });
 
   for (const collection of COLLECTIONS) {
     const source = new Map(snapshot.records.filter(record => record.collection === collection)
       .map(record => [record.id, record.data]));
-    const rows = (await pool.query(
-      `select source_id, payload, import_run_id from brsteel_ops.${TABLES[collection]} where not source_deleted`)).rows;
+    const rows = copyRows.get(collection) ?? [];
     const copy = new Map<string, unknown>();
     let native = 0;
     for (const row of rows) {

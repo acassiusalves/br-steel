@@ -28,6 +28,7 @@
 import { getApps, initializeApp } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
 import { reconcileFromFirestore, compareSources } from '../src/server/migration/operational-reconcile';
+import { withImporterSnapshot } from '../src/server/migration/operational-return';
 import { resetCoreWriteModeCache } from '../src/server/operations/maintenance';
 import { createCutoverPool } from './lib/cutover-pool';
 import { HISTORY_MIGRATION, missingOperationalTables } from './lib/cutover-preflight';
@@ -77,7 +78,9 @@ async function main() {
     }
     log('  ok  todas as tabelas da cópia existem em brsteel_ops');
 
-    const copia = (await pool.query('select ready, captured_at, source_project from brsteel_import.state')).rows[0];
+    // Under the importer role: the hosted importer login is NOINHERIT, and the state table has RLS.
+    const copia = await withImporterSnapshot(pool, async client =>
+      (await client.query('select ready, captured_at, source_project from brsteel_import.state')).rows[0]);
     if (!copia?.ready) { log('ABORTADO: a cópia não está pronta (ready=false)'); return; }
     if (copia.source_project !== sourceProject) {
       log(`ABORTADO: cópia é de ${copia.source_project}, não de ${sourceProject}`); return;

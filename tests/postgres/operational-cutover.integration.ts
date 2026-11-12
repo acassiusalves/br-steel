@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { randomBytes } from 'node:crypto';
 import { after, before, test } from 'node:test';
 import { Pool } from 'pg';
 import { initializeApp, deleteApp } from 'firebase-admin/app';
@@ -95,6 +96,29 @@ test('reconciliation refuses unless the core is blocked, then brings divergence 
   const after = await compareSources(pool, db, PROJECT);
   assert.deepEqual(after.divergences, [], JSON.stringify(after.divergences));
   assert.deepEqual(after.counts.salesOrders, { source: 2, copy: 2, native: 0 });
+});
+
+// The hosted cutover runs as `brsteel_pilot_importer`, which is NOINHERIT and holds no privilege of its
+// own: a comparator reading the copy with plain queries would be refused there while passing here.
+test('the comparator reads the copy through the NOINHERIT importer login', async () => {
+  await resetBoth();
+  await db.collection('salesOrders').doc('1').set(order(1, 100));
+  await importSnapshot(importPool, await backdated(await exportOperationalSnapshot(db, PROJECT)));
+  const password = randomBytes(18).toString('hex');
+  const login = new URL(url!);
+  login.username = 'brsteel_pilot_importer';
+  login.password = password;
+  await pool.query(`alter role brsteel_pilot_importer login password '${password}'`);
+  const importer = new Pool({ connectionString: login.toString(), max: 1 });
+  try {
+    const result = await compareSources(importer, db, PROJECT);
+    assert.deepEqual(result.divergences, [], JSON.stringify(result.divergences));
+    assert.deepEqual(result.counts.salesOrders, { source: 1, copy: 1, native: 0 });
+  } finally {
+    await importer.end();
+    // Pilot logins start disabled, and a later file asserts it.
+    await pool.query('alter role brsteel_pilot_importer nologin password null');
+  }
 });
 
 test('cutover preflight names the copy tables missing from the target', async () => {
