@@ -40,6 +40,9 @@ async function rebuildItems(client: PoolClient, orderId: string, payload: Doc) {
  * sku_order is a position in the locale ordering of every SKU, so a new observation shifts the others.
  * The whole projection is rebuilt inside the same transaction rather than guessing an insertion point.
  */
+/** Advisory lock key that queues stock observation writes; any constant unused elsewhere in the database. */
+const STOCK_PROJECTION_LOCK = 730_201;
+
 /**
  * Recomputes the read projection and writes back only the rows whose values changed, in one statement.
  * Rewriting every row one statement at a time held row locks on the whole table for tens of seconds per
@@ -118,7 +121,9 @@ export function createPostgresSalesIngestRepository(pool: Pool): SalesIngestRepo
             [randomUUID(), JSON.stringify(entry), nativeVersion(), contentHash(entry), NATIVE_RUN_ID]);
         }
         await rebuildStockProjection(client);
-      });
+      // Every observation reads the whole projection, so concurrent ones conflict under serializable
+      // isolation. Bling sends them in bursts: queue them on one lock instead of failing with 40001.
+      }, { serializeOn: STOCK_PROJECTION_LOCK });
     },
 
     async markOrderDeleted(orderId: string, at: string) {
