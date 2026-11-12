@@ -16,8 +16,21 @@ export type ReturnPlan = { changes: ReturnChange[]; counts: ReturnCounts };
 
 type PendingWrite = { change: ReturnChange; payload?: Record<string, unknown>; current?: DocumentData };
 
+/**
+ * A message written for the operator, in Portuguese, that names collections and ids but never content.
+ * Only these are shown; an error from the driver or the SDK may carry a query, a host or a document.
+ */
+export class ReturnError extends Error {}
+
+export function returnErrorMessage(error: unknown): string {
+  return error instanceof ReturnError ? error.message
+    : 'Falha no driver ou no SDK. O detalhe foi omitido para não expor consultas ou dados.';
+}
+
 const PAGE_SIZE = 500;
-const BATCH_LIMIT = 400;
+const BATCH_OPERATIONS = 400;
+/** Well under the 10 MiB request limit, measured on the serialized payloads. */
+const BATCH_BYTES = 4_000_000;
 const ISO_INSTANT = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.(\d{1,9}))?Z$/;
 
 /** Same domain as the export: only the annual lot counters of `operationsMetadata` belong to the core. */
@@ -41,13 +54,14 @@ export function timestampFromIso(value: string): Timestamp | null {
 }
 
 /**
- * Only a string the export would have produced from that very Timestamp is turned back into one;
- * anything else would never compare equal again and the return could not converge.
+ * Only a string the export would have produced from that very Timestamp, and that Firestore can store
+ * exactly, is turned back into one. Firestore keeps microseconds, so `.123456789Z` would be stored as
+ * `.123456000Z`; that, or any other string, would never compare equal again and the return could not converge.
  */
 function restoredTimestamp(value: unknown): Timestamp | null {
   if (typeof value !== 'string') return null;
   const timestamp = timestampFromIso(value);
-  return timestamp && jsonValue(timestamp) === value ? timestamp : null;
+  return timestamp && timestamp.nanoseconds % 1000 === 0 && jsonValue(timestamp) === value ? timestamp : null;
 }
 
 /** Reads the switches from the target itself, uncached: the return must never act on a stale value. */
@@ -77,7 +91,7 @@ async function readPostgres(pool: Pool, collection: OperationalCollection) {
     `select source_id, payload from brsteel_ops.${TABLES[collection]} where not source_deleted order by source_id`);
   for (const row of result.rows) {
     const id = row.source_id as string;
-    if (!validId(id)) throw new Error(`Identificador inválido no PostgreSQL: ${collection}/${id}.`);
+    if (!validId(id)) throw new ReturnError(`Identificador inválido no PostgreSQL: ${collection}/${id}.`);
     if (inDomain(collection, id)) rows.set(id, row.payload as Record<string, unknown>);
   }
   return rows;
@@ -86,7 +100,7 @@ async function readPostgres(pool: Pool, collection: OperationalCollection) {
 /** Messages name the document and never its content: the repository and its logs are public. */
 function digest(side: string, collection: OperationalCollection, id: string, value: () => unknown) {
   try { return contentHash(value()); }
-  catch { throw new Error(`Documento não comparável no ${side}: ${collection}/${id}.`); }
+  catch { throw new ReturnError(`Documento não comparável no ${side}: ${collection}/${id}.`); }
 }
 
 /**
@@ -131,15 +145,38 @@ function documentFor({ change, payload, current }: PendingWrite): Record<string,
   return document;
 }
 
+/**
+ * Groups writes into batches of at most 400 operations, starting a new batch before a write that would
+ * take the current one past 4,000,000 bytes. A single write above that still goes, alone.
+ */
+export function returnBatches<T>(writes: readonly T[], bytesOf: (write: T) => number): T[][] {
+  const batches: T[][] = [];
+  let current: T[] = [], bytes = 0;
+  for (const write of writes) {
+    const size = bytesOf(write);
+    if (current.length && (current.length === BATCH_OPERATIONS || bytes + size > BATCH_BYTES)) {
+      batches.push(current);
+      current = [];
+      bytes = 0;
+    }
+    current.push(write);
+    bytes += size;
+  }
+  if (current.length) batches.push(current);
+  return batches;
+}
+
+const payloadBytes = (write: PendingWrite) => write.payload ? Buffer.byteLength(JSON.stringify(write.payload)) : 0;
+
 async function writeReturn(db: Firestore, pending: PendingWrite[]) {
-  for (let offset = 0; offset < pending.length; offset += BATCH_LIMIT) {
+  for (const writes of returnBatches(pending, payloadBytes)) {
     const batch = db.batch();
-    for (const write of pending.slice(offset, offset + BATCH_LIMIT)) {
+    for (const write of writes) {
       const { collection, id, kind } = write.change;
       const ref = db.collection(collection).doc(id);
       if (kind === 'delete') { batch.delete(ref); continue; }
       try { batch.set(ref, documentFor(write)); }
-      catch { throw new Error(`Documento recusado pelo Firestore: ${collection}/${id}.`); }
+      catch { throw new ReturnError(`Documento recusado pelo Firestore: ${collection}/${id}.`); }
     }
     await batch.commit();
   }
@@ -158,8 +195,8 @@ export async function planReturn(pool: Pool, db: Firestore): Promise<ReturnPlan>
  */
 export async function applyReturn(pool: Pool, db: Firestore): Promise<ReturnPlan> {
   const { source, mode } = await readSwitches(db);
-  if (source !== 'postgres') throw new Error(`O retorno só grava num Firestore cuja fonte ativa é postgres; a fonte é ${source}.`);
-  if (mode !== 'blocked') throw new Error(`O retorno exige o núcleo bloqueado; o modo é ${mode}.`);
+  if (source !== 'postgres') throw new ReturnError(`O retorno só grava num Firestore cuja fonte ativa é postgres; a fonte é ${source}.`);
+  if (mode !== 'blocked') throw new ReturnError(`O retorno exige o núcleo bloqueado; o modo é ${mode}.`);
   const { plan, pending } = await computeReturn(pool, db);
   await writeReturn(db, pending);
   return plan;

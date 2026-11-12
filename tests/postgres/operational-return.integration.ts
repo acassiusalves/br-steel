@@ -2,12 +2,14 @@ import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
 import { Pool } from 'pg';
 import { initializeApp, deleteApp } from 'firebase-admin/app';
-import { getFirestore, Timestamp, type DocumentReference } from 'firebase-admin/firestore';
+import { getFirestore, Timestamp, type DocumentData, type DocumentReference, type Firestore,
+  type WriteBatch } from 'firebase-admin/firestore';
 import { NATIVE_RUN_ID, contentHash } from '../../src/server/migration/operational-snapshot';
 import { createLocalImportPool, importSnapshot } from '../../src/server/migration/operational-import';
 import { exportOperationalSnapshot, jsonValue } from '../../src/server/migration/operational-export';
-import { RETURN_COLLECTIONS, applyReturn, planReturn, timestampFromIso, verifyReturn,
+import { RETURN_COLLECTIONS, applyReturn, planReturn, returnBatches, timestampFromIso, verifyReturn,
   type ReturnPlan } from '../../src/server/migration/operational-return';
+import { runReturn } from '../../src/server/migration/operational-return-run';
 
 const url = process.env.BRSTEEL_PG_LOCAL_URL;
 assert.ok(url, 'Run through scripts/operational-postgres-local.mjs');
@@ -181,6 +183,31 @@ test('after a complete apply the verification is clean and repeating changes not
   assert.deepEqual((await applyReturn(pool, db)).changes, []);
 });
 
+test('writes are split at 400 operations and before a batch would pass 4,000,000 bytes', () => {
+  const lengths = (batches: number[][]) => batches.map(batch => batch.length);
+  assert.deepEqual(lengths(returnBatches(Array<number>(801).fill(0), size => size)), [400, 400, 1]);
+  assert.deepEqual(returnBatches([3_000_000, 1_000_000, 1], size => size), [[3_000_000, 1_000_000], [1]]);
+  // A write larger than the cap still goes, alone, so Firestore is the one to judge it.
+  assert.deepEqual(returnBatches([1, 4_500_000, 1], size => size), [[1], [4_500_000], [1]]);
+  assert.deepEqual(returnBatches([], size => size), []);
+});
+
+test('an apply larger than one batch converges', async () => {
+  await seedScenario();
+  const bulk = Array.from({ length: 401 }, (_, index) => ({ id: `bulk-${String(index).padStart(3, '0')}`,
+    payload: { nome: 'Lote', codigo: `BULK-${index}`, estoqueAtual: index } }));
+  await pool.query(`insert into brsteel_ops.supplies (source_id, payload, source_version, source_hash, import_run_id, lookup_sku)
+    select id, payload, 1, hash, $5, sku from unnest($1::text[], $2::jsonb[], $3::text[], $4::text[]) as row(id, payload, hash, sku)`,
+  [bulk.map(row => row.id), bulk.map(row => JSON.stringify(row.payload)), bulk.map(row => contentHash(row.payload)),
+    bulk.map(row => row.payload.codigo), NATIVE_RUN_ID]);
+  await setSwitches('postgres', 'blocked');
+
+  const applied = await applyReturn(pool, db);
+  assert.equal(applied.changes.length, EXPECTED_CHANGES.length + bulk.length);
+  assert.deepEqual((await verifyReturn(pool, db)).changes, []);
+  assert.equal((await db.collection('supplies').get()).size, 2 + bulk.length);
+});
+
 test('a document that cannot be compared is named by collection and id only', async () => {
   await seedScenario();
   await db.collection('supplies').doc('s1').set({ nome: 'segredo-do-cliente', codigo: 'SKU', estoqueAtual: Number.NaN });
@@ -191,15 +218,24 @@ test('a document that cannot be compared is named by collection and id only', as
   });
 });
 
-test('a timestamp string the export would never produce stays a string so the return converges', async () => {
+test('a timestamp string Firestore could not store exactly stays a string so the return converges', async () => {
   await seedScenario();
-  const id = '7a2d3b5f-9c4e-4d6f-8a1b-2c3d4e5f6a70';
-  const observation = { ...nativeObservation, expiresAt: '2028-11-11T12:00:00Z' };
-  await pool.query(`insert into brsteel_ops.stock_observation_log (source_id, payload, source_version, source_hash, import_run_id)
-    values ($1, $2, 1, $3, $4)`, [id, JSON.stringify(observation), contentHash(observation), NATIVE_RUN_ID]);
+  const strings = {
+    // The export never writes a whole second without its fraction.
+    '7a2d3b5f-9c4e-4d6f-8a1b-2c3d4e5f6a70': '2028-11-11T12:00:00Z',
+    // Canonical, but Firestore keeps microseconds and would store .123456000Z.
+    '8b3e4c6a-0d5f-4e7a-9b2c-3d4e5f6a7b81': '2028-11-11T12:00:00.123456789Z',
+  };
+  for (const [id, expiresAt] of Object.entries(strings)) {
+    const observation = { ...nativeObservation, expiresAt };
+    await pool.query(`insert into brsteel_ops.stock_observation_log (source_id, payload, source_version, source_hash, import_run_id)
+      values ($1, $2, 1, $3, $4)`, [id, JSON.stringify(observation), contentHash(observation), NATIVE_RUN_ID]);
+  }
   await setSwitches('postgres', 'blocked');
   await applyReturn(pool, db);
-  assert.equal((await db.collection('stockObservations').doc(id).get()).data()?.expiresAt, '2028-11-11T12:00:00Z');
+  for (const [id, expiresAt] of Object.entries(strings)) {
+    assert.equal((await db.collection('stockObservations').doc(id).get()).data()?.expiresAt, expiresAt);
+  }
   assert.deepEqual((await verifyReturn(pool, db)).changes, []);
 });
 
@@ -215,4 +251,139 @@ test('ISO strings become timestamps as the exact inverse of the export normaliza
   assert.equal(timestampFromIso('2026-09-12T03:00:00-03:00'), null);
   assert.equal(timestampFromIso('x'), null);
   assert.equal(jsonValue(timestampFromIso('2026-09-12T03:00:00.123456789Z')), '2026-09-12T03:00:00.123456789Z');
+});
+
+const switchRecords = async () => {
+  const [source, mode] = await Promise.all(['operationalSource', 'coreWriteMode'].map(id => db.collection('appConfig').doc(id).get()));
+  return { source: source.data(), mode: mode.data() };
+};
+
+/** Stands in for the clock and the terminal, and records what the switches held at every pause. */
+function recorder() {
+  const waits: number[] = [], states: string[] = [], lines: string[] = [];
+  const wait = async (seconds: number) => {
+    waits.push(seconds);
+    const { source, mode } = await switchRecords();
+    states.push(`${source?.source ?? '-'}/${mode?.mode ?? '-'}`);
+  };
+  return { waits, states, lines, wait, log: (line: string) => { lines.push(line); } };
+}
+
+/** The real database, except that every batch goes through `wrap`; reads and the appConfig records are untouched. */
+function withBatches(real: Firestore, wrap: (batch: WriteBatch) => object): Firestore {
+  const forward = <T extends object>(target: T, overrides: object) => new Proxy(target, {
+    get(object, property) {
+      if (Object.prototype.hasOwnProperty.call(overrides, property)) return Reflect.get(overrides, property);
+      const value = Reflect.get(object, property, object);
+      return typeof value === 'function' ? value.bind(object) : value;
+    },
+  });
+  return forward(real, { batch: () => { const batch = real.batch(); return forward(batch, wrap(batch)); } });
+}
+
+test('the automated return mirrors PostgreSQL, switches the source back and reopens the core', async () => {
+  await seedScenario();
+  await setSwitches('postgres', null);
+  const run = recorder();
+
+  const outcome = await runReturn({ pool, db, wait: run.wait, log: run.log });
+  assert.equal(outcome.status, 'returned');
+  assert.deepEqual(listed(outcome.plan!), EXPECTED_CHANGES);
+  assert.deepEqual(run.waits, [20, 10, 10]);
+  assert.deepEqual(run.states, ['postgres/draining', 'postgres/blocked', '-/blocked'],
+    'the source goes back only after the apply, and the core stays blocked while the selector cache expires');
+  assert.deepEqual(await switchRecords(), { source: undefined, mode: undefined });
+  assert.deepEqual((await planReturn(pool, db)).changes, []);
+
+  assert.ok(run.lines.some(line => /salesOrders\s+postgres 2 \| firestore 2 \| criar 0 \| atualizar 1 \| apagar 0/.test(line)),
+    'every step reports counts per collection');
+  assert.ok(run.lines.some(line => line.includes('productionLots/lot-1: delete')));
+  assert.ok(!run.lines.some(line => /Chapa|Tubo|Steel/.test(line)), 'the log never carries document content');
+});
+
+test('the pre-flight aborts without writing when the maintenance record already exists', async () => {
+  await seedScenario();
+  await setSwitches('postgres', null);
+  // `open` parses like an absent record; only the record's absence proves no other window is open.
+  const seeded = { mode: 'open', updatedAt: '2026-11-11T10:00:00.000Z' };
+  await db.collection('appConfig').doc('coreWriteMode').set(seeded);
+  const before = await planReturn(pool, db);
+  const run = recorder();
+
+  const outcome = await runReturn({ pool, db, wait: run.wait, log: run.log });
+  assert.equal(outcome.status, 'aborted');
+  assert.match(outcome.reason!, /coreWriteMode/);
+  assert.deepEqual(run.waits, []);
+  assert.deepEqual(await switchRecords(), { source: { source: 'postgres' }, mode: seeded });
+  assert.deepEqual(await planReturn(pool, db), before);
+});
+
+test('the pre-flight aborts when the target still serves from Firestore', async () => {
+  await seedScenario();
+  await setSwitches('firestore', null);
+  const run = recorder();
+
+  const outcome = await runReturn({ pool, db, wait: run.wait, log: run.log });
+  assert.equal(outcome.status, 'aborted');
+  assert.match(outcome.reason!, /firestore/);
+  assert.deepEqual(run.waits, []);
+  assert.deepEqual(await switchRecords(), { source: { source: 'firestore' }, mode: undefined });
+});
+
+test('the pre-flight aborts when the copy is not ready', async () => {
+  await seedScenario();
+  await setSwitches('postgres', null);
+  await pool.query('update brsteel_import.state set ready = false');
+  const run = recorder();
+
+  const outcome = await runReturn({ pool, db, wait: run.wait, log: run.log });
+  assert.equal(outcome.status, 'aborted');
+  assert.match(outcome.reason!, /ready/);
+  assert.deepEqual(run.waits, []);
+  assert.deepEqual(await switchRecords(), { source: { source: 'postgres' }, mode: undefined });
+});
+
+test('a plan that fails in the pre-flight aborts without writing', async () => {
+  await seedScenario();
+  await setSwitches('postgres', null);
+  await db.collection('supplies').doc('s1').set({ nome: 'segredo-do-cliente', codigo: 'SKU', estoqueAtual: Number.NaN });
+  const run = recorder();
+
+  const outcome = await runReturn({ pool, db, wait: run.wait, log: run.log });
+  assert.equal(outcome.status, 'aborted');
+  assert.match(outcome.reason!, /supplies\/s1/);
+  assert.ok(!run.lines.some(line => line.includes('segredo-do-cliente')));
+  assert.deepEqual(run.waits, []);
+  assert.deepEqual(await switchRecords(), { source: { source: 'postgres' }, mode: undefined });
+  assert.equal((await db.collection('supplies').doc('native-supply').get()).exists, false);
+});
+
+test('a failure during the apply keeps the source on PostgreSQL, hides the SDK error and reopens the core', async () => {
+  await seedScenario();
+  await setSwitches('postgres', null);
+  const failing = withBatches(db, () => ({ commit: async () => { throw new Error('UNAVAILABLE segredo-do-cliente'); } }));
+  const run = recorder();
+
+  const outcome = await runReturn({ pool, db: failing, wait: run.wait, log: run.log });
+  assert.equal(outcome.status, 'failed');
+  assert.ok(outcome.reason);
+  assert.ok(![outcome.reason, ...run.lines].some(line => line.includes('segredo-do-cliente')), 'a raw SDK error is never passed on');
+  assert.deepEqual(run.waits, [20, 10]);
+  assert.deepEqual(await switchRecords(), { source: { source: 'postgres' }, mode: undefined });
+});
+
+test('a divergence after the apply keeps the source on PostgreSQL, names the document and reopens the core', async () => {
+  await seedScenario();
+  await setSwitches('postgres', null);
+  const dropped = 'supplies/native-supply';
+  const dropping = withBatches(db, batch => ({
+    set: (ref: DocumentReference, data: DocumentData) => ref.path === dropped ? batch : batch.set(ref, data) }));
+  const run = recorder();
+
+  const outcome = await runReturn({ pool, db: dropping, wait: run.wait, log: run.log });
+  assert.equal(outcome.status, 'divergent');
+  assert.deepEqual(outcome.divergences, [{ collection: 'supplies', id: 'native-supply', kind: 'create' }]);
+  assert.ok(run.lines.some(line => line.includes(`${dropped}: create`)));
+  assert.deepEqual(run.waits, [20, 10]);
+  assert.deepEqual(await switchRecords(), { source: { source: 'postgres' }, mode: undefined });
 });
