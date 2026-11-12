@@ -1,6 +1,7 @@
 import 'server-only';
 import { adminDb } from '@/lib/firebase-admin';
 import { OperationError } from './common';
+import { parseCoreWriteMode, type CoreWriteMode } from './switch-values';
 
 /**
  * How the core currently accepts work.
@@ -15,15 +16,13 @@ import { OperationError } from './common';
  *
  * Consulted by the webhook drain and by every core write operation.
  */
-export type CoreWriteMode = 'open' | 'draining' | 'blocked';
+export type { CoreWriteMode };
 
-const MODES: readonly CoreWriteMode[] = ['open', 'draining', 'blocked'];
 const modeRef = () => adminDb.collection('appConfig').doc('coreWriteMode');
 
 /** Absent or unrecognised means `open`: maintenance has to be switched on deliberately. */
 export async function readCoreWriteMode(): Promise<CoreWriteMode> {
-  const stored = String((await modeRef().get()).data()?.mode ?? 'open');
-  return MODES.includes(stored as CoreWriteMode) ? stored as CoreWriteMode : 'open';
+  return parseCoreWriteMode((await modeRef().get()).data()?.mode);
 }
 
 // A window is opened and closed by a person, so seconds of staleness are fine; a read per mutation is
