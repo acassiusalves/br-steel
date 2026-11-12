@@ -4,8 +4,19 @@ import { z } from 'zod';
 import { adminDb } from '@/lib/firebase-admin';
 import type { SupplyRead } from '@/types/supply';
 import { documentIdSchema, paginateQuery, result, OperationError } from '@/server/operations/common';
-import type { SuppliesReadRepository } from './supplies-contract';
+import type { SuppliesReadRepository, SupplyLimitsReadRepository } from './supplies-contract';
 import { movementDateBounds } from './supplies-read-projection';
+
+export const firestoreSupplyLimitsRepository: SupplyLimitsReadRepository = {
+  async readLimits() {
+    // Documents arrive in ID order, so a later document with the same key replaces the earlier one.
+    const snapshot = await adminDb.collection('supplies').get();
+    return new Map(snapshot.docs.map(doc => {
+      const data = doc.data();
+      return [String(data.codigo || doc.id), { estoqueMinimo: data.estoqueMinimo ?? undefined, estoqueMaximo: data.estoqueMaximo ?? undefined }];
+    }));
+  },
+};
 
 export const firestoreSuppliesReadRepository: SuppliesReadRepository = {
   async list(input) {

@@ -209,7 +209,7 @@ O que observar daqui em diante:
 - **O Supavisor mantém as conexões ociosas até o limite do papel.** Depois das consultas, as 4 conexões permitidas ficaram abertas no pooler. Com o tráfego de uma pessoa, isso não tem efeito. Antes de repetir o desenho em produção, meça a concorrência: o `connection limit` vale para o papel inteiro, somando todas as instâncias da Vercel.
 - **A cópia não acompanha o Firestore.** A homologação mostra os dados do instante da exportação, e a defasagem cresce cerca de 3 registros por hora. Para atualizar, rode uma importação nova (Passo 3), que reconcilia sobre a cópia.
 - **Gravar pela homologação muda a natureza da cópia.** Nenhuma gravação oficial chegou ainda ao PostgreSQL. Uma gravação pelo site da homologação seria a primeira, e a partir dela a cópia deixaria de ser só reflexo do Firestore. Isso corresponde ao Passo 5 do plano da etapa 5 (retorno depois de gravações oficiais) e deve acontecer de propósito.
-- **A tela de produção do site ainda lê `supplies` direto do Firestore** (ver os bloqueadores abaixo). O Firestore da homologação não tem essa coleção, então os limites mínimo e máximo devem aparecer vazios nessa tela. O MCP não é afetado, porque usa o repositório trocável.
+- **A tela de produção do site lia `supplies` direto do Firestore** (ver os bloqueadores abaixo). O Firestore da homologação não tem essa coleção, então, na publicação de 11/11, os limites mínimo e máximo dessa tela aparecem vazios. A correção já está no código e chega à homologação na próxima publicação. O MCP não foi afetado, porque já usava o repositório trocável.
 - **A homologação passou a mostrar dados reais.** A cópia tem pedidos e clientes reais. O acesso continua restrito aos usuários cadastrados no Firebase da homologação e, no MCP, à lista `MCP_ALLOWED_USER_IDS`.
 
 ---
@@ -285,7 +285,7 @@ As gravações estão corretas: `saveSalesOrdersOptimized` delega a `salesIngest
 | Onde | Chamado por | Efeito após o corte | Situação |
 | --- | --- | --- | --- |
 | `firestore-sku-weekly-demand.ts` `rollUpWeek` | cron semanal | demanda silenciosamente errada; alimenta `consultar_historico_sku` e a tela de produção | **corrigido** |
-| `firestore-production-demand.ts` `adminDb.collection('supplies').get()` | tela de produção (`readFirestoreProductionDemand`) | os limites mínimo/máximo de estoque (`estoqueMinimo`/`estoqueMaximo`) passam a vir de uma coleção que não é mais atualizada: congelam sem erro | **pendente** |
+| `firestore-production-demand.ts` `adminDb.collection('supplies').get()` | tela de produção (`readFirestoreProductionDemand`) | os limites mínimo/máximo de estoque (`estoqueMinimo`/`estoqueMaximo`) passam a vir de uma coleção que não é mais atualizada: congelam sem erro | **corrigido** |
 | `operations/stock.ts` (observações de webhook) | tela de estoque do site | o caminho vivo perde observações novas; o MCP não é afetado, usa o caminho armazenado | **corrigido** |
 | `actions.ts` `deleteAllSalesOrders` | `api-settings` | **destrutivo**: apagaria a base que não está mais em uso | **corrigido** |
 | `actions.ts` `countImportedOrders` | `api-settings` | contagem congelada na tela | **corrigido** |
@@ -295,7 +295,7 @@ As gravações estão corretas: `saveSalesOrdersOptimized` delega a `salesIngest
 | `order-service.ts` `orderExists` | `actions.ts` | detecção de duplicata deixa de funcionar | **corrigido** |
 | `order-service.ts` `getExistingOrderIds` | sem chamador encontrado | possivelmente código morto | **corrigido** |
 
-Os itens originais foram resolvidos em 16/09/2026; a leitura direta de `supplies`, acrescentada em 11/11/2026, segue pendente. Dois eram código morto e foram apagados. Dois são ferramentas administrativas destrutivas sem equivalente na outra fonte: passaram a recusar por `requireFirestoreSource`, porque apagar a base que ninguém mais usa enquanto o operador vê "pronto" é pior que não apagar. Os outros quatro ganharam roteamento — três métodos novos em `SalesReadRepository` e o uso de `stockReadRepository.snapshot()` no caminho vivo do estoque.
+Os itens originais foram resolvidos em 16/09/2026. A leitura direta de `supplies`, acrescentada à lista e corrigida em 11/11/2026, passou a usar `supplyLimitsRepository.readLimits()`, que é trocável. Esta leitura não reaproveita a listagem de insumos, porque a coleção também guarda limites de produtos sem `nome`, e a listagem descarta esses registros. Os dois adaptadores usam a mesma chave (`codigo` ou o id do documento) e o mesmo desempate (vence o maior id). O SQL é o mesmo da demanda do MCP. A equivalência está em `tests/postgres/operational-readers.integration.ts`. Dos itens originais, dois eram código morto e foram apagados. Dois são ferramentas administrativas destrutivas sem equivalente na outra fonte: passaram a recusar por `requireFirestoreSource`, porque apagar a base que ninguém mais usa enquanto o operador vê "pronto" é pior que não apagar. Os outros quatro ganharam roteamento — três métodos novos em `SalesReadRepository` e o uso de `stockReadRepository.snapshot()` no caminho vivo do estoque.
 
 O teste de equivalência entre os adaptadores pagou-se na hora: o SQL filtrava exclusões lógicas enquanto o Firestore conta todo documento, e a mesma tela mostraria totais diferentes conforme a fonte.
 

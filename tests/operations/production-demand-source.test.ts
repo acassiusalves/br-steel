@@ -11,7 +11,13 @@ vi.mock('@/server/persistence/firestore-sku-weekly-demand', () => ({ readWeeklyH
 vi.mock('@/server/persistence/sku-weekly-demand', () => ({
   skuWeeklyDemandRepository: { readWeeklyHistory: async () => new Map([['A', [{ week: '2026-W36', units: 2, orders: 1 }]]]) },
 }));
-vi.mock('@/lib/firebase-admin', () => ({ adminDb: { collection: () => ({ get: async () => ({ docs: [] }) }) } }));
+// A coleção do Firestore guarda um limite que a cópia não tem: se ele aparecer, a tela leu a fonte errada.
+vi.mock('@/lib/firebase-admin', () => ({ adminDb: { collection: () => ({ get: async () => ({
+  docs: [{ id: 'A', data: () => ({ codigo: 'A', estoqueMinimo: 999, estoqueMaximo: 999 }) }],
+}) }) } }));
+vi.mock('@/server/persistence/supplies', () => ({
+  supplyLimitsRepository: { readLimits: async () => new Map([['A', { estoqueMinimo: 10, estoqueMaximo: 30 }]]) },
+}));
 vi.mock('@/server/operations/sales', () => ({
   readOrdersForPeriod: async () => [{ id: 1, data: '2026-08-31', notaFiscal: { id: 1 }, itens: [{ codigo: 'A', descricao: 'Chapa', quantidade: 2 }] }],
 }));
@@ -26,4 +32,11 @@ it('takes the closed weeks from the switchable repository, not the firestore mod
   const row = response.data.find(item => item.sku === 'A');
   expect(row?.history.filter(point => !point.open)).toEqual([{ week: '2026-W36', units: 2, orders: 1 }]);
   expect(firestoreHistory).not.toHaveBeenCalled();
+});
+
+it('takes the stock limits from the switchable repository, not the firestore collection', async () => {
+  const { readFirestoreProductionDemand } = await import('@/server/persistence/firestore-production-demand');
+  const response = await readFirestoreProductionDemand({ from: '2026-08-31', to: '2026-09-06' }, false);
+  const row = response.data.find(item => item.sku === 'A');
+  expect({ min: row?.stockMin, max: row?.stockMax }).toEqual({ min: 10, max: 30 });
 });
