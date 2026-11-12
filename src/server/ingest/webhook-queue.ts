@@ -57,10 +57,16 @@ export async function markWebhookEvent(id: string, status: WebhookStatus, error?
 export async function drainWebhookEvents(limit: number, handle: (event: QueuedEvent) => Promise<void>) {
   const open = async () => await readCoreWriteMode() === 'open';
   if (!await open()) return { processed: 0, failed: 0, suspended: true };
-  const pending = await adminDb.collection(WEBHOOK_EVENTS)
-    .where('status', 'in', ['received', 'failed']).limit(limit).get();
+  // New deliveries first, then retryable failures. An exhausted failure is skipped without being touched:
+  // reclaiming it every run only inflated its attempts and, sorting ahead, starved new events of slots.
+  const events = adminDb.collection(WEBHOOK_EVENTS);
+  const fresh = (await events.where('status', '==', 'received').limit(limit).get()).docs;
+  const retryable = fresh.length < limit
+    ? (await events.where('status', '==', 'failed').limit(limit * 4).get()).docs
+      .filter(doc => (Number(doc.data().attempts) || 0) < MAX_ATTEMPTS)
+    : [];
   let processed = 0, failed = 0;
-  for (const doc of pending.docs) {
+  for (const doc of [...fresh, ...retryable].slice(0, limit)) {
     if (!await open()) return { processed, failed, suspended: true };
     const event = { id: doc.id, ...doc.data() } as QueuedEvent;
     const claimed = await adminDb.runTransaction(async tx => {
