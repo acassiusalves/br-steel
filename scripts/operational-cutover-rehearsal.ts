@@ -4,9 +4,12 @@
  *   BRSTEEL_CUTOVER_SOURCE_PROJECT=... BRSTEEL_CUTOVER_DATABASE_URL=... \
  *   BRSTEEL_CUTOVER_CA_FILE=... npm run cutover:rehearse -- --confirm
  *
- * **Grava `appConfig/coreWriteMode` no Firestore da origem.** Entre `BLOCKED` e `RESTAURADO`, toda
- * escrita do núcleo responde 503 e o dreno de webhooks fica suspenso. Leituras seguem normais e as
- * entregas continuam sendo enfileiradas: nada se perde, tudo chega atrasado.
+ * **Grava `appConfig/coreWriteMode` no Firestore da origem.** De `draining` até `RESTAURADO`, os dois
+ * modos se comportam igual: as operações do núcleo respondem 503, e as entregas do webhook do Bling vão
+ * para a fila e recebem 200 sem ser aplicadas, com o dreno suspenso. `draining` só dá tempo às chamadas
+ * que já tinham passado pela checagem das operações, que cada instância guarda por até 5 s; o webhook lê
+ * o modo a cada entrega. Depois da janela, o cron de dreno aplica as entregas enfileiradas. Leituras
+ * seguem normais: nada se perde, tudo chega atrasado.
  *
  * Vive separado de `operational-cutover.ts` de propósito. Aquele CLI não decide nada — recusa
  * reconciliar fora do modo `blocked` e deixa a decisão para quem o chama. Este decide: é ele que

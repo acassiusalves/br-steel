@@ -33,6 +33,8 @@ Use o [índice de documentação](../docs/README.md) para localizar o procedimen
 | [`operational-backup-drill.mjs`](operational-backup-drill.mjs) | Lê o destino configurado para gerar backup criptografado ou restaura em PostgreSQL descartável local. |
 | [`operational-cutover.ts`](operational-cutover.ts) | Comandos de reconciliação e controle do corte operacional. Revise o modo e o destino antes de usar `npm run cutover`. |
 | [`operational-cutover-rehearsal.ts`](operational-cutover-rehearsal.ts) | Ensaio que pode acionar manutenção do Firestore e gravar no PostgreSQL de destino. |
+| [`operational-return.ts`](operational-return.ts) | `plan`, `apply` e `verify` do retorno PostgreSQL → Firestore. O `apply` grava no Firestore de `BRSTEEL_RETURN_TARGET_PROJECT`. |
+| [`operational-return-run.ts`](operational-return-run.ts) | Retorno inteiro com `--confirm`: bloqueia o núcleo, grava no Firestore de destino e devolve a fonte ao Firestore. |
 | [`backfill-sku-weekly-demand.ts`](backfill-sku-weekly-demand.ts) | Recalcula demanda semanal e grava buckets e checkpoint no Firestore. |
 | [`print-ml-token.ts`](print-ml-token.ts) | Imprime um token de Mercado Livre. Se precisar renová-lo, grava as credenciais atualizadas no Firestore configurado. Mantenha a saída fora dos logs e artefatos. |
 | [`refresh-claude-ml-token.ts`](refresh-claude-ml-token.ts) | Obtém o token de Mercado Livre e atualiza a configuração pessoal do Claude, com cópia de backup. Uma renovação também grava no Firestore configurado. |
@@ -43,5 +45,5 @@ Use o [índice de documentação](../docs/README.md) para localizar o procedimen
 
 Os arquivos em `lib/` são importados pelos executores acima. Use o script principal como entrada.
 
-- Conexão e backup operacional. [`cutover-pool.ts`](lib/cutover-pool.ts) · [`operational-backup.mjs`](lib/operational-backup.mjs)
+- Conexão e backup operacional. [`cutover-pool.ts`](lib/cutover-pool.ts) · [`return-target.ts`](lib/return-target.ts) · [`operational-backup.mjs`](lib/operational-backup.mjs)
 - Configuração e provas de MCP. [`mcp-postgres-proof.ts`](lib/mcp-postgres-proof.ts) · [`mcp-production-config.ts`](lib/mcp-production-config.ts) · [`mcp-staging-config.ts`](lib/mcp-staging-config.ts) · [`mcp-staging-proof-guard.ts`](lib/mcp-staging-proof-guard.ts)

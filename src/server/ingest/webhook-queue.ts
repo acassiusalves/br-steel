@@ -49,14 +49,19 @@ export async function markWebhookEvent(id: string, status: WebhookStatus, error?
 /**
  * Processes pending events one at a time. A failure leaves the event in `failed` with its cause, so it
  * stays retryable instead of depending on Bling deciding to deliver again.
+ *
+ * Inside a maintenance window (`draining` or `blocked`) the queue accumulates instead: nothing is
+ * applied, and the next run after the window resumes. The mode is read again before every event, so a
+ * window that opens mid-run stops the loop and leaves the remaining events exactly as they were.
  */
 export async function drainWebhookEvents(limit: number, handle: (event: QueuedEvent) => Promise<void>) {
-  // During the cutover the queue must accumulate rather than apply anything, and resume afterwards.
-  if (await readCoreWriteMode() === 'blocked') return { processed: 0, failed: 0, suspended: true };
+  const open = async () => await readCoreWriteMode() === 'open';
+  if (!await open()) return { processed: 0, failed: 0, suspended: true };
   const pending = await adminDb.collection(WEBHOOK_EVENTS)
     .where('status', 'in', ['received', 'failed']).limit(limit).get();
   let processed = 0, failed = 0;
   for (const doc of pending.docs) {
+    if (!await open()) return { processed, failed, suspended: true };
     const event = { id: doc.id, ...doc.data() } as QueuedEvent;
     const claimed = await adminDb.runTransaction(async tx => {
       const current = await tx.get(doc.ref);

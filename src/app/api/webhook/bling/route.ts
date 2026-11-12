@@ -9,6 +9,7 @@ import { saveSalesOrders } from '@/services/order-service';
 import { TERMINAL, enqueueWebhookEvent, markWebhookEvent, webhookEventId } from '@/server/ingest/webhook-queue';
 import { salesIngestRepository } from '@/server/persistence/sales-ingest';
 import { invalidateProductStockCache } from '@/server/operations/stock';
+import { readCoreWriteMode } from '@/server/operations/maintenance';
 import { enrichOrderWithInvoice } from '@/services/bling-invoice-service';
 
 // Bling API configuration
@@ -388,6 +389,13 @@ export async function POST(request: Request) {
     // drain is scheduled, so swallowing it here would make delivery worse than before the queue.
     if (!created && TERMINAL.includes(status)) {
       return NextResponse.json({ success: true, message: 'Entrega repetida ignorada.', event,
+        processedIn: `${Date.now() - startTime}ms` });
+    }
+    // Inside a maintenance window the delivery is durable but not applied: it stays `received`, and the
+    // drain applies it once the core is open again. Read fresh, without the mutation cache, because a
+    // delivery processed a few seconds into the window would change the copy being compared.
+    if (await readCoreWriteMode() !== 'open') {
+      return NextResponse.json({ success: true, message: 'Manutenção em andamento: entrega enfileirada.', event,
         processedIn: `${Date.now() - startTime}ms` });
     }
     await logWebhookDebug({ source: 'bling-webhook', event, hasSignature: true });

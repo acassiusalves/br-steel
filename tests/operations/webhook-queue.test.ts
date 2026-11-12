@@ -68,3 +68,26 @@ it('accumulates without applying anything while the core is blocked', async () =
   expect(await drainWebhookEvents(10, handler)).toEqual({ processed: 2, failed: 0, suspended: false });
   expect(handler).toHaveBeenCalledTimes(2);
 });
+
+it('also stays suspended while the core is draining', async () => {
+  await enqueueWebhookEvent(event('d1'));
+  await adminDb.collection('appConfig').doc('coreWriteMode').set({ mode: 'draining' });
+  const handler = vi.fn();
+  expect(await drainWebhookEvents(10, handler)).toEqual({ processed: 0, failed: 0, suspended: true });
+  expect(handler).not.toHaveBeenCalled();
+  expect((await adminDb.collection(WEBHOOK_EVENTS).doc('d1').get()).data()).toMatchObject({ status: 'received', attempts: 0 });
+});
+
+it('stops before the next event as soon as a window opens, leaving the rest untouched', async () => {
+  for (const id of ['w1', 'w2', 'w3']) await enqueueWebhookEvent(event(id));
+  const seen: string[] = [];
+  const handler = async (queued: QueuedEvent) => {
+    seen.push(queued.id);
+    await adminDb.collection('appConfig').doc('coreWriteMode').set({ mode: 'draining' });
+  };
+  expect(await drainWebhookEvents(10, handler)).toEqual({ processed: 1, failed: 0, suspended: true });
+  expect(seen).toHaveLength(1);
+  const rest = (await adminDb.collection(WEBHOOK_EVENTS).where('status', '==', 'received').get()).docs;
+  expect(rest).toHaveLength(2);
+  expect(rest.every(doc => doc.data().attempts === 0)).toBe(true);
+});

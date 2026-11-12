@@ -16,7 +16,7 @@ function requireReadCompatibleTypes(collection: OperationalCollection, data: Rec
   } else if (collection !== 'supplyCodes' && collection !== 'operationsMetadata') inspect(data);
 }
 
-function jsonValue(value: unknown): unknown {
+export function jsonValue(value: unknown): unknown {
   if (value instanceof Timestamp) {
     // Construct the whole second directly: toDate() can round into the next second.
     const iso = new Date(value.seconds * 1000).toISOString();

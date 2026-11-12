@@ -2,6 +2,7 @@ import 'server-only';
 import { Pool, type PoolConfig } from 'pg';
 import { adminDb } from '@/lib/firebase-admin';
 import { OperationError } from '@/server/operations/common';
+import { parseOperationalSource, type OperationalSource } from '@/server/operations/switch-values';
 
 /**
  * Which store the core currently reads and writes.
@@ -11,9 +12,8 @@ import { OperationError } from '@/server/operations/common';
  * the maintenance mode lives in a record. Absent or unrecognised means `firestore`: the source changes
  * deliberately, never by accident or by a typo in configuration.
  */
-export type OperationalSource = 'firestore' | 'postgres';
+export type { OperationalSource };
 
-const SOURCES: readonly OperationalSource[] = ['firestore', 'postgres'];
 const MAX_CACHE_MS = 5000;
 let cached: { source: OperationalSource; at: number } | null = null;
 let pool: Pool | null = null;
@@ -32,8 +32,7 @@ export function resetOperationalSource() {
 
 export async function readOperationalSource(): Promise<OperationalSource> {
   if (cached && Date.now() - cached.at <= MAX_CACHE_MS) return cached.source;
-  const stored = String((await adminDb.collection('appConfig').doc('operationalSource').get()).data()?.source ?? 'firestore');
-  const source = SOURCES.includes(stored as OperationalSource) ? stored as OperationalSource : 'firestore';
+  const source = parseOperationalSource((await adminDb.collection('appConfig').doc('operationalSource').get()).data()?.source);
   cached = { source, at: Date.now() };
   return source;
 }

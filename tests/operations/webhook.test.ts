@@ -56,6 +56,21 @@ it('ignores a repeated delivery instead of processing it twice', async () => {
   expect((await adminDb.collection(WEBHOOK_EVENTS).get()).size).toBe(1);
 });
 
+it('queues a delivery without applying it while the core is draining or blocked', async () => {
+  for (const [mode, id] of [['draining', 1], ['blocked', 2]] as const) {
+    await adminDb.collection('appConfig').doc('coreWriteMode').set({ mode });
+    const response = await POST(request('pedido_venda.deleted', { id }));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ success: true, message: 'Manutenção em andamento: entrega enfileirada.',
+      event: 'pedido_venda.deleted' });
+    expect((await adminDb.collection('salesOrders').doc(String(id)).get()).data()?.deleted).toBeUndefined();
+  }
+  // Left `received`, so the drain applies them once the window closes.
+  const queued = (await adminDb.collection(WEBHOOK_EVENTS).get()).docs.map(doc => doc.data());
+  expect(queued.map(event => event.status)).toEqual(['received', 'received']);
+  expect(provider.fetch).not.toHaveBeenCalled();
+});
+
 it('does not queue anything when the signature fails', async () => {
   expect((await POST(request('pedido_venda.deleted', { id: 1 }, false))).status).toBe(401);
   expect((await adminDb.collection(WEBHOOK_EVENTS).get()).size).toBe(0);
