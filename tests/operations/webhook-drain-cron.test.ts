@@ -49,6 +49,19 @@ it('retries an event the webhook left failed and marks it processed', async () =
   expect((await adminDb.collection('salesOrders').doc('77').get()).data()?.numero).toBe(4242);
 });
 
+it('queues a delivery that arrives inside the window and applies it after the window closes', async () => {
+  await adminDb.collection('appConfig').doc('coreWriteMode').set({ mode: 'blocked' });
+  provider.fetch.mockResolvedValue({ data: { id: 79, numero: 7979, itens: [] } });
+  expect(await (await POST(signed('pedido_venda.updated', { id: 79 }))).json())
+    .toMatchObject({ success: true, message: 'Manutenção em andamento: entrega enfileirada.' });
+  expect(provider.fetch).not.toHaveBeenCalled();
+  expect((await adminDb.collection('salesOrders').doc('79').get()).exists).toBe(false);
+
+  await adminDb.collection('appConfig').doc('coreWriteMode').delete();
+  expect(await (await drain(cron('Bearer ' + cronSecret))).json()).toMatchObject({ suspended: false, processed: 1 });
+  expect((await adminDb.collection('salesOrders').doc('79').get()).data()?.numero).toBe(7979);
+});
+
 it('applies nothing while the core is blocked and resumes afterwards', async () => {
   provider.fetch.mockResolvedValue(null);
   await POST(signed('pedido_venda.updated', { id: 78 }));

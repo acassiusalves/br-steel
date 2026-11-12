@@ -7,14 +7,15 @@ import { parseCoreWriteMode, type CoreWriteMode } from './switch-values';
  * How the core currently accepts work.
  *
  * `open` is normal operation. `draining` refuses new mutations while the ones already in flight
- * finish. `blocked` is the maintenance window of the source cutover: nothing new is accepted and the
- * webhook queue accumulates instead of being processed.
+ * finish. `blocked` is the maintenance window of the source cutover and of the return. In both, webhook
+ * deliveries are queued without being applied and the drain is suspended; they are applied once the
+ * mode is `open` again.
  *
  * Read at runtime from a shared record rather than from a build-time variable **on purpose**: an older
  * deployment still reachable on Vercel would carry the old value and keep writing. Only a shared record
  * reaches every instance.
  *
- * Consulted by the webhook drain and by every core write operation.
+ * Consulted by the Bling webhook, by the webhook drain and by every core write operation.
  */
 export type { CoreWriteMode };
 
