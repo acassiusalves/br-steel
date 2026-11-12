@@ -223,7 +223,7 @@ O retorno devolve ao Firestore um ambiente que está servindo do PostgreSQL. Ele
 - o que tem conteúdo diferente é regravado com o documento inteiro, sem merge;
 - o que está no Firestore e não existe mais no PostgreSQL é apagado. Os adaptadores PostgreSQL apagam linhas de verdade (lotes, colunas, comentários, insumos e códigos), e só a comparação do estado inteiro enxerga isso.
 
-Em `operationsMetadata`, só entram os contadores `production-lots-AAAA`, como no export. Os outros documentos da coleção nunca são tocados. Dois campos voltam como `Timestamp`, desde que a string seja a que o export produziria e que o Firestore consiga guardar sem perder precisão: o `expiresAt` das observações de estoque, porque a política de TTL ignora strings, e, numa atualização, todo campo de primeiro nível que já era `Timestamp` no documento substituído. As gravações saem em lotes de até 400 operações e até 4 MB.
+Em `operationsMetadata`, só entram os contadores `production-lots-AAAA`, como no export. Os outros documentos da coleção nunca são tocados. Duas regras devolvem `Timestamp`s, desde que a string seja a que o export produziria e que o Firestore consiga guardar sem perder precisão. A primeira vale para o `expiresAt` das observações de estoque, porque a política de TTL ignora strings. A segunda vale numa atualização, para todo campo de primeiro nível que já era `Timestamp` no documento substituído. As gravações saem em lotes de até 400 operações e até 4 MB.
 
 **O que fica de fora:**
 - **Demanda semanal.** `skuWeeklyDemand` não volta. O checkpoint do Firestore ficou no valor de antes do corte, e o rollup recalcula a série a partir de `salesOrders`.
@@ -240,7 +240,9 @@ Em `operationsMetadata`, só entram os contadores `production-lots-AAAA`, como n
 
 As leituras do PostgreSQL assumem `brsteel_ops_importer` numa transação somente leitura, como o import e o `verify` da carga. Assim o login do importador serve como a migration o cria, sem herança de privilégios.
 
-O projeto de destino é obrigatório e não tem valor padrão. A gravação usa as credenciais padrão do Google (o login de `gcloud auth application-default login` de uma conta com acesso ao projeto), sem `FIRESTORE_EMULATOR_HOST`. Os comandos imprimem o projeto de destino e a origem da cópia (`brsteel_import.state.source_project`). Quando os dois diferem, imprimem "destino diferente da origem da cópia: ensaio". Na homologação, isso é o esperado: a cópia veio de `marketflow-9h4tg`.
+Habilite o login do importador antes do retorno, com o `alter role brsteel_pilot_importer login ...` do Passo 3. Ao terminar, mesmo se o retorno falhar, desabilite-o e encerre as sessões com o bloco que vem logo depois no mesmo passo.
+
+O projeto de destino é obrigatório e não tem valor padrão. A gravação usa as credenciais padrão do Google (o login de `gcloud auth application-default login` de uma conta com acesso ao projeto). Os dois comandos recusam rodar com `FIRESTORE_EMULATOR_HOST` definido, porque leriam e gravariam no emulador. Os comandos imprimem o projeto de destino e a origem da cópia (`brsteel_import.state.source_project`). Quando os dois diferem, imprimem "destino diferente da origem da cópia: ensaio". Na homologação, isso é o esperado: a cópia veio de `marketflow-9h4tg`.
 
 **Comandos:**
 - `npm run cutover:return-tool -- plan` mostra o que o retorno mudaria, sem gravar: contagens por coleção e até 50 mudanças, com coleção, id e tipo.
@@ -258,10 +260,18 @@ O projeto de destino é obrigatório e não tem valor padrão. A gravação usa 
 2. grava `blocked` e espera 10 s;
 3. roda o `apply`;
 4. roda o `verify`;
-5. com divergência zero, apaga `appConfig/operationalSource` e espera 10 s com o núcleo ainda bloqueado, porque o cache do seletor é de 5 s;
+5. com divergência zero, apaga `appConfig/operationalSource` e espera 10 s com o núcleo ainda bloqueado, porque o cache do seletor é de 5 s. A troca roda numa transação que confere que `appConfig/coreWriteMode` ainda é `blocked`. Se não for, ou se o comando já recebeu Ctrl-C, a fonte não muda;
 6. apaga `appConfig/coreWriteMode`, e o núcleo volta a aceitar escritas.
 
-A janela dura 40 s mais o tempo do `apply` e do `verify`. Os dois leem as duas bases inteiras, e o primeiro `apply` de um ambiente também grava a cópia inteira. Meça esse tempo no ensaio. A reabertura está num `finally` e cobre erro, divergência e Ctrl-C, mas não `SIGKILL`. Nesse caso, apague `appConfig/coreWriteMode` à mão. Num Ctrl-C durante o `apply`, um lote já enviado ainda pode chegar ao Firestore depois da reabertura. A fonte continua `postgres`, e repetir o retorno corrige o que tiver ficado diferente.
+**Dentro da janela**, de `draining` até a reabertura, os dois modos se comportam igual:
+- as operações do núcleo respondem 503. Cada instância guarda o modo por até 5 s, e os 20 s de `draining` cobrem esse atraso e as chamadas que já tinham passado pela checagem;
+- as entregas do webhook do Bling vão para a fila e recebem 200, sem ser aplicadas ("Manutenção em andamento: entrega enfileirada."). O webhook lê o modo a cada entrega, sem cache;
+- o dreno da fila fica suspenso e, se a janela abrir no meio de uma rodada, para antes do evento seguinte;
+- as leituras seguem normais.
+
+Depois da reabertura, o cron `/api/cron/bling-webhook-drain`, que roda a cada 5 minutos, aplica as entregas enfileiradas na fonte que estiver ativa.
+
+A janela dura 40 s mais o tempo do `apply` e do `verify`. Os dois leem as duas bases inteiras, e o primeiro `apply` de um ambiente também grava a cópia inteira. Meça esse tempo no ensaio. A reabertura está num `finally` e cobre erro e divergência. Num Ctrl-C, o comando só reabre o núcleo se ele mesmo abriu a janela. Se a fonte já tinha sido trocada, ele espera 10 s antes de reabrir. Nada disso cobre `SIGKILL`; nesse caso, apague `appConfig/coreWriteMode` à mão. Num Ctrl-C durante o `apply`, um lote já enviado ainda pode chegar ao Firestore depois da reabertura. A fonte continua `postgres`, e repetir o retorno corrige o que tiver ficado diferente.
 
 **Com divergência ou erro, a fonte não muda.** O comando reabre o núcleo, e o ambiente continua servindo do PostgreSQL, sem perda. A saída lista até 50 divergências, com coleção, id e tipo, e termina com código 1. Para resolver:
 - rode `npm run cutover:return-tool -- plan` para ver o estado atual;

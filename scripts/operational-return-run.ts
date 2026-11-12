@@ -6,13 +6,16 @@
  *   BRSTEEL_CUTOVER_CA_FILE=... npm run cutover:return -- --confirm
  *
  * **Grava `appConfig/coreWriteMode` e apaga `appConfig/operationalSource` no Firestore do projeto de
- * destino.** Entre `draining` e `REABERTO`, toda escrita do núcleo responde 503 e o dreno de webhooks
- * fica suspenso. Leituras seguem normais e as entregas continuam enfileiradas: nada se perde, tudo
- * chega atrasado.
+ * destino.** De `draining` até `REABERTO`, os dois modos se comportam igual: as operações do núcleo
+ * respondem 503, e as entregas do webhook do Bling vão para a fila e recebem 200 sem ser aplicadas, com
+ * o dreno suspenso. `draining` só dá tempo às chamadas que já tinham passado pela checagem das
+ * operações, que cada instância guarda por até 5 s; o webhook lê o modo a cada entrega. Depois da
+ * janela, o cron de dreno aplica as entregas enfileiradas na fonte que estiver ativa. Leituras seguem
+ * normais: nada se perde, tudo chega atrasado.
  *
  * A sequência mora em `runReturn`. Este arquivo prepara o destino, confere a identidade no PostgreSQL
- * como o ensaio do corte e garante a reabertura num Ctrl-C. Não cobre `SIGKILL`: nesse caso, apague
- * `appConfig/coreWriteMode` à mão.
+ * como o ensaio do corte e reabre o núcleo num Ctrl-C, só se esta execução abriu a janela e, depois da
+ * troca da fonte, só passados 10 s. Não cobre `SIGKILL`: nesse caso, apague `appConfig/coreWriteMode` à mão.
  */
 import { returnErrorMessage } from '../src/server/migration/operational-return';
 import { runReturn, type ReturnRunControl } from '../src/server/migration/operational-return-run';
