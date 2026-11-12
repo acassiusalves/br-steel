@@ -1,6 +1,6 @@
 # Provisionamento para o ensaio do corte (etapa 5, Task 3)
 
-> **Projeto atual: `mmewkphsrnttkzvpyddv`** (organização BR Steel), desde 11/11/2026. O que está datado de setembro neste documento se refere ao projeto antigo `mlumbvxpaqfzpdjnvzxc`. As oito migrations já estão no projeto atual, e uma cópia dos dados foi carregada em 11/11/2026 (ver Passo 3). O host do pooler passou a ser `aws-1-sa-east-1.pooler.supabase.com`. Ver a [migração do Supabase](../../docs/migracao-supabase-2026-11.md).
+> **Projeto atual: `mmewkphsrnttkzvpyddv`** (organização BR Steel), desde 11/11/2026. O que está datado de setembro neste documento se refere ao projeto antigo `mlumbvxpaqfzpdjnvzxc`. As oito migrations já estão no projeto atual. Uma cópia dos dados foi carregada em 11/11/2026 (ver Passo 3), e a homologação passou a ler dessa cópia no mesmo dia (ver "Troca da fonte em homologação"). O host do pooler passou a ser `aws-1-sa-east-1.pooler.supabase.com`. Ver a [migração do Supabase](../../docs/migracao-supabase-2026-11.md).
 
 > **Histórico de estoque e demanda semanal (11/11/2026).** O log de observações de estoque e a série semanal de demanda por SKU passaram a existir em PostgreSQL com o PR [#34](https://github.com/acassiusalves/br-steel/pull/34), em produção desde 11/11/2026: a migration [`20261111120000_operational_history.sql`](migrations/20261111120000_operational_history.sql) cria `stock_observation_log` e `sku_weekly_demand`, e o export, o import, o `verify`, a reconciliação e o comparador cobrem as duas. A migration foi aplicada em `mmewkphsrnttkzvpyddv` em 11/11/2026. A carga do mesmo dia copiou o histórico: 3.706 observações de estoque e 208 semanas de demanda.
 
@@ -70,8 +70,15 @@ drop role if exists brsteel_ops_runtime;
 -- deste roteiro, e é literalmente o prazo que ficou no resíduo.
 create role brsteel_ops_runtime login password '<SENHA>' valid until '<PRAZO>'
   nosuperuser nocreatedb nocreaterole noreplication nobypassrls inherit connection limit 4;
-grant brsteel_ops_writer to brsteel_ops_runtime;
+grant brsteel_ops_writer to brsteel_ops_runtime with inherit true;
+
+-- O pooler descarta o statement_timeout que o código envia ao conectar. Fixe o valor no papel.
+alter role brsteel_ops_runtime set statement_timeout = '30s';
 ```
+
+**Provisionado em 11/11/2026 no projeto atual, com prazo até 18/11/2026 23:00 UTC.** A senha foi gerada localmente, e o banco recebeu só o verificador SCRAM-SHA-256. O `create role` aceita o verificador no lugar da senha, e assim o texto da senha não passa pelo servidor nem pelos logs. A conferência abaixo devolveu só `brsteel_ops_writer`, com herança, e o papel não tem privilégio direto em tabela nenhuma.
+
+**O pooler ignora o `statement_timeout` de inicialização.** O pool do runtime pede 30 s ao conectar, mas o Supavisor em modo sessão descarta esse parâmetro, e a sessão fica com os 2 minutos do banco. Os papéis do piloto já fixam o valor no próprio papel, e o `alter role ... set` acima faz o mesmo no runtime. O ajuste só vale para conexões novas, e o Supavisor reaproveita as ociosas. Depois de alterá-lo, encerre as sessões do papel com `pg_terminate_backend` e confira `select current_setting('statement_timeout')` numa conexão nova.
 
 Se o `drop` reclamar de objetos dependentes, **pare e investigue**: significa que alguém concedeu privilégio direto ao papel em vez de passar pela associação, e o resíduo é maior do que este roteiro supõe.
 
@@ -178,6 +185,33 @@ Use **modo sessão (5432)** também aqui no ensaio. O modo transacional (6543) �
 
 Confira que as variáveis **não** vazaram para produção antes de seguir.
 
+**Gravadas em 11/11/2026.** As duas variáveis estão no destino Production do projeto `br-steel-mcp-staging`, como Secret, e não existem no projeto `br-steel`. A homologação foi republicada a partir da `main` (`53fc83a`) com o manifesto de homologação: `dpl_3PgESRiUst42E8poCjHssDkYTxhT`. Para voltar, a publicação anterior é `dpl_ErRwzBbGXTmqVHfJ33ajYVfnYay8`.
+
+---
+
+## Troca da fonte em homologação
+
+A chave mora no Firestore de cada ambiente. A homologação usa o Firebase `brsteel-mcp-staging`, separado do `marketflow-9h4tg` da produção, e por isso gravar `appConfig/operationalSource` nele não alcança a produção. A gravação usa o Admin SDK com as credenciais padrão do Google: o login de `gcloud auth application-default login` de uma conta com acesso ao projeto, sem `FIRESTORE_EMULATOR_HOST`.
+
+- Para ler do PostgreSQL, grave `appConfig/operationalSource = { source: "postgres" }`.
+- Para voltar ao Firestore, apague o documento. Ausente vale `firestore`.
+
+A troca vale em até 5 s, o tempo do cache do seletor, sem republicar. As variáveis do Passo 4 precisam estar publicadas antes: com a chave em `postgres` e sem conexão configurada, o núcleo responde 503, sem cair para o Firestore.
+
+**Feita em 12/11/2026 às 00:25 UTC (21:25 de 11/11 em Brasília).** Todas as consultas pelo conector da homologação no Claude responderam com fonte `postgres`:
+- `resumir_vendas` de 05/11 a 11/11 devolveu 289 pedidos. A produção mostrava 295 no mesmo instante. A diferença são os pedidos que entraram depois da exportação das 22:21 UTC, e o período anterior bate exatamente.
+- `consultar_estoque_produtos`, `consultar_demanda_producao`, `consultar_historico_sku` e `listar_lotes_producao` devolveram dados da cópia. A demanda veio com estoque e limites mínimo e máximo da cópia.
+- `listar_insumos` devolveu a primeira página vazia, com o mesmo aviso e o mesmo cursor da produção. Os dois adaptadores se comportam igual.
+
+No banco, o runtime abriu 4 conexões pelo Supavisor, e `brsteel_write.audit` e `brsteel_write.idempotency` continuaram vazias. A Vercel não registrou erro de execução na homologação.
+
+O que observar daqui em diante:
+- **O Supavisor mantém as conexões ociosas até o limite do papel.** Depois das consultas, as 4 conexões permitidas ficaram abertas no pooler. Com o tráfego de uma pessoa, isso não tem efeito. Antes de repetir o desenho em produção, meça a concorrência: o `connection limit` vale para o papel inteiro, somando todas as instâncias da Vercel.
+- **A cópia não acompanha o Firestore.** A homologação mostra os dados do instante da exportação, e a defasagem cresce cerca de 3 registros por hora. Para atualizar, rode uma importação nova (Passo 3), que reconcilia sobre a cópia.
+- **Gravar pela homologação muda a natureza da cópia.** Nenhuma gravação oficial chegou ainda ao PostgreSQL. Uma gravação pelo site da homologação seria a primeira, e a partir dela a cópia deixaria de ser só reflexo do Firestore. Isso corresponde ao Passo 5 do plano da etapa 5 (retorno depois de gravações oficiais) e deve acontecer de propósito.
+- **A tela de produção do site ainda lê `supplies` direto do Firestore** (ver os bloqueadores abaixo). O Firestore da homologação não tem essa coleção, então os limites mínimo e máximo devem aparecer vazios nessa tela. O MCP não é afetado, porque usa o repositório trocável.
+- **A homologação passou a mostrar dados reais.** A cópia tem pedidos e clientes reais. O acesso continua restrito aos usuários cadastrados no Firebase da homologação e, no MCP, à lista `MCP_ALLOWED_USER_IDS`.
+
 ---
 
 ## Passo 5 — Me avise
@@ -238,7 +272,7 @@ where member.rolname = 'brsteel_pilot_importer' and granted.rolname = 'brsteel_o
 
 Sessão zerada não é encerramento. Enquanto o papel existir e a associação estiver de pé, o que separa o destino de um acesso ativo é só uma senha e um `valid until` — dois comandos de distância.
 
-Remova as variáveis do projeto de homologação, apague o snapshot e os relatórios dos diretórios privados, e restaure o deployment anterior de homologação.
+Antes de remover as variáveis, apague `appConfig/operationalSource` do Firestore da homologação. Sem a chave, a homologação volta a ler o próprio Firestore. Com a chave em `postgres` e sem as variáveis, ela responde 503. Depois remova as variáveis do projeto de homologação, apague o snapshot e os relatórios dos diretórios privados, e restaure o deployment anterior de homologação.
 
 ---
 
@@ -273,7 +307,7 @@ O teste de equivalência entre os adaptadores pagou-se na hora: o SQL filtrava e
 - **Novo corte depois do retorno.** Manter os ids na volta transforma um novo corte numa recusa explícita ("Native row collision") em vez de duplicatas silenciosas. Antes de um novo corte, as linhas nativas de `stock_observation_log` (copiadas de volta) e de `sku_weekly_demand` (recalculadas no Firestore) precisam ser resolvidas explicitamente — por exemplo, removidas da cópia. Sem isso, espere colisão (mesmo id) ou duplicata (`CHAPA_10~hash` ao lado de `CHAPA/10`).
 - **Demanda semanal.** A série se cura no retorno por recomputação: o checkpoint do Firestore fica no valor de antes do corte e o rollup do Firestore recalcula as semanas a partir de `salesOrders`. Este é o caminho reverso pretendido para esta série; não há cópia de volta.
 
-**Nada disto aparece num ensaio.** O ensaio prova que a cópia fica idêntica no instante do bloqueio; ele não exercita a aplicação depois do corte. O que revelaria estes casos é a troca da fonte em homologação, com a aplicação servindo do PostgreSQL — o passo que segue pendente.
+**Nada disto aparece num ensaio.** O ensaio prova que a cópia fica idêntica no instante do bloqueio; ele não exercita a aplicação depois do corte. O que revelaria estes casos é a troca da fonte em homologação, com a aplicação servindo do PostgreSQL. A troca foi feita em 11/11/2026, e as leituras do MCP responderam da cópia. Falta exercitar as telas do site e o retorno.
 
 ---
 
