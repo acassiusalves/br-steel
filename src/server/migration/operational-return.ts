@@ -116,7 +116,8 @@ async function readPostgres(client: PoolClient, collection: OperationalCollectio
     `select source_id, payload from brsteel_ops.${TABLES[collection]} where not source_deleted order by source_id`);
   for (const row of result.rows) {
     const id = row.source_id as string;
-    if (!validId(id)) throw new ReturnError(`Identificador inválido no PostgreSQL: ${collection}/${id}.`);
+    // Quoted and cut: an invalid id may carry line breaks or be long enough to flood the log.
+    if (!validId(id)) throw new ReturnError(`Identificador inválido no PostgreSQL: ${collection}/${JSON.stringify(id).slice(0, 80)}.`);
     if (inDomain(collection, id)) rows.set(id, row.payload as Record<string, unknown>);
   }
   return rows;

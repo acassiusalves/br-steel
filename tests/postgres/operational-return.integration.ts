@@ -4,14 +4,14 @@ import { after, before, test } from 'node:test';
 import { Pool } from 'pg';
 import { initializeApp, deleteApp } from 'firebase-admin/app';
 import { getFirestore, Timestamp, type DocumentData, type DocumentReference, type Firestore,
-  type WriteBatch } from 'firebase-admin/firestore';
+  type Transaction, type WriteBatch } from 'firebase-admin/firestore';
 import { NATIVE_RUN_ID, contentHash } from '../../src/server/migration/operational-snapshot';
 import { createLocalImportPool, importSnapshot } from '../../src/server/migration/operational-import';
 import { exportOperationalSnapshot, jsonValue } from '../../src/server/migration/operational-export';
 import { RETURN_COLLECTIONS, applyReturn, planReturn, returnBatches, timestampFromIso, verifyReturn,
   type ReturnPlan } from '../../src/server/migration/operational-return';
 import { runReturn } from '../../src/server/migration/operational-return-run';
-import { describeReturnTarget, returnIdentityRefusal } from '../../scripts/lib/return-target';
+import { describeReturnTarget, openReturnTarget, returnIdentityRefusal } from '../../scripts/lib/return-target';
 
 const url = process.env.BRSTEEL_PG_LOCAL_URL;
 assert.ok(url, 'Run through scripts/operational-postgres-local.mjs');
@@ -322,9 +322,11 @@ test('the automated return mirrors PostgreSQL, switches the source back and reop
   await seedScenario();
   await setSwitches('postgres', null);
   const run = recorder();
+  const control = { aborted: false, opened: false, sourceDeleted: false };
 
-  const outcome = await runReturn({ pool, db, wait: run.wait, log: run.log });
+  const outcome = await runReturn({ pool, db, wait: run.wait, log: run.log, control });
   assert.equal(outcome.status, 'returned');
+  assert.deepEqual(control, { aborted: false, opened: true, sourceDeleted: true });
   assert.deepEqual(listed(outcome.plan!), EXPECTED_CHANGES);
   assert.deepEqual(run.waits, [20, 10, 10]);
   assert.deepEqual(run.states, ['postgres/draining', 'postgres/blocked', '-/blocked'],
@@ -430,12 +432,66 @@ test('a window opened by someone else after the pre-flight aborts the return and
   await setSwitches('postgres', null);
   const seeded = { mode: 'blocked', updatedAt: '2026-11-11T10:00:00.000Z' };
   const run = recorder();
+  const control = { aborted: false, opened: false, sourceDeleted: false };
 
-  const outcome = await runReturn({ pool, db: withRacingWindow(db, seeded), wait: run.wait, log: run.log });
+  const outcome = await runReturn({ pool, db: withRacingWindow(db, seeded), wait: run.wait, log: run.log, control });
   assert.equal(outcome.status, 'aborted');
   assert.match(outcome.reason!, /coreWriteMode/);
+  assert.equal(control.opened, false, 'a signal handler must not reopen a window this run did not create');
   assert.deepEqual(run.waits, []);
   assert.deepEqual(await switchRecords(), { source: { source: 'postgres' }, mode: seeded });
+});
+
+test('an interruption before the switch keeps the source on PostgreSQL and reopens the core', async () => {
+  await seedScenario();
+  await setSwitches('postgres', null);
+  const run = recorder();
+  const control = { aborted: false, opened: false, sourceDeleted: false };
+  // The signal arrives while the core is blocked; the run reaches the switch and must not take it.
+  const wait = async (seconds: number) => { await run.wait(seconds); if (run.waits.length === 2) control.aborted = true; };
+
+  const outcome = await runReturn({ pool, db, wait, log: run.log, control });
+  assert.equal(outcome.status, 'failed');
+  assert.match(outcome.reason!, /interrompido/);
+  assert.deepEqual(control, { aborted: true, opened: true, sourceDeleted: false });
+  assert.deepEqual(run.waits, [20, 10]);
+  assert.deepEqual(await switchRecords(), { source: { source: 'postgres' }, mode: undefined });
+});
+
+test('the source is switched only while the core is still blocked, read in the same transaction', async () => {
+  await seedScenario();
+  await setSwitches('postgres', null);
+  // Someone reopens the core by hand while the return runs.
+  const reopening = forward(db, { runTransaction: async (update: (transaction: Transaction) => Promise<unknown>) => {
+    await db.collection('appConfig').doc('coreWriteMode').set({ mode: 'open' });
+    return db.runTransaction(update);
+  } });
+  const run = recorder();
+  const control = { aborted: false, opened: false, sourceDeleted: false };
+
+  const outcome = await runReturn({ pool, db: reopening, wait: run.wait, log: run.log, control });
+  assert.equal(outcome.status, 'failed');
+  assert.match(outcome.reason!, /não está mais bloqueado/);
+  assert.equal(control.sourceDeleted, false);
+  assert.deepEqual(await switchRecords(), { source: { source: 'postgres' }, mode: undefined });
+});
+
+test('an idle-connection error on the CLI pool cannot crash the process', async () => {
+  const target = openReturnTarget(url, PROJECT);
+  try {
+    assert.doesNotThrow(() => target.pool.emit('error', new Error('idle client terminated')));
+  } finally {
+    await target.close();
+  }
+});
+
+test('an invalid PostgreSQL id is quoted and shortened in the message', async () => {
+  await seedScenario();
+  const id = `a/b\n${'x'.repeat(150)}`;
+  await pool.query(`insert into brsteel_ops.supplies (source_id, payload, source_version, source_hash, import_run_id, lookup_sku)
+    values ($1, $2, 1, $3, $4, 'BAD')`, [id, JSON.stringify(nativeSupply), contentHash(nativeSupply), NATIVE_RUN_ID]);
+  await assert.rejects(planReturn(pool, db), {
+    message: `Identificador inválido no PostgreSQL: supplies/${JSON.stringify(id).slice(0, 80)}.` });
 });
 
 test('the plan and the whole return work through the NOINHERIT importer login', async () => {

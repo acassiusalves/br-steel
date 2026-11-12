@@ -1,5 +1,6 @@
 import type { Firestore } from 'firebase-admin/firestore';
 import type { Pool } from 'pg';
+import { parseCoreWriteMode } from '../operations/switch-values';
 import { applyReturn, planReturn, readSwitches, returnErrorMessage, verifyReturn, withImporterSnapshot,
   type ReturnChange, type ReturnCounts, type ReturnPlan } from './operational-return';
 
@@ -29,15 +30,24 @@ export function describeChanges(changes: ReturnChange[]): string[] {
 const ALREADY_EXISTS = 6;
 
 /**
+ * Shared with whoever handles signals around the run. The handler sets `aborted`; the run reports
+ * whether it created the window (`opened`) and whether the source has already gone back
+ * (`sourceDeleted`), which tells the handler what it may reopen and how long to wait first.
+ */
+export type ReturnRunControl = { aborted: boolean; opened: boolean; sourceDeleted: boolean };
+
+/**
  * The whole return in one window. The pre-flight writes nothing, and every PostgreSQL read assumes the
  * importer role inside a transaction (`withImporterSnapshot`). The window opens by *creating* the
  * maintenance record, so a window someone else opened after the pre-flight aborts the return and is
  * left alone; from then on, the core is reopened in a `finally`. The source goes back to Firestore only
- * after a verification with zero divergences, so a divergence or a failure leaves the environment
+ * after a verification with zero divergences, and only in a transaction that finds the core still
+ * blocked and the run not interrupted. A divergence, a failure or an interruption leaves the environment
  * serving from PostgreSQL, where nothing is lost, and the return is resolved by running it again.
  */
-export async function runReturn({ pool, db, wait, log }: {
+export async function runReturn({ pool, db, wait, log, control = { aborted: false, opened: false, sourceDeleted: false } }: {
   pool: Pool; db: Firestore; wait: (seconds: number) => Promise<void>; log: (line: string) => void;
+  control?: ReturnRunControl;
 }): Promise<ReturnRunOutcome> {
   const config = db.collection('appConfig');
   const sourceRef = config.doc('operationalSource'), modeRef = config.doc('coreWriteMode');
@@ -79,6 +89,7 @@ export async function runReturn({ pool, db, wait, log }: {
       opened = false;
       return abort('appConfig/coreWriteMode foi criado por outra execução depois do pré-voo.');
     }
+    control.opened = true;
     log('1/5 draining — aguardando as chamadas em trânsito (20 s)');
     await wait(20);
     await modeRef.set(record('blocked'));
@@ -98,7 +109,21 @@ export async function runReturn({ pool, db, wait, log }: {
       for (const line of describeChanges(verified.changes)) log(`      ${line}`);
       return { status: 'divergent', plan: applied, divergences: verified.changes };
     }
-    await sourceRef.delete();
+    // A core reopened by hand during the apply would have let writes reach PostgreSQL after the mirror,
+    // so the switch reads the record in the same transaction that deletes the source.
+    const refused = await db.runTransaction(async transaction => {
+      if (control.aborted) return 'retorno interrompido antes da troca da fonte';
+      const mode = parseCoreWriteMode((await transaction.get(modeRef)).data()?.mode);
+      if (mode !== 'blocked') return `o núcleo não está mais bloqueado na hora da troca (modo ${mode})`;
+      transaction.delete(sourceRef);
+      return null;
+    });
+    if (refused) {
+      const reason = `${refused}; a fonte continua postgres.`;
+      log(`5/5 ERRO: ${reason}`);
+      return { status: 'failed', reason };
+    }
+    control.sourceDeleted = true;
     log('5/5 DIVERGÊNCIA ZERO — operationalSource removido; o núcleo segue bloqueado enquanto o cache do seletor expira (10 s)');
     await wait(10);
     return { status: 'returned', plan: applied };

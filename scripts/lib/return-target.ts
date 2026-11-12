@@ -17,6 +17,10 @@ export type ReturnTarget = { project: string; db: Firestore; pool: Pool; close: 
 export const RETURN_ENV_HINT = 'Defina BRSTEEL_CUTOVER_DATABASE_URL e BRSTEEL_RETURN_TARGET_PROJECT.'
   + ' Para o destino hospedado, defina também BRSTEEL_CUTOVER_CA_FILE.';
 
+/** Com o emulador configurado, o SDK leria e gravaria nele em vez do projeto de destino. */
+export const RETURN_EMULATOR_REFUSAL = 'FIRESTORE_EMULATOR_HOST está definido: o retorno leria e gravaria no emulador,'
+  + ' não no projeto de destino. Remova a variável e repita.';
+
 export function openReturnTarget(connectionString: string, project: string): ReturnTarget {
   let pool: Pool;
   try {
@@ -26,6 +30,9 @@ export function openReturnTarget(connectionString: string, project: string): Ret
     throw new ReturnError('Não foi possível preparar a conexão com o PostgreSQL. Confira BRSTEEL_CUTOVER_DATABASE_URL'
       + ' (login do importador, sem query string) e, para o destino hospedado, BRSTEEL_CUTOVER_CA_FILE.');
   }
+  // Uma conexão ociosa que cai (um reinício do pooler) emite no pool. Sem ouvinte, o Node encerraria o
+  // processo na hora e pularia o `finally` que reabre o núcleo. A consulta em andamento ainda falha normalmente.
+  pool.on('error', () => undefined);
   const app = initializeApp({ projectId: project, credential: applicationDefault() }, 'operational-return');
   return {
     project, db: getFirestore(app), pool,

@@ -15,7 +15,7 @@
  */
 import { applyReturn, planReturn, returnErrorMessage, verifyReturn } from '../src/server/migration/operational-return';
 import { describeChanges, describeCounts } from '../src/server/migration/operational-return-run';
-import { RETURN_ENV_HINT, describeReturnTarget, openReturnTarget } from './lib/return-target';
+import { RETURN_EMULATOR_REFUSAL, RETURN_ENV_HINT, describeReturnTarget, openReturnTarget } from './lib/return-target';
 
 const COMMANDS = { plan: planReturn, apply: applyReturn, verify: verifyReturn };
 type Command = keyof typeof COMMANDS;
@@ -24,6 +24,10 @@ async function main() {
   const command = process.argv[2];
   if (!command || !Object.keys(COMMANDS).includes(command)) {
     console.error(`Uso: operational-return.ts <${Object.keys(COMMANDS).join('|')}>`);
+    process.exit(1);
+  }
+  if (process.env.FIRESTORE_EMULATOR_HOST) {
+    console.error(RETURN_EMULATOR_REFUSAL);
     process.exit(1);
   }
   const connectionString = process.env.BRSTEEL_CUTOVER_DATABASE_URL;
