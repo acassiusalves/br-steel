@@ -5,6 +5,7 @@ import type { HistoryPoint, ProductionDemand, ProductionDemandReadRepository } f
 import { isoWeekOf, isoWeekRange } from '@/lib/iso-week';
 import { withOperationalSnapshot } from './postgres-read';
 import { latestStockSql } from './postgres-stock';
+import { supplyLimitsSql } from './postgres-supplies';
 import { storedStockWarnings } from './stored-stock-model';
 import { buildCancelledStatusSqlFragment } from './demand-eligibility';
 
@@ -28,10 +29,7 @@ function buildDemandSql(): string {
 ), aggregated as (
   select sku_key,count(distinct order_key)::int as order_count,sum(quantity order by item_order) as quantity,min(item_order) as first_seen
   from valid_items group by sku_key
-), latest_stock as (${latestStockSql}), limits as (
-  select distinct on (lookup_sku) lookup_sku,payload->'estoqueMinimo' as minimum,payload->'estoqueMaximo' as maximum
-  from brsteel_ops.supplies where not source_deleted order by lookup_sku,source_id desc
-)
+), latest_stock as (${latestStockSql}), limits as (${supplyLimitsSql})
 select f.sku,f.description,f.description_present,a.order_count,a.quantity,s.stock_read,l.minimum,l.maximum
 from aggregated a join valid_items f on f.item_order=a.first_seen
 left join latest_stock s on to_jsonb(s.observed_sku)=f.sku

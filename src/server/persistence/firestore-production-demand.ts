@@ -1,5 +1,4 @@
 import 'server-only';
-import { adminDb } from '@/lib/firebase-admin';
 import type { OperationSource } from '@/types/operations';
 import type { SalesRange } from './sales-contract';
 import type { HistoryPoint, ProductionDemand, ProductionDemandReadRepository } from './production-demand-contract';
@@ -9,10 +8,11 @@ import { readStockSnapshot, readStoredStockSnapshot } from '@/server/operations/
 import { countsAsConsumption } from './demand-eligibility';
 import { isoWeekOf } from '@/lib/iso-week';
 import { skuWeeklyDemandRepository } from './sku-weekly-demand';
+import { supplyLimitsRepository } from './supplies';
 export async function readFirestoreProductionDemand(raw: SalesRange, databaseOnly = true) {
   const input = dateRangeSchema.parse(raw);
-  const [orders, stock, supplies, history] = await Promise.all([readOrdersForPeriod(input), databaseOnly ? readStoredStockSnapshot() : readStockSnapshot(), adminDb.collection('supplies').get(), skuWeeklyDemandRepository.readWeeklyHistory(12)]);
-  const limits = new Map(supplies.docs.map(doc => [String(doc.data().codigo || doc.id), doc.data()]));
+  // Os limites passam pelo repositório trocável: depois do corte, a coleção do Firestore para de ser atualizada.
+  const [orders, stock, limits, history] = await Promise.all([readOrdersForPeriod(input), databaseOnly ? readStoredStockSnapshot() : readStockSnapshot(), supplyLimitsRepository.readLimits(), skuWeeklyDemandRepository.readWeeklyHistory(12)]);
   const stocks = new Map(stock.data.map(row => [row.produto.codigo, row]));
   const weeks = Math.max(1, (Date.parse(input.to) - Date.parse(input.from) + 86400000) / 86400000 / 7);
   const demand = new Map<string, { description: string; orders: Set<number>; quantity: number }>();

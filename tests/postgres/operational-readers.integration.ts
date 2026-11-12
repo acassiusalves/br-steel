@@ -12,8 +12,8 @@ import { createPostgresProductionDemandRepository } from '../../src/server/persi
 import { firestoreProductionDemandReadRepository } from '../../src/server/persistence/firestore-production-demand';
 import { createPostgresProductionRepository } from '../../src/server/persistence/postgres-production';
 import { firestoreProductionReadRepository } from '../../src/server/persistence/firestore-production';
-import { createPostgresSuppliesRepository } from '../../src/server/persistence/postgres-supplies';
-import { firestoreSuppliesReadRepository } from '../../src/server/persistence/firestore-supplies';
+import { createPostgresSuppliesRepository, createPostgresSupplyLimitsRepository } from '../../src/server/persistence/postgres-supplies';
+import { firestoreSuppliesReadRepository, firestoreSupplyLimitsRepository } from '../../src/server/persistence/firestore-supplies';
 import { createStoredStockOperations } from '../../src/server/operations/stock';
 import { createProductionDemandOperation } from '../../src/server/operations/production-demand';
 import { createProductionReadOperations } from '../../src/server/operations/production';
@@ -220,6 +220,12 @@ test('supplies advance through unnamed rows and movements preserve São Paulo da
     } while (next);
     assert.deepEqual(ids,filters.from ? ['m1','m1-tie','m2'] : ['m-undated','m0','m1','m1-tie','m2','m3']);
   }
+});
+test('stock limits keep unnamed product rows and resolve a repeated SKU by the highest document ID', async () => {
+  const sql = await createPostgresSupplyLimitsRepository(readerPool).readLimits();
+  assert.deepEqual(sql,await firestoreSupplyLimitsRepository.readLimits());
+  assert.deepEqual(sql.get('THRESHOLD'),{estoqueMinimo:1,estoqueMaximo:undefined});
+  assert.deepEqual(sql.get('ZERO'),{estoqueMinimo:0,estoqueMaximo:20});
 });
 test('SQL-backed operation factories preserve per-user authorization and minimal production access', async () => {
   const stockOps = createStoredStockOperations(stock), prodOps = createProductionReadOperations(production);

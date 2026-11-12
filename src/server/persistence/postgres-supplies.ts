@@ -3,9 +3,24 @@ import type { Pool } from 'pg';
 import { z } from 'zod';
 import type { SupplyRead } from '@/types/supply';
 import { documentIdSchema, OperationError, result } from '@/server/operations/common';
-import type { SuppliesReadRepository, SupplyMovementRead } from './supplies-contract';
+import type { SuppliesReadRepository, SupplyLimitsReadRepository, SupplyMovementRead } from './supplies-contract';
 import { movementDateBounds } from './supplies-read-projection';
 import { withOperationalSnapshot } from './postgres-read';
+
+/** `lookup_sku` is `codigo` or the document ID, set by the import; the highest ID wins, as in Firestore. */
+export const supplyLimitsSql = `select distinct on (lookup_sku) lookup_sku,payload->'estoqueMinimo' as minimum,payload->'estoqueMaximo' as maximum
+  from brsteel_ops.supplies where not source_deleted order by lookup_sku,source_id desc`;
+
+export function createPostgresSupplyLimitsRepository(pool: Pool): SupplyLimitsReadRepository {
+  return {
+    async readLimits() {
+      return withOperationalSnapshot(pool, async client => {
+        const rows = (await client.query(supplyLimitsSql)).rows.filter(row => row.lookup_sku !== null);
+        return new Map(rows.map(row => [row.lookup_sku as string, { estoqueMinimo: row.minimum ?? undefined, estoqueMaximo: row.maximum ?? undefined }]));
+      });
+    },
+  };
+}
 
 function documentCursor(cursor?: string) {
   if (!cursor) return undefined;
