@@ -216,7 +216,7 @@ O que observar daqui em diante:
 
 ## Retorno PostgreSQL → Firestore
 
-O retorno devolve ao Firestore um ambiente que está servindo do PostgreSQL. Ele espelha a cópia no Firestore do próprio ambiente e, com divergência zero, apaga `appConfig/operationalSource`. O código está em `src/server/migration/operational-return.ts` e `operational-return-run.ts`, e os testes em `tests/postgres/operational-return.integration.ts`. **A ferramenta ainda não foi ensaiada contra um ambiente hospedado.**
+O retorno devolve ao Firestore um ambiente que está servindo do PostgreSQL. Ele espelha a cópia no Firestore do próprio ambiente e, com divergência zero, apaga `appConfig/operationalSource`. O código está em `src/server/migration/operational-return.ts` e `operational-return-run.ts`, e os testes em `tests/postgres/operational-return.integration.ts`. O ensaio na homologação, em 12/11/2026, está registrado no fim desta seção.
 
 **O que a ferramenta faz.** Compara cada coleção do núcleo nos dois lados, por id:
 - o que está no PostgreSQL e falta no Firestore é criado;
@@ -281,6 +281,20 @@ A janela dura 40 s mais o tempo do `apply` e do `verify`. Os dois leem as duas b
 **Consequências para o ensaio na homologação:**
 - **O primeiro retorno grava uma cópia completa no Firebase da homologação.** O `apply` cria em `brsteel-mcp-staging` cerca de 18,8 mil documentos (pedidos, itens, estoque, observações, insumos e lotes) e apaga, nessas coleções, o que não estiver na cópia. São dados reais de clientes, como os da cópia. Depois do retorno, a homologação lê esses documentos do próprio Firestore.
 - **Uma cópia alterada pelo ensaio precisa ser recarregada do zero antes do corte da produção.** As gravações pela homologação criam linhas nativas e alteram linhas importadas. Uma importação nova reconcilia sobre a cópia, mas preserva as linhas nativas, e o corte partiria de uma cópia que não é reflexo do `marketflow-9h4tg`. Antes do corte, a carga parte de uma exportação nova e de uma cópia vazia (Passo 3).
+
+**Ensaio de 12/11/2026 na homologação, sem gravações pelo ambiente.** Corresponde ao Passo 4 do plano da etapa 5: o retorno antes da primeira gravação oficial.
+- `plan` previu 18.790 criações e nenhuma atualização ou exclusão: 14.603 pedidos, 413 registros de estoque, 3.706 observações, 54 insumos, 3 colunas, 3 lotes, 7 itens de lote e 1 movimentação.
+- `npm run cutover:return -- --confirm` terminou em `returned`:
+  - a janela foi das 09:29:37 às 09:33:44 UTC, ou 4 min 7 s;
+  - o `apply` levou 3 min 14 s, e o `verify`, 13 s, com divergência zero.
+- Depois do retorno:
+  - o conector do Claude da homologação respondeu com fonte `firestore` e os mesmos números da cópia (289 pedidos de 05/11 a 11/11);
+  - as 3.706 observações ficaram com `expiresAt` como Timestamp;
+  - um segundo `verify` continuou com divergência zero.
+- Em seguida, a homologação voltou a ler do PostgreSQL (`operationalSource = postgres`). Nada foi gravado entre o retorno e a volta, então a cópia segue reflexo do `marketflow-9h4tg`. Os 18.790 documentos continuam no Firebase da homologação, sem uso enquanto a fonte for `postgres`.
+- **O Firebase da homologação está no plano gratuito,** com cerca de 20 mil gravações por dia. A cota zera à meia-noite do Pacífico. O ensaio usou quase toda a cota. Uma segunda carga completa no mesmo dia falharia no meio. Como a fonte só muda depois de divergência zero, o ambiente continuaria no PostgreSQL.
+- **Com o login vencido, o pooler não diz que a senha venceu.** Ele responde `unsupported or invalid secret format`, e a conexão direta responde `password authentication failed`. Antes de investigar o pooler, confira `rolvaliduntil > now()`. A conexão direta (`db.mmewkphsrnttkzvpyddv.supabase.co:5432`, usuário sem o sufixo do projeto) também é aceita pelo CLI.
+- Falta o Passo 5: o retorno depois de gravações oficiais. Ele exige gravar pelo site da homologação, com login de usuário, e recarregar a cópia do zero antes do corte da produção.
 
 ---
 
@@ -377,7 +391,7 @@ O teste de equivalência entre os adaptadores pagou-se na hora: o SQL filtrava e
 - **Novo corte depois do retorno.** Manter os ids na volta transforma um novo corte numa recusa explícita ("Native row collision") em vez de duplicatas silenciosas. Antes de um novo corte, as linhas nativas de `stock_observation_log` (copiadas de volta) e de `sku_weekly_demand` (recalculadas no Firestore) precisam ser resolvidas explicitamente — por exemplo, removidas da cópia. Sem isso, espere colisão (mesmo id) ou duplicata (`CHAPA_10~hash` ao lado de `CHAPA/10`).
 - **Demanda semanal.** A série se cura no retorno por recomputação: o checkpoint do Firestore fica no valor de antes do corte e o rollup do Firestore recalcula as semanas a partir de `salesOrders`. Este é o caminho reverso pretendido para esta série; não há cópia de volta.
 
-**Nada disto aparece num ensaio.** O ensaio prova que a cópia fica idêntica no instante do bloqueio; ele não exercita a aplicação depois do corte. O que revelaria estes casos é a troca da fonte em homologação, com a aplicação servindo do PostgreSQL. A troca foi feita em 11/11/2026, e as leituras do MCP responderam da cópia. Falta exercitar as telas do site. A ferramenta do retorno existe (ver "Retorno PostgreSQL → Firestore"); falta o ensaio.
+**Nada disto aparece num ensaio.** O ensaio prova que a cópia fica idêntica no instante do bloqueio; ele não exercita a aplicação depois do corte. O que revelaria estes casos é a troca da fonte em homologação, com a aplicação servindo do PostgreSQL. A troca foi feita em 11/11/2026, e as leituras do MCP responderam da cópia. Falta exercitar as telas do site. O retorno sem gravações foi ensaiado em 12/11/2026 (ver "Retorno PostgreSQL → Firestore"). Falta o retorno depois de gravações oficiais.
 
 ---
 
