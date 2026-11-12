@@ -614,6 +614,22 @@ test('SQL stock observations rebuild the read projection instead of drifting', a
   assert.deepEqual(merged, { sku: 'A', virtual: '9' }, 'a partial observation merges instead of dropping known fields');
 });
 
+// In production every stock webhook rewrote all ~400 projection rows one statement at a time inside a
+// serializable transaction: bursts timed out, deadlocked and exhausted connections. An observation on
+// one SKU must leave the projection rows it does not change untouched.
+test('SQL stock observations rewrite only the projection rows that change', async () => {
+  await seedReadyCopy();
+  await ingest.applyStockObservation('B', { sku: 'B', estoqueAtual: 5, webhookReceivedAt: '2026-09-01T00:00:00Z' });
+  await ingest.applyStockObservation('A', { sku: 'A', estoqueAtual: 0, webhookReceivedAt: '2026-09-02T00:00:00Z' });
+  const version = async (id: string) => (await pool.query(
+    `select xmin::text as v from brsteel_ops.stock_observations where source_id = $1`, [id])).rows[0].v;
+  const before = await version('B');
+  await ingest.applyStockObservation('A', { sku: 'A', estoqueAtual: 3, webhookReceivedAt: '2026-09-03T00:00:00Z' });
+  assert.equal(await version('B'), before, 'an unrelated row was rewritten');
+  const a = (await pool.query(`select stock_read->>'saldoVirtualTotal' as virtual from brsteel_ops.stock_observations where source_id = 'A'`)).rows[0];
+  assert.equal(a.virtual, '3');
+});
+
 test('SQL stock observations append to the history only when the balance changes', async () => {
   await seedReadyCopy();
   await pool.query('delete from brsteel_ops.stock_observation_log');
