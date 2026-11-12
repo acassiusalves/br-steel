@@ -6,7 +6,34 @@
 
 O código do corte está pronto e testado: interruptor de manutenção, reconciliação, comparador e seletor trocável em runtime. O que falta é provisionamento, que envolve credenciais e por isso é seu.
 
-**Nada aqui toca produção.** O destino é o Supabase `mmewkphsrnttkzvpyddv` e o ambiente é a Vercel de homologação `br-steel-mcp-staging`. A aplicação de produção continua em Firestore o tempo todo — `appConfig/operationalSource` nem existe lá.
+> **A produção foi cortada para o PostgreSQL em 12/11/2026.** Desde as 12:04:36 UTC, `appConfig/operationalSource` em `marketflow-9h4tg` vale `postgres`, e o núcleo operacional da produção lê e grava em `mmewkphsrnttkzvpyddv`. O registro do corte está em "Corte da produção, 12/11/2026", logo abaixo. O texto que segue, escrito para os ensaios, descreve o caminho até ali.
+
+## Corte da produção, 12/11/2026
+
+**Preparação, com o núcleo aberto:**
+- Foi criado o login de runtime da produção, `brsteel_ops_production`:
+  - `login`, `valid until 'infinity'`, `inherit` e `connection limit 20`;
+  - membro de `brsteel_ops_writer` com `inherit true`;
+  - `statement_timeout` de 30 s fixado no papel, porque o pooler descarta o parâmetro de inicialização;
+  - o banco recebeu só o verificador SCRAM, e a senha não passou pelo servidor nem pelos logs.
+- O login de runtime da homologação, `brsteel_ops_runtime`, foi desligado (`nologin`). O banco passou a guardar dados de produção, e a homologação não pode gravar nele. Com a chave ainda em `postgres`, o núcleo da homologação responde 503.
+- `BRSTEEL_OPERATIONAL_DATABASE_URL`, com o pooler de sessão na porta 5432, e `BRSTEEL_OPERATIONAL_CA` foram gravadas como Secret no destino Production de `br-steel`. A produção foi republicada em `dpl_BiH3agdJm7oqTZeLnojhLBxCvcUd`, ainda servindo do Firestore.
+
+**Janela, das 11:53:48 às 12:04:46 UTC (10 min 58 s):**
+1. `draining` por 20 s, depois `blocked` por 10 s.
+2. `reconcile` de 19.040 registros e 15.191 itens, em 568 s.
+3. `compare` com divergência zero.
+4. `operationalSource = postgres`, gravado numa transação que exigia `blocked`.
+5. Espera de 10 s pelo cache do seletor, e então a reabertura.
+
+A sequência rodou por um script local que segue o mesmo desenho do retorno: troca a fonte só com divergência zero e só reabre depois da troca. O login do importador foi aberto pela conexão direta e fechado ao fim.
+
+**Depois da janela:**
+- Os webhooks voltaram a ser processados na hora e gravam no PostgreSQL. Às 12:06, um pedido, a projeção de estoque e uma linha de `stock_observation_log` já tinham versão posterior ao corte.
+- A Vercel não registrou erros de execução.
+- **Os 13 eventos que ficaram na fila durante a janela não foram drenados.** Na produção, 5.550 falhas com tentativas esgotadas vinham na frente na consulta do dreno, que gastava todos os lugares do lote com elas. A correção (PR [#43](https://github.com/acassiusalves/br-steel/pull/43)) drena primeiro as entregas novas e ignora as falhas esgotadas. Os eventos continuaram guardados como `received` até a correção ser publicada.
+
+**Para voltar ao Firestore,** use a ferramenta de retorno com `BRSTEEL_RETURN_TARGET_PROJECT=marketflow-9h4tg` (ver "Retorno PostgreSQL → Firestore").
 
 Guarde credenciais num arquivo privado fora do Git, com permissão `0600`. Nada deste roteiro deve ser colado em chat, issue ou PR.
 
