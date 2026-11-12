@@ -2,7 +2,7 @@ import 'server-only';
 import { randomUUID } from 'node:crypto';
 import type { Pool, PoolClient } from 'pg';
 import { serialize } from '@/server/operations/common';
-import { NATIVE_RUN_ID, contentHash } from '@/server/migration/operational-snapshot';
+import { NATIVE_RUN_ID, canonicalJson, contentHash } from '@/server/migration/operational-snapshot';
 import type { IngestCounts, SalesIngestRepository, SourceOrder } from './sales-ingest-contract';
 import { prepareStockReadModels } from './stored-stock-model';
 import { withOperationalWrite } from './postgres-write';
@@ -40,17 +40,30 @@ async function rebuildItems(client: PoolClient, orderId: string, payload: Doc) {
  * sku_order is a position in the locale ordering of every SKU, so a new observation shifts the others.
  * The whole projection is rebuilt inside the same transaction rather than guessing an insertion point.
  */
+/**
+ * Recomputes the read projection and writes back only the rows whose values changed, in one statement.
+ * Rewriting every row one statement at a time held row locks on the whole table for tens of seconds per
+ * webhook, so bursts of stock events deadlocked, hit the statement timeout and exhausted connections.
+ */
 async function rebuildStockProjection(client: PoolClient) {
-  const rows = (await client.query(
-    'select source_id, payload from brsteel_ops.stock_observations where not source_deleted')).rows;
+  const rows = (await client.query(`select source_id, payload, stock_read, observed_at_ms, sku_order
+    from brsteel_ops.stock_observations where not source_deleted`)).rows;
   const models = prepareStockReadModels(rows.map(row => ({ id: row.source_id, data: row.payload as Doc })));
+  const ids: string[] = [], reads: (string | null)[] = [], observed: (number | null)[] = [], orders: (number | null)[] = [];
   for (const row of rows) {
     const model = models.get(row.source_id);
-    await client.query(
-      `update brsteel_ops.stock_observations set stock_read = $2, observed_at_ms = $3, sku_order = $4
-       where source_id = $1`,
-      [row.source_id, model ? JSON.stringify(model.stock) : null, model?.observedAtMs ?? null, model?.skuOrder ?? null]);
+    const read = model ? JSON.parse(JSON.stringify(model.stock)) as Doc : null;
+    const at = model?.observedAtMs ?? null, order = model?.skuOrder ?? null;
+    const same = (row.observed_at_ms === null ? null : Number(row.observed_at_ms)) === at && row.sku_order === order
+      && (read === null ? row.stock_read === null : row.stock_read !== null && canonicalJson(row.stock_read) === canonicalJson(read));
+    if (same) continue;
+    ids.push(row.source_id); reads.push(read === null ? null : JSON.stringify(read)); observed.push(at); orders.push(order);
   }
+  if (!ids.length) return;
+  await client.query(`update brsteel_ops.stock_observations o
+    set stock_read = v.stock_read, observed_at_ms = v.observed_at_ms, sku_order = v.sku_order
+    from unnest($1::text[], $2::jsonb[], $3::double precision[], $4::integer[]) as v(source_id, stock_read, observed_at_ms, sku_order)
+    where o.source_id = v.source_id`, [ids, reads, observed, orders]);
 }
 
 export function createPostgresSalesIngestRepository(pool: Pool): SalesIngestRepository {
