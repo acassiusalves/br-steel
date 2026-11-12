@@ -630,6 +630,28 @@ test('SQL stock observations rewrite only the projection rows that change', asyn
   assert.equal(a.virtual, '3');
 });
 
+// Bling delivers stock events in bursts of 8–10 within a second. Each one reads the whole projection in a
+// serializable transaction, so in production a burst failed with 40001 even after the retries. Stock
+// writes must queue behind each other instead of conflicting.
+test('a burst of concurrent stock observations all land instead of failing to serialize', async () => {
+  await seedReadyCopy();
+  const burstPool = new Pool({ connectionString: url, max: 12, options: '-c role=brsteel_ops_writer' });
+  try {
+    const burst = createPostgresSalesIngestRepository(burstPool);
+    const skus = Array.from({ length: 12 }, (_, index) => `BURST-${index}`);
+    const results = await Promise.allSettled(skus.map((sku, index) => burst.applyStockObservation(sku,
+      { sku, estoqueAtual: index + 1, webhookReceivedAt: `2026-09-01T00:00:${String(index).padStart(2, '0')}Z` })));
+    const failures = results.filter(result => result.status === 'rejected')
+      .map(result => (result as PromiseRejectedResult).reason?.code ?? 'error');
+    assert.deepEqual(failures, [], `burst writes failed: ${failures.join(', ')}`);
+    const stored = (await pool.query(`select count(*)::int as n from brsteel_ops.stock_observations
+      where source_id like 'BURST-%' and stock_read is not null`)).rows[0].n;
+    assert.equal(stored, skus.length);
+  } finally {
+    await burstPool.end();
+  }
+});
+
 test('SQL stock observations append to the history only when the balance changes', async () => {
   await seedReadyCopy();
   await pool.query('delete from brsteel_ops.stock_observation_log');
