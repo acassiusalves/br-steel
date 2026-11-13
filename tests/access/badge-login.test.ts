@@ -69,3 +69,12 @@ describe('acesso pelo crachá', () => {
     expect((await profile(request('profile', 'PATCH', { name: 'Pessoa', currentPassword: 'senha-original-longa', newPassword: 'curta1' }, token))).status).toBe(400);
   });
 });
+
+describe('acesso pelo crachá sob tentativas simultâneas', () => {
+  beforeEach(async () => { await resetDatabase(); await firestoreBadgeAccounts.create('Líder de teste', '26557'); });
+  it('10 senhas erradas ao mesmo tempo bloqueiam o crachá', async () => {
+    const statuses = await Promise.all(Array.from({ length: 10 }, () => login(request('login', 'POST', { badge: '26557', password: 'errada' })).then(r => r.status)));
+    expect(statuses.every(status => status === 401 || status === 429)).toBe(true);
+    expect((await login(request('login', 'POST', { badge: '26557', password: '123456' }))).status).toBe(429);
+  });
+});
