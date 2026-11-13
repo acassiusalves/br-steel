@@ -1,9 +1,9 @@
 import 'server-only';
 import type { Pool, PoolClient } from 'pg';
 import { OperationError, result } from '@/server/operations/common';
-import { predecessorError, teamMembersError, workPeriodsError } from '@/lib/pcp/engineering-rules';
+import { predecessorError, sheetError, teamMembersError, workPeriodsError } from '@/lib/pcp/engineering-rules';
 import type {
-  EngineeringRepository, EngineeringSnapshot, Holiday, LineInput, OperationInput, TeamInput, WorkerInput, WorkPeriodRow,
+  EngineeringRepository, EngineeringSnapshot, Holiday, LineInput, OperationInput, ProductSheet, SheetInput, SheetStatus, TeamInput, WorkerInput, WorkPeriodRow,
 } from './pcp-engineering-contract';
 import { recordWriteAudit, type WriteActor } from './write-audit';
 import { withOperationalWrite } from './postgres-write';
@@ -260,6 +260,90 @@ export function createPostgresEngineeringRepository(pool: Pool): EngineeringRepo
         if (!(await client.query('delete from brsteel_pcp.holidays where day = $1', [day])).rowCount) throw missing('Feriado');
         await audit(client, 'pcp.deleteHoliday', actor, 'pcp.holidays', day);
         return result(null, 'postgres');
+      });
+    },
+
+    async listSheets() {
+      const rows = (await pool.query(
+        `select s.id, s.code, s.sku, s.name, s.status,
+           (select count(*)::int from brsteel_pcp.product_sheet_steps t where t.sheet_id = s.id) step_count,
+           (select count(*)::int from brsteel_pcp.product_sheet_components c where c.sheet_id = s.id) component_count
+         from brsteel_pcp.product_sheets s order by s.name`)).rows as Row[];
+      return result(rows.map(r => ({ id: String(r.id), code: String(r.code), sku: String(r.sku), name: String(r.name),
+        status: r.status as SheetStatus, stepCount: Number(r.step_count), componentCount: Number(r.component_count) })), 'postgres');
+    },
+
+    async getSheet(id: string) {
+      const client = await pool.connect();
+      try {
+        await client.query('begin isolation level repeatable read read only');
+        const sheet = (await client.query('select * from brsteel_pcp.product_sheets where id = $1', [id])).rows[0] as Row | undefined;
+        if (!sheet) throw missing('Ficha');
+        const steps = (await client.query(
+          `select t.operation_id, p.operation_id as predecessor_operation_id, t.planned_minutes, t.notes
+           from brsteel_pcp.product_sheet_steps t left join brsteel_pcp.product_sheet_steps p on p.id = t.predecessor_step_id
+           where t.sheet_id = $1 order by t.position`, [id])).rows as Row[];
+        const components = (await client.query(
+          `select c.component_sku, c.component_name, c.quantity, t.operation_id
+           from brsteel_pcp.product_sheet_components c left join brsteel_pcp.product_sheet_steps t on t.id = c.step_id
+           where c.sheet_id = $1 order by c.component_sku`, [id])).rows as Row[];
+        await client.query('commit');
+        const detail: ProductSheet = {
+          id, code: String(sheet.code), sku: String(sheet.sku), name: String(sheet.name), status: sheet.status as SheetStatus,
+          baseQuantity: Number(sheet.base_quantity), lineId: (sheet.line_id as string) ?? null,
+          steps: steps.map(t => ({ operationId: String(t.operation_id), predecessorOperationId: (t.predecessor_operation_id as string) ?? null,
+            plannedMinutes: t.planned_minutes === null ? null : Number(t.planned_minutes), notes: (t.notes as string) ?? null })),
+          components: components.map(c => ({ componentSku: String(c.component_sku), componentName: (c.component_name as string) ?? null,
+            quantity: Number(c.quantity), operationId: (c.operation_id as string) ?? null })),
+        };
+        return result(detail, 'postgres');
+      } catch (error) {
+        await client.query('rollback').catch(() => undefined);
+        throw error;
+      } finally {
+        client.release();
+      }
+    },
+
+    async saveSheet(id: string | null, input: SheetInput, actor: WriteActor) {
+      return write(pool, async client => {
+        const known = new Set((await client.query('select id from brsteel_pcp.production_operations')).rows.map((r: Row) => String(r.id)));
+        refuse(sheetError(input.steps, input.components, known));
+        const values = [input.code, input.sku, input.name, input.status, input.baseQuantity, input.lineId];
+        let sheetId = id;
+        if (sheetId) {
+          const updated = await client.query(
+            `update brsteel_pcp.product_sheets set code = $2, sku = $3, name = $4, status = $5, base_quantity = $6, line_id = $7,
+               updated_at = now() where id = $1 returning id`, [sheetId, ...values]);
+          if (!updated.rowCount) throw missing('Ficha');
+        } else {
+          sheetId = (await client.query(
+            `insert into brsteel_pcp.product_sheets (code, sku, name, status, base_quantity, line_id)
+             values ($1, $2, $3, $4, $5, $6) returning id`, values)).rows[0].id as string;
+        }
+        // Componentes primeiro, porque apontam para os passos que serão regravados.
+        await client.query('delete from brsteel_pcp.product_sheet_components where sheet_id = $1', [sheetId]);
+        await client.query('delete from brsteel_pcp.product_sheet_steps where sheet_id = $1', [sheetId]);
+        const stepIds = new Map<string, string>();
+        for (const [position, step] of input.steps.entries()) {
+          stepIds.set(step.operationId, (await client.query(
+            `insert into brsteel_pcp.product_sheet_steps (sheet_id, operation_id, position, planned_minutes, notes)
+             values ($1, $2, $3, $4, $5) returning id`,
+            [sheetId, step.operationId, position, step.plannedMinutes, step.notes])).rows[0].id as string);
+        }
+        for (const step of input.steps.filter(t => t.predecessorOperationId)) {
+          await client.query('update brsteel_pcp.product_sheet_steps set predecessor_step_id = $2 where id = $1',
+            [stepIds.get(step.operationId), stepIds.get(step.predecessorOperationId!)]);
+        }
+        for (const component of input.components) {
+          await client.query(
+            `insert into brsteel_pcp.product_sheet_components (sheet_id, step_id, component_sku, component_name, quantity)
+             values ($1, $2, $3, $4, $5)`,
+            [sheetId, component.operationId ? stepIds.get(component.operationId) : null, component.componentSku,
+              component.componentName, component.quantity]);
+        }
+        await audit(client, id ? 'pcp.updateSheet' : 'pcp.createSheet', actor, 'pcp.sheets', sheetId);
+        return result({ id: sheetId }, 'postgres');
       });
     },
 

@@ -113,3 +113,81 @@ test('a página de engenharia é só do administrador', async () => {
   assert.ok(created.data.id);
   await assert.rejects(ops.saveLossReason(ctx('Administrador'), null, { name: 'Y', active: true, extra: 1 }));
 });
+
+test('a carga do iApp é idempotente e respeita o organograma', async () => {
+  const { buildImportSql } = await import('../../scripts/pcp-import-iapp');
+  const data = {
+    line: { iappId: 900, name: 'Linha sintética', monthlyCapacity: 100, phases: ['Corte', 'Check Corte', 'Dobra'] },
+    operations: [
+      { iappId: 1, code: 'S01', name: 'Cortar', phase: 'Corte', position: 1, predecessorIappId: null, defaultWorkerIappId: 10, location: 'interno' as const, classification: 'BATELADAS' },
+      { iappId: 2, code: 'S02', name: 'Check Corte', phase: 'Check Corte', position: 1, predecessorIappId: 1, defaultWorkerIappId: null, location: 'interno' as const, classification: null },
+      { iappId: 3, code: 'S03', name: "Dobrar d'água", phase: 'Dobra', position: 2, predecessorIappId: 2, defaultWorkerIappId: 11, location: 'interno' as const, classification: null },
+    ],
+    workers: [
+      { iappId: 10, name: 'Pessoa A', badge: 'S-001', kind: 'Cortador', active: true, operationIappIds: [1] },
+      { iappId: 11, name: 'Pessoa B', badge: 'S-002', kind: 'Dobrador', active: true, operationIappIds: [3, 99] },
+      { iappId: 12, name: 'Pessoa C', badge: 'S-003', kind: 'Dobrador', active: true, operationIappIds: [3] },
+    ],
+    teams: [
+      { iappId: 50, name: 'Dobra sintética', status: 'aberto' as const, shift: 'integral' as const, leaderIappId: 11, operations: ["Dobrar d'água"],
+        members: [{ workerIappId: 11, leaderIappId: null }, { workerIappId: 12, leaderIappId: 11 }] },
+    ],
+    workPeriods: [{ weekday: 1, startsAt: '07:45', endsAt: '12:00' }, { weekday: 1, startsAt: '13:00', endsAt: '17:30' }],
+    sheets: [{ iappId: 700, code: 'S-0700', sku: 'SKU-S700', name: 'Produto sintético importado', status: 'aberto' as const, baseQuantity: 1,
+      steps: [{ operationIappId: 1, predecessorOperationIappId: null, plannedMinutes: 8 }, { operationIappId: 3, predecessorOperationIappId: 1, plannedMinutes: null }],
+      components: [{ sku: 'PARTE-1', name: 'Parte um', quantity: 2, operationIappId: 1 }] }],
+  };
+  const sql = buildImportSql(data);
+  await pool.query(sql);
+  await pool.query(sql);
+  const counts = (await pool.query(`select
+    (select count(*)::int from brsteel_pcp.workers where iapp_id in (10, 11, 12)) workers,
+    (select count(*)::int from brsteel_pcp.production_operations where iapp_id in (1, 2, 3) and predecessor_id is not null) linked,
+    (select count(*)::int from brsteel_pcp.worker_operations wo join brsteel_pcp.workers w on w.id = wo.worker_id where w.iapp_id = 11) b_ops,
+    (select count(*)::int from brsteel_pcp.work_team_members m join brsteel_pcp.work_teams t on t.id = m.team_id where t.iapp_id = 50 and m.leader_id is not null) subordinates`)).rows[0];
+  assert.deepEqual(counts, { workers: 3, linked: 2, b_ops: 1, subordinates: 1 });
+  const sheet = (await pool.query(`select (select count(*)::int from brsteel_pcp.product_sheet_steps t where t.sheet_id = s.id) steps,
+      (select count(*)::int from brsteel_pcp.product_sheet_steps t where t.sheet_id = s.id and t.predecessor_step_id is not null) linked,
+      (select count(*)::int from brsteel_pcp.product_sheet_components c where c.sheet_id = s.id and c.step_id is not null) components
+    from brsteel_pcp.product_sheets s where s.iapp_id = 700`)).rows[0];
+  assert.deepEqual(sheet, { steps: 2, linked: 1, components: 1 });
+  assert.throws(() => buildImportSql({ ...data, sheets: [{ ...data.sheets[0], steps: [{ operationIappId: 3, predecessorOperationIappId: 1, plannedMinutes: null }] }] }), /S-0700/);
+  // Ciclo de predecessoras é recusado antes de gerar SQL.
+  assert.throws(() => buildImportSql({ ...data, operations: data.operations.map(op => (op.iappId === 1 ? { ...op, predecessorIappId: 3 } : op)) }), /ciclo/);
+  assert.throws(() => buildImportSql({ ...data, teams: [{ ...data.teams[0], leaderIappId: 10 }] }), /membro da equipe/);
+});
+
+test('ficha técnica: roteiro com predecessoras, componentes por passo e regravação', async () => {
+  const snapshot = (await repo.read()).data;
+  const op = (name: string) => snapshot.operations.find(o => o.name === name)!.id;
+  const [cortar, check, dobrar] = [op('Cortar'), op('Check Q/Q Corte'), op('Dobrar')];
+  const input = {
+    code: 'F-0001', sku: 'SKU-SINTETICO', name: 'Produto sintético', status: 'aberto' as const, baseQuantity: 1, lineId: null,
+    steps: [
+      { operationId: cortar, predecessorOperationId: null, plannedMinutes: 8, notes: null },
+      { operationId: check, predecessorOperationId: cortar, plannedMinutes: null, notes: 'Conferir a quantidade' },
+      { operationId: dobrar, predecessorOperationId: check, plannedMinutes: 4.5, notes: null },
+    ],
+    components: [
+      { componentSku: 'CHAPA-1', componentName: 'Chapa lateral', quantity: 2, operationId: cortar },
+      { componentSku: 'CHAPA-2', componentName: null, quantity: 1, operationId: null },
+    ],
+  };
+  const id = (await repo.saveSheet(null, input, actor)).data.id;
+  let sheet = (await repo.getSheet(id)).data;
+  assert.deepEqual(sheet.steps.map(s => s.predecessorOperationId), [null, cortar, check]);
+  assert.equal(sheet.components.find(c => c.componentSku === 'CHAPA-1')?.operationId, cortar);
+
+  // Regravar sem o Check: a predecessora do Dobrar precisa ser ajustada pelo cliente; o servidor recusa se não for.
+  await assert.rejects(repo.saveSheet(id, { ...input, steps: [input.steps[0], input.steps[2]] }, actor), /no roteiro da ficha/);
+  await repo.saveSheet(id, { ...input, steps: [input.steps[0], { ...input.steps[2], predecessorOperationId: cortar }],
+    components: [input.components[0]] }, actor);
+  sheet = (await repo.getSheet(id)).data;
+  assert.deepEqual(sheet.steps.map(s => s.operationId), [cortar, dobrar]);
+  assert.equal(sheet.components.length, 1);
+  await assert.rejects(repo.saveSheet(null, { ...input, code: 'F-0001' }, actor), /código/);
+  const list = (await repo.listSheets()).data;
+  assert.deepEqual(list.find(s => s.id === id), { id, code: 'F-0001', sku: 'SKU-SINTETICO', name: 'Produto sintético', status: 'aberto', stepCount: 2, componentCount: 1 });
+  // Operação usada em ficha não pode ser apagada.
+  await assert.rejects(pool.query('delete from brsteel_pcp.production_operations where id = $1', [dobrar]), (e: { code?: string }) => e.code === '23503');
+});

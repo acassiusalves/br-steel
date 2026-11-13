@@ -1,6 +1,6 @@
 import { fetchOperation, notifyOperationsChanged } from '@/lib/operation-client';
 import type {
-  EngineeringSnapshot, Holiday, LineInput, OperationInput, TeamInput, WorkerInput, WorkPeriodRow,
+  EngineeringSnapshot, Holiday, LineInput, OperationInput, ProductSheet, ProductSheetSummary, SheetInput, TeamInput, WorkerInput, WorkPeriodRow,
 } from '@/server/persistence/pcp-engineering-contract';
 
 const path = '/api/operations/engineering';
@@ -24,3 +24,10 @@ export const replaceWorkPeriods = (data: WorkPeriodRow[]) => mutate<null>('repla
 export const saveHoliday = (data: Holiday) => mutate<null>('saveHoliday', data);
 export const deleteHoliday = (day: string) => mutate<null>('deleteHoliday', undefined, day);
 export const saveLossReason = (id: string | null, data: { name: string; active: boolean }) => mutate<{ id: string }>('saveLossReason', data, id);
+export async function getSheets(): Promise<ProductSheetSummary[]> {
+  return (await fetchOperation<ProductSheetSummary[]>(`${path}?view=sheets`)).data;
+}
+export async function getSheet(id: string): Promise<ProductSheet> {
+  return (await fetchOperation<ProductSheet>(`${path}?view=sheet&id=${encodeURIComponent(id)}`)).data;
+}
+export const saveSheet = (id: string | null, data: SheetInput) => mutate<{ id: string }>('saveSheet', data, id);

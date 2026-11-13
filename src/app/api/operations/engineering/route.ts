@@ -5,10 +5,17 @@ import { engineering as e } from '@/server/operations/engineering';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-const actions = ['saveLine', 'saveOperation', 'saveTeam', 'saveWorker', 'replaceWorkPeriods', 'saveHoliday', 'deleteHoliday', 'saveLossReason'] as const;
+const actions = ['saveLine', 'saveOperation', 'saveTeam', 'saveWorker', 'replaceWorkPeriods', 'saveHoliday', 'deleteHoliday', 'saveLossReason', 'saveSheet'] as const;
 
 export async function GET(request: Request) {
-  return operationJson(async () => e.readEngineering(await requireWebContext(request)));
+  return operationJson(async () => {
+    const ctx = await requireWebContext(request);
+    const params = new URL(request.url).searchParams;
+    const view = z.enum(['engineering', 'sheets', 'sheet']).parse(params.get('view') ?? 'engineering');
+    if (view === 'sheets') return e.listSheets(ctx);
+    if (view === 'sheet') return e.getSheet(ctx, params.get('id'));
+    return e.readEngineering(ctx);
+  });
 }
 export async function POST(request: Request) {
   return operationJson(async () => {
@@ -24,6 +31,7 @@ export async function POST(request: Request) {
       case 'saveHoliday': return e.saveHoliday(ctx, data);
       case 'deleteHoliday': return e.deleteHoliday(ctx, id);
       case 'saveLossReason': return e.saveLossReason(ctx, id, data);
+      case 'saveSheet': return e.saveSheet(ctx, id, data);
     }
   });
 }

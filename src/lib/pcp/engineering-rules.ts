@@ -77,3 +77,39 @@ export function workPeriodsError(periods: readonly WorkPeriod[]): string | null 
   }
   return null;
 }
+
+export type SheetStep = { operationId: string; predecessorOperationId: string | null };
+export type SheetComponent = { componentSku: string; quantity: number; operationId: string | null };
+
+/**
+ * Roteiro de uma ficha técnica: cada operação aparece uma vez, existe no cadastro, e a predecessora de
+ * um passo é outro passo da mesma ficha, sem ciclo. Os componentes só podem apontar para passos do roteiro.
+ */
+export function sheetError(steps: readonly SheetStep[], components: readonly SheetComponent[],
+  knownOperationIds: ReadonlySet<string>): string | null {
+  if (!steps.length) return 'O roteiro precisa de pelo menos uma operação.';
+  const byOperation = new Map<string, SheetStep>();
+  for (const step of steps) {
+    if (!knownOperationIds.has(step.operationId)) return 'Operação não encontrada no cadastro.';
+    if (byOperation.has(step.operationId)) return 'A mesma operação aparece duas vezes no roteiro.';
+    byOperation.set(step.operationId, step);
+  }
+  for (const step of steps) {
+    if (!step.predecessorOperationId) continue;
+    if (step.predecessorOperationId === step.operationId) return 'Um passo não pode ser predecessor de si mesmo.';
+    if (!byOperation.has(step.predecessorOperationId)) return 'A predecessora precisa estar no roteiro da ficha.';
+    const seen = new Set<string>();
+    for (let current: SheetStep | undefined = step; current; current = current.predecessorOperationId ? byOperation.get(current.predecessorOperationId) : undefined) {
+      if (seen.has(current.operationId)) return 'O roteiro tem um ciclo entre predecessoras.';
+      seen.add(current.operationId);
+    }
+  }
+  const seenComponents = new Set<string>();
+  for (const component of components) {
+    if (component.operationId && !byOperation.has(component.operationId)) return 'O componente aponta para uma operação fora do roteiro.';
+    const key = `${component.componentSku}|${component.operationId ?? ''}`;
+    if (seenComponents.has(key)) return 'Componente repetido no mesmo passo.';
+    seenComponents.add(key);
+  }
+  return null;
+}

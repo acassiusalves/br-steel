@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { predecessorError, teamMembersError, workPeriodsError, type OperationNode } from '@/lib/pcp/engineering-rules';
+import { predecessorError, sheetError, teamMembersError, workPeriodsError, type OperationNode } from '@/lib/pcp/engineering-rules';
 
 // Mesma cadeia da linha da fábrica: Cortar → Check Corte → Dobrar → Check Dobra.
 const ops: OperationNode[] = [
@@ -60,5 +60,30 @@ describe('workPeriodsError', () => {
   it('recusa intervalo invertido e sobreposição', () => {
     expect(workPeriodsError([{ weekday: 1, startsAt: '12:00', endsAt: '07:45' }])).toMatch(/depois do início/);
     expect(workPeriodsError([...day(1), { weekday: 1, startsAt: '11:00', endsAt: '12:30' }])).toMatch(/sobrepõem/);
+  });
+});
+
+describe('sheetError', () => {
+  const known = new Set(['cortar', 'dobrar', 'embalar']);
+  const route = [
+    { operationId: 'cortar', predecessorOperationId: null },
+    { operationId: 'dobrar', predecessorOperationId: 'cortar' },
+    { operationId: 'embalar', predecessorOperationId: 'dobrar' },
+  ];
+  it('aceita o roteiro e componentes ligados a passos do roteiro', () => {
+    expect(sheetError(route, [{ componentSku: 'CHAPA', quantity: 2, operationId: 'cortar' }, { componentSku: 'CAIXA', quantity: 1, operationId: null }], known)).toBeNull();
+    // Suporte simples do iApp: só Dobrar e Embalar.
+    expect(sheetError([{ operationId: 'dobrar', predecessorOperationId: null }, { operationId: 'embalar', predecessorOperationId: 'dobrar' }], [], known)).toBeNull();
+  });
+  it('recusa roteiro vazio, operação desconhecida, repetida, predecessora fora do roteiro e ciclo', () => {
+    expect(sheetError([], [], known)).toMatch(/pelo menos uma/);
+    expect(sheetError([{ operationId: 'soldar', predecessorOperationId: null }], [], known)).toMatch(/não encontrada/);
+    expect(sheetError([...route, { operationId: 'cortar', predecessorOperationId: null }], [], known)).toMatch(/duas vezes/);
+    expect(sheetError([{ operationId: 'dobrar', predecessorOperationId: 'cortar' }], [], known)).toMatch(/no roteiro da ficha/);
+    expect(sheetError([{ operationId: 'cortar', predecessorOperationId: 'dobrar' }, { operationId: 'dobrar', predecessorOperationId: 'cortar' }], [], known)).toMatch(/ciclo/);
+  });
+  it('recusa componente fora do roteiro ou repetido no mesmo passo', () => {
+    expect(sheetError(route, [{ componentSku: 'X', quantity: 1, operationId: 'soldar' }], known)).toMatch(/fora do roteiro/);
+    expect(sheetError(route, [{ componentSku: 'X', quantity: 1, operationId: 'cortar' }, { componentSku: 'X', quantity: 2, operationId: 'cortar' }], known)).toMatch(/repetido/);
   });
 });

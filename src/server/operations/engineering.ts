@@ -36,6 +36,16 @@ const workerSchema = z.object({
 const periodsSchema = z.array(z.object({ weekday: z.number().int().min(0).max(6), startsAt: time, endsAt: time }).strict()).max(70);
 const holidaySchema = z.object({ day: dateSchema, name }).strict();
 const lossReasonSchema = z.object({ name, active: z.boolean() }).strict();
+const quantity = z.number().finite().positive().max(1_000_000);
+const sheetSchema = z.object({
+  code: z.string().trim().min(1).max(50), sku: z.string().trim().min(1).max(100), name: z.string().trim().min(1).max(300),
+  status: z.enum(['aberto', 'aberto_avulso', 'bloqueado', 'suspenso', 'versao_revisada', 'fechado', 'amostra']),
+  baseQuantity: quantity, lineId: uuid.nullable(),
+  steps: z.array(z.object({ operationId: uuid, predecessorOperationId: uuid.nullable(),
+    plannedMinutes: z.number().finite().min(0).max(1_000_000).nullable(), notes: z.string().trim().max(2000).nullable() }).strict()).min(1).max(50),
+  components: z.array(z.object({ componentSku: z.string().trim().min(1).max(100), componentName: z.string().trim().max(300).nullable(),
+    quantity, operationId: uuid.nullable() }).strict()).max(200),
+}).strict();
 
 const writeActor = (context: AccessContext): WriteActor => ({
   userId: context.actor.userId, source: context.actor.source, clientId: context.actor.clientId ?? null, idempotencyKey: null,
@@ -76,6 +86,17 @@ export function createEngineeringOperations(repository: EngineeringRepository) {
     },
     async deleteHoliday(ctx: AccessContext, day: unknown) {
       const actor = write(ctx); return repository.deleteHoliday(dateSchema.parse(day), actor);
+    },
+    async listSheets(ctx: AccessContext) {
+      requireOperation(ctx, 'producao:read', ENGINEERING_PAGE);
+      return repository.listSheets();
+    },
+    async getSheet(ctx: AccessContext, id: unknown) {
+      requireOperation(ctx, 'producao:read', ENGINEERING_PAGE);
+      return repository.getSheet(uuid.parse(id));
+    },
+    async saveSheet(ctx: AccessContext, id: unknown, input: unknown) {
+      const actor = write(ctx); return repository.saveSheet(idInput.parse(id), sheetSchema.parse(input), actor);
     },
     async saveLossReason(ctx: AccessContext, id: unknown, input: unknown) {
       const actor = write(ctx); return repository.saveLossReason(idInput.parse(id), lossReasonSchema.parse(input), actor);

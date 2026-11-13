@@ -181,7 +181,8 @@ Abordagem: **adaptar ao estilo do BR Steel**, não copiar o iApp como está. Cop
 > - Só PostgreSQL (Supabase), em schema próprio `brsteel_pcp` com tabelas relacionais. Não há par no Firestore e o PCP não passa pela chave de fonte do núcleo (`postgresOnlyRepository`). O login continua no Firestore, como no resto do app.
 > - O iApp tem funcionários em mais de uma equipe (um líder chefia Dobra e Polimento). Por isso a hierarquia fica em `work_team_members` (equipe, funcionário, superior), e não num `leader_id` do funcionário. Chaves compostas garantem que superior e líder sejam membros da mesma equipe.
 > - A página `/producao/engenharia` é só do Administrador.
-> - O backup operacional passou a incluir `brsteel_pcp` (26 tabelas). O roteiro de backup recusa o banco hospedado até a migration ser aplicada lá.
+> - O backup operacional passou a incluir `brsteel_pcp` (29 tabelas com as fichas). O roteiro de backup recusa um banco hospedado que não tenha as migrations do PCP.
+> - **13/11/2026:** `20261112120000_pcp_engineering.sql` aplicada no projeto `mmewkphsrnttkzvpyddv` com `supabase db query --linked`, num workdir isolado. Conferido no hospedado: 11 tabelas com RLS, 12 chaves estrangeiras e 33 políticas, só para os papéis de gravação, leitura e backup; `anon` e `authenticated` sem acesso; o papel de backup sem `INSERT`; as 15 tabelas do núcleo intactas.
 > - Carga inicial: `scripts/pcp-import-iapp.ts`. Na leitura do iApp, um membro da equipe Limpeza (ID 26557) não está na lista de funcionários e ficou fora. As predecessoras foram copiadas como estão no iApp: Check Q/Q Corte, Polir, Limpar e Embalar estão sem predecessora lá.
 
 
@@ -201,6 +202,13 @@ Telas em `/producao/engenharia/*` e operações em `src/server/operations/engine
 - **Pronto quando:** as 12 operações, as 6 equipes, os funcionários e o expediente aparecem no BR Steel iguais ao iApp, e a suíte de testes cobre o predecessor e a validação do líder.
 
 ### Fase 2. Fichas técnicas
+
+> **Estado em 13/11/2026:** implementada na branch `claude/pcp-fase1-cadastros` (migration `20261113120000_pcp_product_sheets.sql`, aba "Fichas técnicas" em `/producao/engenharia`).
+> - O roteiro é guardado por passo (`product_sheet_steps`), com predecessora dentro da própria ficha (chave composta) e minutos previstos. Os componentes (`product_sheet_components`) podem apontar para o passo em que entram.
+> - Uma operação usada em alguma ficha não pode ser apagada.
+> - **13/11/2026:** aplicada no projeto `mmewkphsrnttkzvpyddv` com `supabase db query --linked`. Conferido: 14 tabelas com RLS em `brsteel_pcp`, 18 chaves estrangeiras, 42 políticas; `anon` sem acesso.
+> - A carga do iApp (`scripts/pcp-import-iapp.ts`) aceita `sheets` na mesma exportação e gera um SQL único e idempotente, que pode ser aplicado pelo `supabase db query --linked` sem a senha do banco.
+
 
 | Entidade | Campos mínimos |
 | --- | --- |

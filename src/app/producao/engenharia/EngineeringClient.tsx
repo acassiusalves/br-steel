@@ -16,6 +16,7 @@ import { Switch } from '@/components/ui/switch';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import * as svc from '@/services/engineering-service';
+import { SheetsTab } from './SheetsTab';
 import type {
   EngineeringSnapshot, ProductionLine, ProductionOperation, TeamMemberRow, WorkTeam, Worker, WorkPeriodRow,
 } from '@/server/persistence/pcp-engineering-contract';
@@ -159,7 +160,7 @@ export default function EngineeringClient() {
       <div className="space-y-4 p-4 md:p-6">
         <div>
           <h1 className="text-2xl font-semibold">Engenharia da produção</h1>
-          <p className="text-sm text-muted-foreground">Linha, fases, operações, equipes, funcionários e expediente usados no Kanban de produção.</p>
+          <p className="text-sm text-muted-foreground">Linha, fases, operações, equipes, funcionários, fichas técnicas e expediente usados no Kanban de produção.</p>
         </div>
         <Tabs defaultValue="linha">
           <TabsList className="flex-wrap">
@@ -167,6 +168,7 @@ export default function EngineeringClient() {
             <TabsTrigger value="operacoes">Operações</TabsTrigger>
             <TabsTrigger value="equipes">Equipes</TabsTrigger>
             <TabsTrigger value="funcionarios">Funcionários</TabsTrigger>
+            <TabsTrigger value="fichas">Fichas técnicas</TabsTrigger>
             <TabsTrigger value="expediente">Expediente</TabsTrigger>
             <TabsTrigger value="perdas">Motivos de perda</TabsTrigger>
           </TabsList>
@@ -236,6 +238,7 @@ export default function EngineeringClient() {
             </Table>
           </TabsContent>
 
+          <TabsContent value="fichas"><SheetsTab data={data} isAdmin={isAdmin} /></TabsContent>
           <TabsContent value="expediente"><WorkCalendar data={data} isAdmin={isAdmin} run={run} saving={saving} /></TabsContent>
           <TabsContent value="perdas"><LossReasons data={data} isAdmin={isAdmin} run={run} /></TabsContent>
         </Tabs>

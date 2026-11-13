@@ -26,6 +26,9 @@ const tables = [
   // Cadastros do PCP: só existem no PostgreSQL, então o backup precisa lê-los.
   'brsteel_pcp.holidays',
   'brsteel_pcp.loss_reasons',
+  'brsteel_pcp.product_sheet_components',
+  'brsteel_pcp.product_sheet_steps',
+  'brsteel_pcp.product_sheets',
   'brsteel_pcp.production_lines',
   'brsteel_pcp.production_operations',
   'brsteel_pcp.production_phases',

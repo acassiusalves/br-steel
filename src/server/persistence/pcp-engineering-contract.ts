@@ -43,6 +43,19 @@ export type WorkerInput = {
   name: string; badge: string; kind: string; active: boolean; userId: string | null; operationIds: string[];
 };
 
+
+export type SheetStatus = 'aberto' | 'aberto_avulso' | 'bloqueado' | 'suspenso' | 'versao_revisada' | 'fechado' | 'amostra';
+export type ProductSheetSummary = {
+  id: string; code: string; sku: string; name: string; status: SheetStatus; stepCount: number; componentCount: number;
+};
+export type ProductSheetStep = { operationId: string; predecessorOperationId: string | null; plannedMinutes: number | null; notes: string | null };
+export type ProductSheetComponent = { componentSku: string; componentName: string | null; quantity: number; operationId: string | null };
+export type ProductSheet = {
+  id: string; code: string; sku: string; name: string; status: SheetStatus; baseQuantity: number; lineId: string | null;
+  steps: ProductSheetStep[]; components: ProductSheetComponent[];
+};
+export type SheetInput = Omit<ProductSheet, 'id'>;
+
 /**
  * Persistência dos cadastros de engenharia. Só existe em PostgreSQL. As operações autorizam e validam
  * a forma da entrada; o repositório aplica as regras que dependem do estado (predecessor, líder).
@@ -59,4 +72,9 @@ export interface EngineeringRepository {
   saveHoliday(input: Holiday, actor: WriteActor): Promise<OperationResult<null>>;
   deleteHoliday(day: string, actor: WriteActor): Promise<OperationResult<null>>;
   saveLossReason(id: string | null, input: { name: string; active: boolean }, actor: WriteActor): Promise<OperationResult<{ id: string }>>;
+  /** Fichas técnicas: a lista é curta (centenas) e vem inteira; o detalhe traz roteiro e componentes. */
+  listSheets(): Promise<OperationResult<ProductSheetSummary[]>>;
+  getSheet(id: string): Promise<OperationResult<ProductSheet>>;
+  /** Regrava o roteiro e os componentes inteiros na ordem recebida. */
+  saveSheet(id: string | null, input: SheetInput, actor: WriteActor): Promise<OperationResult<{ id: string }>>;
 }
