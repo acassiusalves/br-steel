@@ -8,7 +8,7 @@ export const tables = ['brsteel_import.runs','brsteel_import.state',
   ...['inventory_movements','production_columns','production_comments','production_counters',
     'production_lot_items','production_lots','sales_order_items','sales_orders','sku_weekly_demand','stock_observation_log','stock_observations','supplies','supply_codes'].map(n=>'brsteel_ops.'+n),
   // Cadastros do PCP: nascem no PostgreSQL e só existem aqui, então o backup é a única cópia.
-  ...['holidays','loss_reasons','product_sheet_components','product_sheet_steps','product_sheets','production_lines','production_operations','production_order_batches','production_order_steps','production_orders','production_phases','work_periods',
+  ...['holidays','loss_reasons','product_sheet_components','product_sheet_steps','product_sheets','production_lines','production_operations','production_order_batches','production_order_events','production_order_losses','production_order_steps','production_orders','production_phases','work_periods',
     'work_team_members','work_team_operations','work_teams','worker_operations','workers'].map(n=>'brsteel_pcp.'+n)];
 
 export function backupConnection(value, ca) {
@@ -79,7 +79,7 @@ export function tableManifestSql(table) {
 export async function manifest(query) {
   await query("set timezone='UTC'; set extra_float_digits=3; set search_path=pg_catalog");
   const catalog=(await query(catalogSql)).rows[0].catalog;
-  if (catalog.tables?.length!==32 || catalog.tables.some(t=>!t[2]) || catalog.constraints.filter(c=>c[3]==='f').length!==44)
+  if (catalog.tables?.length!==34 || catalog.tables.some(t=>!t[2]) || catalog.constraints.filter(c=>c[3]==='f').length!==52)
     throw new Error('Unexpected operational catalog');
   const rows=[];
   for (const name of tables) rows.push({name,...(await query(tableManifestSql(name))).rows[0]});

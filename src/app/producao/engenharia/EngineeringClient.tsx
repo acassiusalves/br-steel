@@ -16,6 +16,7 @@ import { Switch } from '@/components/ui/switch';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import * as svc from '@/services/engineering-service';
+import { getAssignableUsers } from '@/services/user-service';
 import { SheetsTab } from './SheetsTab';
 import type {
   EngineeringSnapshot, ProductionLine, ProductionOperation, TeamMemberRow, WorkTeam, Worker, WorkPeriodRow,
@@ -85,7 +86,11 @@ export default function EngineeringClient() {
   const [editing, setEditing] = React.useState<Editing>(null);
   const [form, setForm] = React.useState<Record<string, unknown>>({});
   const [saving, setSaving] = React.useState(false);
+  const [users, setUsers] = React.useState<{ id: string; name: string; role: string }[]>([]);
   const isAdmin = user?.role === 'Administrador';
+
+  // Usuários de login, para vincular ao funcionário: é por esse vínculo que ele age no Kanban de OPs.
+  React.useEffect(() => { if (isAdmin) void getAssignableUsers().then(setUsers).catch(() => setUsers([])); }, [isAdmin]);
 
   React.useEffect(() => subscribeOperation(svc.getEngineering,
     snapshot => { setData(snapshot); setError(null); },
@@ -225,12 +230,12 @@ export default function EngineeringClient() {
           <TabsContent value="funcionarios" className="space-y-3">
             <div className="flex justify-end">{newButton({ kind: 'worker', value: null }, 'Novo funcionário')}</div>
             <Table>
-              <TableHeader><TableRow><TableHead>Crachá</TableHead><TableHead>Nome</TableHead><TableHead>Tipo</TableHead><TableHead>Equipes</TableHead><TableHead>Status</TableHead><TableHead /></TableRow></TableHeader>
+              <TableHeader><TableRow><TableHead>Crachá</TableHead><TableHead>Nome</TableHead><TableHead>Tipo</TableHead><TableHead>Equipes</TableHead><TableHead>Login</TableHead><TableHead>Status</TableHead><TableHead /></TableRow></TableHeader>
               <TableBody>
                 {data.workers.map(w => (
                   <TableRow key={w.id}>
                     <TableCell className="font-mono text-xs">{w.badge}</TableCell><TableCell>{w.name}</TableCell><TableCell>{w.kind}</TableCell>
-                    <TableCell className="text-xs">{data.teams.filter(t => t.members.some(m => m.workerId === w.id)).map(t => t.name).join(', ') || '—'}</TableCell><TableCell>{status(w.active)}</TableCell>
+                    <TableCell className="text-xs">{data.teams.filter(t => t.members.some(m => m.workerId === w.id)).map(t => t.name).join(', ') || '—'}</TableCell><TableCell className="text-xs">{w.userId ? users.find(u => u.id === w.userId)?.name ?? 'Vinculado' : '—'}</TableCell><TableCell>{status(w.active)}</TableCell>
                     <TableCell>{editButton({ kind: 'worker', value: w })}</TableCell>
                   </TableRow>
                 ))}
@@ -298,6 +303,8 @@ export default function EngineeringClient() {
                 <Field label="Crachá"><Input value={String(form.badge ?? '')} onChange={e => set('badge', e.target.value)} /></Field>
                 <Field label="Tipo (ex.: Dobrador)"><Input value={String(form.kind ?? '')} onChange={e => set('kind', e.target.value)} /></Field>
               </div>
+              <Field label="Usuário de login (para agir no Kanban de OPs)"><select className={selectClass} value={String(form.userId ?? '')} onChange={e => set('userId', e.target.value || null)}>
+                <option value="">Sem usuário</option>{users.map(u => <option key={u.id} value={u.id}>{u.name} · {u.role}</option>)}</select></Field>
               <Field label="Operações que pode iniciar"><OperationPicker operations={data.operations} value={form.operationIds as string[] ?? []} onChange={ids => set('operationIds', ids)} /></Field>
             </>}
             {editing && editing.kind !== 'team' && (

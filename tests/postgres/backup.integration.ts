@@ -32,6 +32,8 @@ const tables = [
   'brsteel_pcp.production_lines',
   'brsteel_pcp.production_operations',
   'brsteel_pcp.production_order_batches',
+  'brsteel_pcp.production_order_events',
+  'brsteel_pcp.production_order_losses',
   'brsteel_pcp.production_order_steps',
   'brsteel_pcp.production_orders',
   'brsteel_pcp.production_phases',

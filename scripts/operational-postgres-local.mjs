@@ -105,7 +105,7 @@ try {
     // O PCP fica em schema próprio, fora da contagem do núcleo copiado do Firestore.
     const pcp = (await pool.query(`select count(*)::int as tables, count(*) filter (where c.relrowsecurity)::int as rls_tables
       from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='brsteel_pcp' and c.relkind='r'`)).rows[0];
-    if (pcp.tables !== 17 || pcp.rls_tables !== 17) throw new Error('PCP schema catalog verification failed');
+    if (pcp.tables !== 19 || pcp.rls_tables !== 19) throw new Error('PCP schema catalog verification failed');
     console.log('PCP schema catalog:', JSON.stringify(pcp));
   } finally { await pool.end(); }
   if (process.env.BRSTEEL_PG_ADVISORS === '1') {

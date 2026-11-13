@@ -72,7 +72,8 @@ const allNavItems: NavItem[] = [
     subItems: [
       { href: "/producao", icon: BarChart3, label: "Análise" },
       { href: "/producao/ops", icon: ClipboardList, label: "Ordens de produção" },
-      { href: "/producao/kanban", icon: Kanban, label: "Kanban" },
+      { href: "/producao/quadro", icon: Kanban, label: "Kanban de OPs" },
+      { href: "/producao/kanban", icon: Kanban, label: "Kanban de lotes" },
       { href: "/producao/engenharia", icon: Wrench, label: "Engenharia" },
     ],
   },

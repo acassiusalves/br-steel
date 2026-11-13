@@ -234,3 +234,61 @@ test('lote de OPs: roteiro vira OS, corte gera OPs das partes e a planilha do iA
   const numbers = (await orders.listOrders(null)).data.map(o => o.number);
   assert.equal(new Set(numbers).size, numbers.length);
 });
+
+test('Kanban de OPs: líder move, membro executa, perda reduz a quantidade e o card chega a Concluído', async () => {
+  const { createPostgresProductionOrderRepository } = await import('@/server/persistence/postgres-pcp-orders');
+  const { createPostgresKanbanRepository } = await import('@/server/persistence/postgres-pcp-kanban');
+  const kanban = createPostgresKanbanRepository(writerPool);
+  const snapshot = (await repo.read()).data;
+  const op = (name: string) => snapshot.operations.find(o => o.name === name)!;
+  const [check, dobrar] = [op('Check Q/Q Corte'), op('Dobrar')];
+  const worker = async (name: string, badge: string, userId: string | null, operationIds: string[]) =>
+    (await repo.saveWorker(null, { name, badge, kind: 'Kanban', active: true, userId, operationIds }, actor)).data.id;
+  const lider = await worker('Líder K', 'K-01', 'u-lider', [check.id, dobrar.id]);
+  const dobrador = await worker('Dobrador K', 'K-02', null, [dobrar.id]);
+  await repo.saveTeam(null, { name: 'Equipe K', status: 'aberto', shift: 'integral', leaderId: lider, operationIds: [check.id, dobrar.id],
+    members: [{ workerId: lider, leaderId: null }, { workerId: dobrador, leaderId: lider }] }, actor);
+  const reason = (await repo.saveLossReason(null, { name: 'Peça amassada', active: true }, actor)).data.id;
+  const sheetId = (await repo.saveSheet(null, { code: 'K-0001', sku: 'SKU-K', name: 'Produto K', status: 'aberto', baseQuantity: 1, lineId: null,
+    steps: [check, dobrar].map(o => ({ operationId: o.id, predecessorOperationId: null, plannedMinutes: null, notes: null })), components: [] }, actor)).data.id;
+  const batch = (await createPostgresProductionOrderRepository(writerPool).createBatch({ kind: 'semanal', factor: 1.5, from: '2026-08-01', to: '2026-11-12',
+    items: [{ sku: 'SKU-K', sheetId, quantity: 10, description: 'Produto K' }] }, actor)).data;
+  const orderId = (await pool.query('select id from brsteel_pcp.production_orders where batch_id = $1', [batch.batchId])).rows[0].id as string;
+
+  const asLider = { userId: 'u-lider', source: 'web' as const, clientId: null, idempotencyKey: null, isAdmin: false };
+  const outsider = { ...asLider, userId: 'ninguem' };
+  const card = async () => (await kanban.board(asLider)).data.cards.find(c => c.id === orderId)!;
+
+  let c = await card();
+  assert.equal(c.column, 'a_produzir');
+  assert.equal(c.allowed.moveTo, check.phaseId);
+  await assert.rejects(kanban.move(orderId, check.phaseId, outsider), /líder/);
+  await kanban.move(orderId, check.phaseId, asLider);
+  c = await card();
+  assert.equal(c.column, check.phaseId);
+  const checkStep = c.allowed.start!.stepId;
+  assert.ok(c.allowed.start!.workers.some(w => w.id === lider));
+  await kanban.start(orderId, checkStep, lider, asLider);
+  await assert.rejects(kanban.move(orderId, dobrar.phaseId, asLider), /Finalize/);
+  await assert.rejects(kanban.finish(orderId, checkStep, { lossQuantity: 0, lossReasonId: null, notes: null }, outsider), /Só quem iniciou/);
+  await assert.rejects(kanban.finish(orderId, checkStep, { lossQuantity: 1, lossReasonId: null, notes: null }, asLider), /motivo/);
+  await kanban.finish(orderId, checkStep, { lossQuantity: 1, lossReasonId: reason, notes: 'Uma peça veio amassada do corte' }, asLider);
+  c = await card();
+  assert.equal(c.currentQuantity, 9);
+  assert.deepEqual(c.losses.map(l => l.reason), ['Peça amassada']);
+
+  await kanban.move(orderId, dobrar.phaseId, asLider);
+  c = await card();
+  const dobraStep = c.allowed.start!.stepId;
+  // O líder inicia em nome do dobrador, que não tem login.
+  await kanban.start(orderId, dobraStep, dobrador, asLider);
+  await kanban.finish(orderId, dobraStep, { lossQuantity: 0, lossReasonId: null, notes: null }, asLider);
+  c = await card();
+  assert.equal(c.allowed.moveTo, 'concluido');
+  await kanban.move(orderId, 'concluido', asLider);
+  c = await card();
+  assert.equal(c.column, 'concluido');
+  assert.deepEqual(c.steps.map(s => [s.status, s.workerName]), [['executada', 'Líder K'], ['executada', 'Dobrador K']]);
+  const kinds = (await pool.query('select kind from brsteel_pcp.production_order_events where order_id = $1 order by created_at, kind', [orderId])).rows.map(r => r.kind);
+  assert.deepEqual(kinds, ['move', 'start', 'finish', 'loss', 'move', 'start', 'finish', 'move']);
+});

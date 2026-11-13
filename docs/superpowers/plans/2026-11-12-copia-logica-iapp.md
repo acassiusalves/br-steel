@@ -259,6 +259,21 @@ Telas em `/producao/engenharia/*` e operações em `src/server/operations/engine
 
 ### Fase 4. Kanban por fase com OS, líderes e perdas
 
+> **Estado em 13/11/2026:** implementada na branch `claude/pcp-fase1-cadastros`: migration `20261113140000_pcp_kanban.sql`, tela `/producao/quadro` ("Kanban de OPs") e API `/api/operations/production-kanban`.
+> - **Pergunta 4.1-a:** o quadro novo convive com o Kanban de lotes (renomeado no menu para "Kanban de lotes") até ser validado na fábrica. Nada do quadro antigo mudou.
+> - **Quem age:** o funcionário vinculado ao usuário de login (`workers.user_id`, escolhido na ficha do funcionário). O Administrador age como gestão. Um Operador sem vínculo só vê o quadro.
+> - **Regras no servidor** (`src/lib/pcp/kanban-rules.ts`, com testes):
+>   - o card só passa para a fase da próxima OS pendente, e só depois que a OS da fase atual terminou;
+>   - quem passa adiante é o líder de uma equipe que tem a operação da fase de origem;
+>   - iniciar exige a permissão da operação: o membro inicia em nome próprio, e o líder em nome de qualquer membro da equipe;
+>   - só quem iniciou finaliza, ou o líder dele;
+>   - a perda pede motivo e reduz a quantidade atual do card;
+>   - as observações ficam na OS;
+>   - todo movimento grava quem fez, de onde e para onde (`production_order_events`).
+> - **Configuração necessária antes do uso real:** no iApp, nenhuma equipe tem as operações de Check Q/Q, e os checks são executados pelo funcionário genérico "Padrão check". Para valer a regra da reunião (o líder da fase confere e passa o card), cada equipe precisa receber o check da sua fase em Engenharia → Equipes, e o líder precisa da permissão dessa operação. Sem isso, só o Administrador passa o card a partir das colunas de check.
+> - **Fora desta fase:** arrastar e soltar (o card se move por botão, sempre para a próxima fase válida), coluna Suspenso e tempos em horas de expediente (Fase 5).
+
+
 Evolui `/producao/kanban` para o quadro de OPs. Reaproveita o dnd-kit e os componentes que já existem.
 
 - **Colunas:** A Produzir, as fases da linha, Concluído e Suspenso.
