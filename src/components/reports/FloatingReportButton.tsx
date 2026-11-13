@@ -60,7 +60,7 @@ export default function FloatingReportButton() {
         aria-label="Abrir reporte de problema ou melhoria"
         onClick={handleOpen}
         data-report-label="Abrir reporte de problema ou melhoria"
-        className="group fixed bottom-6 left-6 z-40 flex h-12 w-12 items-center justify-center rounded-full bg-red-600 text-white shadow-lg shadow-red-600/25 transition-all hover:w-36 hover:scale-[1.04] hover:bg-red-700 focus-visible:w-36 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-red-200 active:scale-95 md:left-20"
+        className="group fixed bottom-6 right-6 z-40 flex h-12 w-12 items-center justify-center rounded-full bg-red-600 text-white shadow-lg shadow-red-600/25 transition-all hover:w-36 hover:scale-[1.04] hover:bg-red-700 focus-visible:w-36 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-red-200 active:scale-95"
       >
         <MessageSquareWarning size={21} className="shrink-0" />
         <span className="pointer-events-none ml-0 max-w-0 overflow-hidden whitespace-nowrap text-sm font-black opacity-0 transition-all group-hover:ml-2 group-hover:max-w-24 group-hover:opacity-100 group-focus-visible:ml-2 group-focus-visible:max-w-24 group-focus-visible:opacity-100">
