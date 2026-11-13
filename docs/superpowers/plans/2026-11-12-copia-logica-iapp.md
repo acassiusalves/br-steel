@@ -236,6 +236,16 @@ Telas em `/producao/engenharia/*` e operações em `src/server/operations/engine
 
 ### Fase 3. Gerador de OP e planilha do iApp (paralelo com o iApp)
 
+> **Estado em 13/11/2026:** implementada na branch `claude/pcp-fase1-cadastros`: migration `20261113130000_pcp_production_orders.sql`, tela `/producao/ops` e API `/api/operations/production-orders`.
+> - **Modelo da planilha:** o iApp fornece o modelo em `/importador/download?planilha=op`, com as colunas IDENTIFICAÇÃO DA FICHA, QUANTIDADE, LOTE ANTECIPADO, MULTI-NÍVEIS e EMPENHAR. Não há coluna de SKU, então a importação usa o código da ficha. Isso resolve a pergunta 4.1-b.
+> - **Fila:** a mesma da `/producao`, calculada sobre a demanda já gravada no PostgreSQL (vendas faturadas, saldo e limites). Só entram SKUs com ficha técnica com roteiro, o que substitui a lista JSON de inox do script.
+> - **Quantidade sugerida:** a média semanal × fator (1,5 na semanal e 2 no corte, os mesmos da tela atual), sem ficar abaixo do que falta para o mínimo. O fator é parâmetro da geração e fica gravado no lote; a pergunta 4.1-d (1,7 ou 2) continua aberta. A quantidade é editável antes de confirmar.
+> - **Ficha por SKU:** quando há mais de uma ficha, vale a de roteiro mais completo.
+> - **OS:** cada OP nasce com uma ordem de serviço por passo da ficha. Sem predecessora definida na ficha, vale o passo anterior.
+> - **Corte:** gera a OP do produto e OPs filhas das partes com ficha própria (quantidade da parte × quantidade da OP ÷ quantidade base). A planilha do iApp leva só a OP mãe, com multinível "S", para o iApp gerar as partes.
+> - **Pendente:** a ferramenta MCP de geração (escrita pelo MCP continua desligada sem `MCP_WRITES_ENABLED`) e o teste de subir uma OP real no iApp com a planilha gerada.
+
+
 - **Entrada:** a Fila de Produção da `/producao`, com os mesmos critérios: status do SKU, saldo, mínimo, vendidos e zerados. Usa só pedidos com NF e exclui os cancelados.
 - **Saída:** duas sequências numeradas, uma para a **produção semanal (dobra)** e outra para o **corte**, com a quantidade sugerida editável antes de confirmar.
 - **Gravação:**

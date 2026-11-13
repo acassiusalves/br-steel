@@ -192,3 +192,45 @@ test('ficha técnica: roteiro com predecessoras, componentes por passo e regrava
   // Operação usada em ficha não pode ser apagada.
   await assert.rejects(pool.query('delete from brsteel_pcp.production_operations where id = $1', [dobrar]), (e: { code?: string }) => e.code === '23503');
 });
+
+test('lote de OPs: roteiro vira OS, corte gera OPs das partes e a planilha do iApp leva só as OPs mães', async () => {
+  const { createPostgresProductionOrderRepository } = await import('@/server/persistence/postgres-pcp-orders');
+  const orders = createPostgresProductionOrderRepository(writerPool);
+  const snapshot = (await repo.read()).data;
+  const op = (name: string) => snapshot.operations.find(o => o.name === name)!.id;
+  const step = (operationId: string, predecessorOperationId: string | null = null) => ({ operationId, predecessorOperationId, plannedMinutes: null, notes: null });
+  const sheet = async (code: string, sku: string, steps: ReturnType<typeof step>[], components: { componentSku: string; quantity: number; operationId: string | null }[] = []) =>
+    (await repo.saveSheet(null, { code, sku, name: sku, status: 'aberto', baseQuantity: 1, lineId: null, steps,
+      components: components.map(c => ({ ...c, componentName: null })) }, actor)).data.id;
+  // Produto com 3 passos sem predecessora definida: as OS herdam a ordem do roteiro.
+  const product = await sheet('OP-0001', 'PROD-1', [step(op('Check Q/Q Corte')), step(op('Dobrar')), step(op('Check Corte'))],
+    [{ componentSku: 'PARTE-1', quantity: 2, operationId: op('Check Q/Q Corte') }, { componentSku: 'SEM-FICHA', quantity: 1, operationId: null }]);
+  await sheet('OP-0002', 'PARTE-1', [step(op('Cortar'))]);
+
+  const range = { from: '2026-08-01', to: '2026-11-12' };
+  const semanal = (await orders.createBatch({ kind: 'semanal', factor: 1.5, ...range,
+    items: [{ sku: 'PROD-1', sheetId: product, quantity: 21, description: 'Produto' }] }, actor)).data;
+  assert.deepEqual({ orderCount: semanal.orderCount, childCount: semanal.childCount }, { orderCount: 1, childCount: 0 });
+  const corte = (await orders.createBatch({ kind: 'corte', factor: 2, ...range,
+    items: [{ sku: 'PROD-1', sheetId: product, quantity: 5, description: 'Produto' }] }, actor)).data;
+  assert.equal(corte.childCount, 1);
+
+  const corteOrders = (await orders.listOrders(corte.batchId)).data;
+  const child = corteOrders.find(o => o.parentOrderId)!;
+  assert.deepEqual({ sku: child.sku, quantity: child.quantity, steps: child.stepCount }, { sku: 'PARTE-1', quantity: 10, steps: 1 });
+  const parent = (await orders.listOrders(semanal.batchId)).data[0];
+  const preds = (await pool.query(`select o.name, p.name as pred from brsteel_pcp.production_order_steps t
+    join brsteel_pcp.production_operations o on o.id = t.operation_id
+    left join brsteel_pcp.production_order_steps ps on ps.id = t.predecessor_step_id
+    left join brsteel_pcp.production_operations p on p.id = ps.operation_id where t.order_id = $1 order by t.position`, [parent.id])).rows;
+  assert.deepEqual(preds.map(r => r.pred), [null, 'Check Q/Q Corte', 'Dobrar']);
+
+  const sheet2 = await orders.exportIapp(corte.batchId, actor);
+  assert.deepEqual(sheet2.data.rows, [['OP-0001', 5, '', 'S', 'N']]);
+  assert.ok((await orders.listBatches()).data.find(b => b.id === corte.batchId)?.exportedAt);
+  await assert.rejects(orders.createBatch({ kind: 'semanal', factor: 1.5, ...range,
+    items: [{ sku: 'OUTRO', sheetId: product, quantity: 1, description: null }] }, actor), /não é do SKU/);
+  // Números sequenciais e únicos.
+  const numbers = (await orders.listOrders(null)).data.map(o => o.number);
+  assert.equal(new Set(numbers).size, numbers.length);
+});
