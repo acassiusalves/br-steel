@@ -100,6 +100,10 @@ export function finishError(order: KanbanOrder, stepId: string, actor: KanbanAct
   if (lossQuantity < 0) return 'Perda inválida.';
   if (lossQuantity > currentQuantity(order)) return 'A perda não pode passar da quantidade atual da OP.';
   // A OS fica com quem a iniciou: finaliza ele mesmo, ou o líder dele na operação.
-  if (actor.isAdmin || actor.workerId === step.workerId || (step.workerId && leadsWorker(actor, teams, step.operationId, step.workerId))) return null;
+  // `workerId` nulo dos dois lados (usuário sem funcionário e OS vinda do iApp) não é a mesma pessoa.
+  if (actor.isAdmin || (actor.workerId !== null && actor.workerId === step.workerId)
+    || (step.workerId && leadsWorker(actor, teams, step.operationId, step.workerId))) return null;
+  // OS vinda do iApp em execução: o iApp não diz quem a iniciou, então o líder da operação a finaliza.
+  if (!step.workerId && leadsOperation(actor, teams, step.operationId)) return null;
   return 'Só quem iniciou a OS, ou o líder dele, pode finalizá-la.';
 }

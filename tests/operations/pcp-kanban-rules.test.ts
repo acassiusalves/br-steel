@@ -60,5 +60,12 @@ describe('iniciar e finalizar OS', () => {
     expect(finishError(iniciada, 's2', dobrador, teams, 20)).toMatch(/quantidade atual/);
     expect(currentQuantity(iniciada)).toBe(19);
     expect(finishError(naDobra, 's2', lider, teams, 0)).toMatch(/não está em execução/);
+  });  it('OS vinda do iApp em execução, sem funcionário: o líder da operação finaliza, o membro não', () => {
+    const doIapp = order({ status: 'produzindo', phaseId: 'F-dobra' }, [step('s1', 'F-check-corte', 0, 'executada'), step('s2', 'F-dobra', 1, 'em_execucao'), step('s3', 'F-check-dobra', 2)]);
+    expect(finishError(doIapp, 's2', lider, teams, 0)).toBeNull();
+    expect(finishError(doIapp, 's2', admin, teams, 0)).toBeNull();
+    expect(finishError(doIapp, 's2', dobrador, teams, 0)).toMatch(/Só quem iniciou/);
+    // Usuário sem funcionário vinculado não "coincide" com a OS sem funcionário.
+    expect(finishError(doIapp, 's2', { isAdmin: false, workerId: null }, teams, 0)).toMatch(/Só quem iniciou/);
   });
 });
