@@ -272,6 +272,12 @@ Telas em `/producao/engenharia/*` e operações em `src/server/operations/engine
 >   - todo movimento grava quem fez, de onde e para onde (`production_order_events`).
 > - **13/11/2026:** migration aplicada no projeto `mmewkphsrnttkzvpyddv` com `supabase db query --linked`. Conferido: 19 tabelas com RLS em `brsteel_pcp`, 32 chaves estrangeiras, 57 políticas, `anon` sem acesso, e as colunas de execução nas OS.
 > - **Configuração necessária antes do uso real:** no iApp, nenhuma equipe tem as operações de Check Q/Q, e os checks são executados pelo funcionário genérico "Padrão check". Para valer a regra da reunião (o líder da fase confere e passa o card), cada equipe precisa receber o check da sua fase em Engenharia → Equipes, e o líder precisa da permissão dessa operação. Sem isso, só o Administrador passa o card a partir das colunas de check.
+> - **13/11/2026, configuração aplicada em produção:**
+>   - cada equipe recebeu o check da sua fase: Corte, Dobra, Solda, Polimento e Limpeza. Embalagem fica sem check, porque não há check depois de Embalar;
+>   - o líder de cada uma recebeu a permissão desse check. O líder da Dobra também lidera o Polimento e ficou com os dois.
+>   - Registro na auditoria: `pcp.configureTeamChecks`.
+>   - **Atenção:** a carga do iApp (`scripts/pcp-import-iapp.ts`) regrava as operações de equipes e funcionários com o que vem do iApp. Rodá-la de novo desfaz essa configuração, que então precisa ser refeita.
+> - **Falta para o uso real:** vincular cada líder ao seu usuário de login, em Engenharia → Funcionários. Os líderes também precisam ter login no BR Steel.
 > - **Fora desta fase:** arrastar e soltar (o card se move por botão, sempre para a próxima fase válida), coluna Suspenso e tempos em horas de expediente (Fase 5).
 
 
