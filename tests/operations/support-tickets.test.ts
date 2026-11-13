@@ -60,6 +60,16 @@ describe('reportes (cópia do Calculaqui)', () => {
     expect(ticketFingerprint('error', {}, [], 'um')).toHaveLength(20);
   });
 
+  it('não grava query de URL nem valores de chaves sensíveis enviados pelo navegador', async () => {
+    const { repo, calls } = fakeRepository(); const ops = createSupportTicketOperations(repo);
+    await ops.create(withPerson('Vendedor'), { category: 'error', description: 'Callback falhou',
+      context: { url: 'https://app.example.test/api-settings?code=SEGREDO#x', referrer: 'https://example.test/a?token=T', search: '?code=SEGREDO', sessionId: 's-1' },
+      logs: [{ timestamp: 't', level: 'error', source: 'console.error', message: 'x', args: [{ accessToken: 'T', nested: { password: 'P', ok: 1 } }] }] });
+    const saved = calls.create!.input;
+    expect(saved.context).toEqual({ url: 'https://app.example.test/api-settings', referrer: 'https://example.test/a', sessionId: 's-1' });
+    expect(saved.logs[0].args).toEqual([{ accessToken: '[removido]', nested: { password: '[removido]', ok: 1 } }]);
+  });
+
   it('limpa JSON enviado pelo navegador e reconhece o número do chamado', () => {
     expect(sanitizeJson({ a: 'x'.repeat(10), b: [1, 2, 3], c: { d: { e: 1 } } }, { maxDepth: 2, maxArrayLength: 2, maxStringLength: 4 }))
       .toEqual({ a: 'xxxx...', b: [2, 3], c: { d: null } });

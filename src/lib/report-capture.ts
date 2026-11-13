@@ -20,11 +20,26 @@ let lastRoute: string | null = null;
 const push = <T,>(items: T[], item: T, max: number) => [...items, item].slice(-max);
 const truncate = (value: string, max: number) => (value.length > max ? `${value.slice(0, max)}...` : value);
 
+// Chaves cujo valor nunca sai do navegador (tokens de OAuth, cookies, senhas).
+const SECRET_KEY = /token|authorization|password|passwd|secret|cookie|session|code|api[-_]?key|credential/i;
+function redact(value: unknown, depth = 0): unknown {
+  if (value == null || typeof value !== 'object') return value;
+  if (depth > 5) return '[...]';
+  if (Array.isArray(value)) return value.map(item => redact(item, depth + 1));
+  return Object.fromEntries(Object.entries(value as Record<string, unknown>)
+    .map(([key, item]) => [key, SECRET_KEY.test(key) ? '[removido]' : redact(item, depth + 1)]));
+}
 function serializeArg(arg: unknown): unknown {
   if (arg instanceof Error) return { name: arg.name, message: arg.message, stack: arg.stack };
   if (arg == null || ['string', 'number', 'boolean'].includes(typeof arg)) return arg;
-  try { return JSON.parse(JSON.stringify(arg)); } catch { return String(arg); }
+  try { return redact(JSON.parse(JSON.stringify(arg))); } catch { return String(arg); }
 }
+/** Endereço sem query nem fragmento: callbacks de OAuth trazem códigos ali. */
+function bareUrl(raw: string) {
+  try { const url = new URL(raw, window.location.origin); return `${url.origin}${url.pathname}`; } catch { return ''; }
+}
+/** Só os nomes dos parâmetros, nunca os valores. */
+const queryKeys = () => [...new URLSearchParams(window.location.search).keys()];
 const messageOf = (args: unknown[]) => args.map(arg => typeof arg === 'string' ? arg : arg instanceof Error ? arg.message
   : arg && typeof arg === 'object' && typeof (arg as { message?: unknown }).message === 'string' ? (arg as { message: string }).message : '')
   .filter(Boolean).join(' ');
@@ -60,19 +75,20 @@ function elementDescriptor(element: Element) {
   return d;
 }
 function errorLog(error: unknown, source: string, data?: Record<string, unknown>): TicketLog {
-  if (error instanceof Error) return { timestamp: new Date().toISOString(), level: 'error', source, message: error.message, stack: error.stack, args: data ? [data] : undefined };
-  return { timestamp: new Date().toISOString(), level: 'error', source, message: typeof error === 'string' ? error : String(error), args: [serializeArg(error), ...(data ? [data] : [])] };
+  if (error instanceof Error) return { timestamp: new Date().toISOString(), level: 'error', source, message: error.message, stack: error.stack, args: data ? [redact(data)] : undefined };
+  return { timestamp: new Date().toISOString(), level: 'error', source, message: typeof error === 'string' ? error : String(error), args: [serializeArg(error), ...(data ? [redact(data)] : [])] };
 }
 
 export function addBreadcrumb(type: string, message: string, data?: Record<string, unknown>) {
-  breadcrumbs = push(breadcrumbs, { timestamp: new Date().toISOString(), type, message, data }, MAX_BREADCRUMBS);
+  breadcrumbs = push(breadcrumbs, { timestamp: new Date().toISOString(), type, message, data: data && redact(data) as Record<string, unknown> }, MAX_BREADCRUMBS);
 }
 export function captureError(error: unknown, source = 'manual', data?: Record<string, unknown>) {
   logs = push(logs, errorLog(error, source, data), MAX_LOGS);
 }
 /** Dados da tela atual que ajudam a entender o chamado (ex.: lote aberto). */
 export function setDomainContext(context: Record<string, unknown>, replace = false) {
-  domainContext = replace ? context : { ...domainContext, ...context };
+  const clean = redact(context) as Record<string, unknown>;
+  domainContext = replace ? clean : { ...domainContext, ...clean };
 }
 export function resetCapture() { logs = []; breadcrumbs = []; }
 export function trackRoute(route: string) {
@@ -85,8 +101,8 @@ export function trackRoute(route: string) {
 export function getReportSnapshot() {
   return {
     context: {
-      url: window.location.href, pathname: window.location.pathname, search: window.location.search,
-      referrer: document.referrer || undefined, userAgent: navigator.userAgent,
+      url: bareUrl(window.location.href), pathname: window.location.pathname, queryKeys: queryKeys(),
+      referrer: document.referrer ? bareUrl(document.referrer) : undefined, userAgent: navigator.userAgent,
       resolution: `${window.innerWidth}x${window.innerHeight}`,
       viewport: { width: window.innerWidth, height: window.innerHeight, devicePixelRatio: window.devicePixelRatio },
       buildId: process.env.NEXT_PUBLIC_BUILD_ID || process.env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA || 'development',

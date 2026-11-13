@@ -17,6 +17,13 @@ const MAX_BREADCRUMBS = 80;
 export const RATE_LIMIT: TicketRateLimit = { max: 5, windowSeconds: 600 };
 
 type Limits = { maxDepth: number; maxArrayLength: number; maxStringLength: number };
+/** Os dados vêm do navegador: valores dessas chaves não são gravados, mesmo que o cliente os envie. */
+const SECRET_KEY = /token|authorization|password|passwd|secret|cookie|session(?!id)|code|api[-_]?key|credential/i;
+/** Tira query e fragmento de endereços (callbacks de OAuth trazem códigos ali). */
+const bareUrl = (value: unknown) => {
+  if (typeof value !== 'string') return undefined;
+  try { const url = new URL(value); return `${url.origin}${url.pathname}`; } catch { return value.split(/[?#]/)[0]; }
+};
 
 /** Copia só JSON simples, cortando profundidade, listas e textos longos. */
 export function sanitizeJson(value: unknown, limits: Limits, depth = 0): unknown {
@@ -27,7 +34,7 @@ export function sanitizeJson(value: unknown, limits: Limits, depth = 0): unknown
   if (Array.isArray(value)) return value.slice(-limits.maxArrayLength).map(item => sanitizeJson(item, limits, depth + 1));
   if (typeof value === 'object') {
     return Object.fromEntries(Object.entries(value as Record<string, unknown>).slice(0, 100)
-      .map(([key, item]) => [key.slice(0, 120), sanitizeJson(item, limits, depth + 1)]));
+      .map(([key, item]) => [key.slice(0, 120), SECRET_KEY.test(key) ? '[removido]' : sanitizeJson(item, limits, depth + 1)]));
   }
   return null;
 }
@@ -93,6 +100,8 @@ export function createSupportTicketOperations(repository: SupportTicketRepositor
       requireWebPage(ctx, MY_REPORTS_PAGE);
       const body = createSchema.parse(input);
       const context = record(body.context, { maxDepth: 5, maxArrayLength: 50, maxStringLength: 4000 });
+      for (const key of ['url', 'referrer'] as const) if (key in context) context[key] = bareUrl(context[key]);
+      delete context.search;
       const logs = list<TicketLog>(body.logs, { maxDepth: 5, maxArrayLength: MAX_LOGS, maxStringLength: 8000 });
       const breadcrumbs = list<TicketBreadcrumb>(body.breadcrumbs, { maxDepth: 5, maxArrayLength: MAX_BREADCRUMBS, maxStringLength: 4000 });
       const domainContext = record(body.domainContext, { maxDepth: 5, maxArrayLength: 80, maxStringLength: 4000 });
