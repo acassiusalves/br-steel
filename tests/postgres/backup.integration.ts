@@ -23,6 +23,18 @@ const tables = [
   'brsteel_ops.sku_weekly_demand',
   'brsteel_write.audit',
   'brsteel_write.idempotency',
+  // Cadastros do PCP: só existem no PostgreSQL, então o backup precisa lê-los.
+  'brsteel_pcp.holidays',
+  'brsteel_pcp.loss_reasons',
+  'brsteel_pcp.production_lines',
+  'brsteel_pcp.production_operations',
+  'brsteel_pcp.production_phases',
+  'brsteel_pcp.work_periods',
+  'brsteel_pcp.work_team_members',
+  'brsteel_pcp.work_team_operations',
+  'brsteel_pcp.work_teams',
+  'brsteel_pcp.worker_operations',
+  'brsteel_pcp.workers',
 ] as const;
 
 const expectPermissionDenied = async (query: Promise<unknown>) => {
@@ -72,7 +84,7 @@ test('backup role reads every current operational table without mutation or esca
     where grantee.rolname = 'brsteel_ops_backup'
       and privilege.privilege_type = 'USAGE'
     order by namespace.nspname`)).rows.map(row => row.nspname);
-  assert.deepEqual(schemas, ['brsteel_import', 'brsteel_ops', 'brsteel_write']);
+  assert.deepEqual(schemas, ['brsteel_import', 'brsteel_ops', 'brsteel_pcp', 'brsteel_write']);
 
   const policies = (await pool.query(`select schemaname || '.' || tablename as table_name, policyname, cmd, roles, qual
     from pg_policies

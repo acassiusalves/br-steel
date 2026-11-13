@@ -177,6 +177,14 @@ Abordagem: **adaptar ao estilo do BR Steel**, não copiar o iApp como está. Cop
 
 ### Fase 1. Cadastros de engenharia
 
+> **Estado em 12/11/2026:** implementada na branch `claude/pcp-fase1-cadastros`. Decisões tomadas na implementação:
+> - Só PostgreSQL (Supabase), em schema próprio `brsteel_pcp` com tabelas relacionais. Não há par no Firestore e o PCP não passa pela chave de fonte do núcleo (`postgresOnlyRepository`). O login continua no Firestore, como no resto do app.
+> - O iApp tem funcionários em mais de uma equipe (um líder chefia Dobra e Polimento). Por isso a hierarquia fica em `work_team_members` (equipe, funcionário, superior), e não num `leader_id` do funcionário. Chaves compostas garantem que superior e líder sejam membros da mesma equipe.
+> - A página `/producao/engenharia` é só do Administrador.
+> - O backup operacional passou a incluir `brsteel_pcp` (26 tabelas). O roteiro de backup recusa o banco hospedado até a migration ser aplicada lá.
+> - Carga inicial: `scripts/pcp-import-iapp.ts`. Na leitura do iApp, um membro da equipe Limpeza (ID 26557) não está na lista de funcionários e ficou fora. As predecessoras foram copiadas como estão no iApp: Check Q/Q Corte, Polir, Limpar e Embalar estão sem predecessora lá.
+
+
 Telas em `/producao/engenharia/*` e operações em `src/server/operations/engineering.ts`. As tabelas novas entram na cadeia manual `supabase/operational/migrations/`, com RLS no padrão das existentes.
 
 | Entidade | Campos mínimos | Regras |

@@ -6,7 +6,10 @@ export const project='mmewkphsrnttkzvpyddv';
 export const sourceProject='marketflow-9h4tg';
 export const tables = ['brsteel_import.runs','brsteel_import.state',
   ...['inventory_movements','production_columns','production_comments','production_counters',
-    'production_lot_items','production_lots','sales_order_items','sales_orders','sku_weekly_demand','stock_observation_log','stock_observations','supplies','supply_codes'].map(n=>'brsteel_ops.'+n)];
+    'production_lot_items','production_lots','sales_order_items','sales_orders','sku_weekly_demand','stock_observation_log','stock_observations','supplies','supply_codes'].map(n=>'brsteel_ops.'+n),
+  // Cadastros do PCP: nascem no PostgreSQL e só existem aqui, então o backup é a única cópia.
+  ...['holidays','loss_reasons','production_lines','production_operations','production_phases','work_periods',
+    'work_team_members','work_team_operations','work_teams','worker_operations','workers'].map(n=>'brsteel_pcp.'+n)];
 
 export function backupConnection(value, ca) {
   const u=new URL(value);
@@ -42,7 +45,7 @@ export async function privateLocation(path,kind,repo) {
   return actual;
 }
 
-const scope="('brsteel_ops','brsteel_import')";
+const scope="('brsteel_ops','brsteel_import','brsteel_pcp')";
 export const catalogSql=`select jsonb_build_object(
   'tables',(select jsonb_agg(jsonb_build_array(n.nspname,c.relname,c.relrowsecurity,c.relforcerowsecurity,
     (select jsonb_agg(x::text order by x::text) from unnest(c.relacl) x)) order by n.nspname,c.relname)
@@ -76,7 +79,7 @@ export function tableManifestSql(table) {
 export async function manifest(query) {
   await query("set timezone='UTC'; set extra_float_digits=3; set search_path=pg_catalog");
   const catalog=(await query(catalogSql)).rows[0].catalog;
-  if (catalog.tables?.length!==15 || catalog.tables.some(t=>!t[2]) || catalog.constraints.filter(c=>c[3]==='f').length!==20)
+  if (catalog.tables?.length!==26 || catalog.tables.some(t=>!t[2]) || catalog.constraints.filter(c=>c[3]==='f').length!==32)
     throw new Error('Unexpected operational catalog');
   const rows=[];
   for (const name of tables) rows.push({name,...(await query(tableManifestSql(name))).rows[0]});

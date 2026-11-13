@@ -116,7 +116,7 @@ async function run() {
           PGPASSWORD:config.password,PGDATABASE:'postgres',PGSSLMODE:'verify-full',PGSSLROOTCERT:caPath,PGCONNECT_TIMEOUT:'10',
           PGOPTIONS:'-c statement_timeout=120000 -c lock_timeout=10000 -c default_transaction_read_only=on'};
         progress('encrypted-dump');const start=performance.now();let plainBytes=0;
-        const pg=child(join(pgBin,'pg_dump'),['--format=custom','--compress=gzip:6','--schema=brsteel_ops','--schema=brsteel_import',
+        const pg=child(join(pgBin,'pg_dump'),['--format=custom','--compress=gzip:6','--schema=brsteel_ops','--schema=brsteel_import','--schema=brsteel_pcp',
           '--strict-names','--enable-row-security',`--snapshot=${snapshot}`],{env});pg.p.stdin.end();
         const age=child('age',['--encrypt','--recipient',recipient]);
         const meter=new Transform({transform(b,e,cb){plainBytes+=b.length;cb(null,b);}});
@@ -151,7 +151,7 @@ async function run() {
     await writeFile(bad,bytes,{flag:'wx',mode:0o600});
     try {
       let refused=false;try{await restore(bad,identity);}catch{refused=true;}
-      const remaining=(await localQuery("select count(*)::int count from pg_namespace where nspname in ('brsteel_ops','brsteel_import')")).rows[0].count;
+      const remaining=(await localQuery("select count(*)::int count from pg_namespace where nspname in ('brsteel_ops','brsteel_import','brsteel_pcp')")).rows[0].count;
       if(!refused||remaining!==0)throw new Error('Tamper protection or rollback failed');
       report.tamper={rejected:true,partialSchemas:remaining};
     }finally{await unlink(bad);}

@@ -11,6 +11,7 @@ export const pagePermissions: Record<string, string[]> = {
     '/vendas': ['Administrador', 'Vendedor'],
     '/producao': ['Administrador', 'Operador'],
     '/producao/kanban': ['Administrador', 'Operador'],
+    '/producao/engenharia': ['Administrador'],
     '/insumos': ['Administrador', 'Operador'],
     '/financeiro/conciliacao': ['Administrador'],
     '/financeiro/planilhas': ['Administrador'],

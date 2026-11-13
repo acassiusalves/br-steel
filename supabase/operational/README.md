@@ -66,8 +66,9 @@ Pelos objetos, não pelo registro. Cada consulta devolve o valor esperado quando
 | `operational_writer_role` | `select count(*) from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='brsteel_write' and c.relkind='r'` | 2 |
 | `operational_native_run` | `select count(*) from brsteel_import.runs where id = repeat('0', 64)` | 1 |
 | `operational_history` | `select count(*) from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='brsteel_ops' and c.relname in ('stock_observation_log','sku_weekly_demand') and c.relrowsecurity` | 2 |
+| `pcp_engineering` | `select count(*) from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='brsteel_pcp' and c.relkind='r' and c.relrowsecurity` | 11 |
 
-Em 13/09/2026 as sete devolviam o valor esperado no projeto antigo (`mlumbvxpaqfzpdjnvzxc`). No projeto atual, `mmewkphsrnttkzvpyddv`, as oito devolvem o valor esperado desde 11/11/2026: as sete primeiras foram aplicadas na migração do Supabase, e a oitava, `operational_history`, no mesmo dia, depois do merge do código que a usa. O projeto antigo não recebeu a oitava.
+Em 13/09/2026 as sete devolviam o valor esperado no projeto antigo (`mlumbvxpaqfzpdjnvzxc`). No projeto atual, `mmewkphsrnttkzvpyddv`, as oito devolvem o valor esperado desde 11/11/2026: as sete primeiras foram aplicadas na migração do Supabase, e a oitava, `operational_history`, no mesmo dia, depois do merge do código que a usa. O projeto antigo não recebeu a oitava. A nona, `pcp_engineering` (cadastros do PCP, 12/11/2026), ainda não foi aplicada no projeto hospedado: só no banco local da suíte.
 
 Ao acrescentar uma migration nova, acrescente também a linha correspondente nesta tabela. Uma verificação que não cobre o arquivo novo não é verificação.
 
@@ -128,7 +129,7 @@ Repetir um snapshot já concluído é um no-op; não reativa um snapshot histór
 
 ## Acesso e limites
 
-Os schemas privados `brsteel_ops` e `brsteel_import` têm 15 tabelas com RLS. Papéis sem login separam importação e leitura; `anon`, `authenticated` e `PUBLIC` não recebem acesso operacional. O papel de leitura não grava dados nem consulta o histórico interno de importações. Essas políticas protegem o acesso pelo backend: a autorização de cada usuário continua obrigatória nas operações do sistema. Elas não representam políticas individuais por usuário.
+Os schemas privados `brsteel_ops` e `brsteel_import` têm 15 tabelas com RLS. O schema `brsteel_pcp` guarda os cadastros do PCP, que só existem no PostgreSQL, em 11 tabelas relacionais com RLS e os mesmos papéis. Papéis sem login separam importação e leitura; `anon`, `authenticated` e `PUBLIC` não recebem acesso operacional. O papel de leitura não grava dados nem consulta o histórico interno de importações. Essas políticas protegem o acesso pelo backend: a autorização de cada usuário continua obrigatória nas operações do sistema. Elas não representam políticas individuais por usuário.
 
 Os adaptadores candidatos implementam vendas, estoque, insumos, movimentações, produção e demanda. Estoque usa a última observação válida por SKU; produção retorna listas permitidas de campos, inclusive para identidades aninhadas; demanda agrega pedidos faturados e combina saldos e limites na mesma transação. Listagens SQL mantêm os cursores existentes, inclusive o avanço por documentos examinados quando a página de insumos omite registros sem nome. Os repositórios ativos da aplicação continuam exportando Firestore; somente usuários explicitamente selecionados no piloto MCP recebem os adaptadores PostgreSQL.
 

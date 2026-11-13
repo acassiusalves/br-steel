@@ -102,6 +102,11 @@ try {
       throw new Error('Operational schema catalog verification failed');
     }
     console.log('Operational schema catalog:', JSON.stringify(catalog));
+    // O PCP fica em schema próprio, fora da contagem do núcleo copiado do Firestore.
+    const pcp = (await pool.query(`select count(*)::int as tables, count(*) filter (where c.relrowsecurity)::int as rls_tables
+      from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='brsteel_pcp' and c.relkind='r'`)).rows[0];
+    if (pcp.tables !== 11 || pcp.rls_tables !== 11) throw new Error('PCP schema catalog verification failed');
+    console.log('PCP schema catalog:', JSON.stringify(pcp));
   } finally { await pool.end(); }
   if (process.env.BRSTEEL_PG_ADVISORS === '1') {
     // The repository's Supabase config belongs to OAuth and expects its own signing keys.
