@@ -30,6 +30,7 @@ Use o [índice de documentação](../docs/README.md) para localizar o procedimen
 | Arquivo | Efeito |
 | --- | --- |
 | [`operational-hosted-pilot.ts`](operational-hosted-pilot.ts) | Piloto de importação e leitura no PostgreSQL hospedado, com credenciais separadas por papel. |
+| [`pcp-import-iapp.ts`](pcp-import-iapp.ts) | Carga inicial dos cadastros de engenharia do PCP (`brsteel_pcp`) a partir de uma exportação do iApp: linha e fases, operações e predecessoras, funcionários, equipes com organograma e expediente. Grava no banco de `BRSTEEL_PCP_IMPORT_URL` só se `--confirm-host` repetir o host da URL. Idempotente pelo `iapp_id`, numa transação. O arquivo de exportação tem nomes de funcionários e fica fora do repositório. Em banco hospedado, exige escopo autorizado. |
 | [`operational-backup-drill.mjs`](operational-backup-drill.mjs) | Lê o destino configurado para gerar backup criptografado ou restaura em PostgreSQL descartável local. |
 | [`operational-cutover.ts`](operational-cutover.ts) | Comandos de reconciliação e controle do corte operacional. Revise o modo e o destino antes de usar `npm run cutover`. |
 | [`operational-cutover-rehearsal.ts`](operational-cutover-rehearsal.ts) | Ensaio que pode acionar manutenção do Firestore e gravar no PostgreSQL de destino. |

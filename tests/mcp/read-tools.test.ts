@@ -23,7 +23,7 @@ it('registers thirteen authorized reads, rejects actor injection and coerced num
 it('limits effective reads by current pages and role', async () => {
  const limited = { ...ctx, actor: { ...ctx.actor, role: 'Operador' }, capabilities: ['producao:read'] as AccessContext['capabilities'], inactivePages: ['/producao/kanban'] };
  await seedUser('admin', { role: 'Operador' });
- const access = await run('consultar_meu_acesso', {}, limited); expect(access.data.pages).toEqual(['/producao']);
+ const access = await run('consultar_meu_acesso', {}, limited); expect(access.data.pages).toEqual(['/producao', '/producao/ops', '/producao/quadro']);
  await expect(run('listar_lotes_producao', {}, limited)).rejects.toThrow();
  await expect(run('listar_pedidos', {}, limited)).rejects.toThrow();
 });

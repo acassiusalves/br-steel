@@ -31,7 +31,7 @@ import {
   User,
   Users,
   Warehouse,
-  type LucideIcon,
+  type LucideIcon, Wrench
 } from "lucide-react";
 import * as React from "react";
 
@@ -74,7 +74,10 @@ const allNavItems: NavItem[] = [
     label: "Produção",
     subItems: [
       { href: "/producao", icon: BarChart3, label: "Análise" },
-      { href: "/producao/kanban", icon: Kanban, label: "Kanban" },
+      { href: "/producao/ops", icon: ClipboardList, label: "Ordens de produção" },
+      { href: "/producao/quadro", icon: Kanban, label: "Kanban de OPs" },
+      { href: "/producao/kanban", icon: Kanban, label: "Kanban de lotes" },
+      { href: "/producao/engenharia", icon: Wrench, label: "Engenharia" },
     ],
   },
   {

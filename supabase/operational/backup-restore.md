@@ -7,7 +7,7 @@ O roteiro `scripts/operational-backup-drill.mjs` comprova recuperação da **có
 ## Pré-requisitos e acesso
 
 - Node 22, dependências do projeto, `age`/`age-keygen`, cliente `pg_dump` 17 e Docker com endpoint Unix local. A imagem de restauração é `public.ecr.aws/supabase/postgres:17.6.1.167`; não há portas publicadas nem rede no contêiner. Contextos Docker remotos são recusados.
-- Aplicar a migration operacional de backup. `brsteel_ops_backup` é NOLOGIN, sem privilégios administrativos, e lê somente as 16 tabelas atuais com RLS: as 15 do núcleo operacional e `brsteel_support.tickets`, dos chamados. Tabelas futuras exigem revisão explícita; o roteiro recusa um catálogo diferente.
+- Aplicar a migration operacional de backup. `brsteel_ops_backup` é NOLOGIN, sem privilégios administrativos, e lê somente as 35 tabelas atuais com RLS (15 do núcleo, 19 do PCP em `brsteel_pcp` e `brsteel_support.tickets`, dos chamados). Tabelas futuras exigem revisão explícita; o roteiro recusa um catálogo diferente.
 - Provisionar, por conexão administrativa confiável, um login temporário chamado `brsteel_backup_probe`, INHERIT, NOSUPERUSER, NOCREATEDB, NOCREATEROLE, NOREPLICATION, NOBYPASSRLS, limite de duas conexões e validade curta. Conceder somente `brsteel_ops_backup`. Nunca usar o login de runtime ou importação. Não registrar senha na migration ou em Git.
 - O roteiro não cria nem revoga esse login. O operador deve fazer a revogação abaixo **mesmo após uma falha ou interrupção**. Expiração é proteção adicional, não substitui a revogação.
 
@@ -29,7 +29,7 @@ Definir as variáveis no ambiente privado do processo:
 
 O manifesto privilegiado tem a forma `{tables:[{name,rows,sha256}],catalog:{...}}`. Gerar as consultas com `tableManifestSql` para os nomes de `tables` e `catalogSql`, exportados por `scripts/lib/operational-backup.mjs`. Executar com `timezone=UTC`, `extra_float_digits=3`, `search_path=pg_catalog`, ordenar tabelas por nome e salvar apenas contagens/hashes/catálogo. Não exportar payloads para o manifesto. A cópia deve permanecer estável entre esta captura e a execução. Se houver divergência, investigar; não substituir automaticamente a referência por dados do papel de backup.
 
-Essa comparação administrativa é necessária porque `pg_dump --enable-row-security` exporta somente as linhas que o papel pode ler. O roteiro compara as 16 tabelas antes do dump, depois mantém uma transação `REPEATABLE READ READ ONLY` e usa o mesmo snapshot exportado no dump. Veja a [documentação do PostgreSQL](https://www.postgresql.org/docs/17/app-pgdump.html).
+Essa comparação administrativa é necessária porque `pg_dump --enable-row-security` exporta somente as linhas que o papel pode ler. O roteiro compara as 35 tabelas antes do dump, depois mantém uma transação `REPEATABLE READ READ ONLY` e usa o mesmo snapshot exportado no dump. Veja a [documentação do PostgreSQL](https://www.postgresql.org/docs/17/app-pgdump.html).
 
 ## Execução e verificação
 

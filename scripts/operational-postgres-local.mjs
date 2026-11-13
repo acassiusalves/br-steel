@@ -102,6 +102,11 @@ try {
       throw new Error('Operational schema catalog verification failed');
     }
     console.log('Operational schema catalog:', JSON.stringify(catalog));
+    // O PCP fica em schema próprio, fora da contagem do núcleo copiado do Firestore.
+    const pcp = (await pool.query(`select count(*)::int as tables, count(*) filter (where c.relrowsecurity)::int as rls_tables
+      from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='brsteel_pcp' and c.relkind='r'`)).rows[0];
+    if (pcp.tables !== 19 || pcp.rls_tables !== 19) throw new Error('PCP schema catalog verification failed');
+    console.log('PCP schema catalog:', JSON.stringify(pcp));
     // Os chamados ficam em schema próprio, fora da contagem do núcleo copiado do Firestore.
     const support = (await pool.query(`select count(*)::int as tables, count(*) filter (where c.relrowsecurity)::int as rls_tables
       from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='brsteel_support' and c.relkind='r'`)).rows[0];
