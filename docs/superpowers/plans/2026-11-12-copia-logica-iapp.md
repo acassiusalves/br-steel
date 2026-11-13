@@ -243,6 +243,7 @@ Telas em `/producao/engenharia/*` e operações em `src/server/operations/engine
 > - **Ficha por SKU:** quando há mais de uma ficha, vale a de roteiro mais completo.
 > - **OS:** cada OP nasce com uma ordem de serviço por passo da ficha. Sem predecessora definida na ficha, vale o passo anterior.
 > - **Corte:** gera a OP do produto e OPs filhas das partes com ficha própria (quantidade da parte × quantidade da OP ÷ quantidade base). A planilha do iApp leva só a OP mãe, com multinível "S", para o iApp gerar as partes.
+> - **13/11/2026:** migration aplicada no projeto `mmewkphsrnttkzvpyddv` com `supabase db query --linked`. Conferido: 17 tabelas com RLS em `brsteel_pcp`, 24 chaves estrangeiras, 51 políticas, `anon` sem acesso e o papel de gravação com uso da sequência de numeração das OPs.
 > - **Pendente:** a ferramenta MCP de geração (escrita pelo MCP continua desligada sem `MCP_WRITES_ENABLED`) e o teste de subir uma OP real no iApp com a planilha gerada.
 
 
