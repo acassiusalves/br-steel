@@ -297,6 +297,15 @@ Evolui `/producao/kanban` para o quadro de OPs. Reaproveita o dnd-kit e os compo
 
 ### Fase 5. Apontamento de tempo, balanço e estoque
 
+> **Estado em 13/11/2026:** tempos e balanço implementados na branch `claude/pcp-fase1-cadastros`, sem migration nova.
+> - **Cálculo:** `src/lib/pcp/business-time.ts` conta só os minutos dentro do expediente cadastrado e fora dos feriados, no fuso da fábrica (America/Sao_Paulo, com o deslocamento de cada dia vindo do Intl). O exemplo da reunião é teste: uma OS das 10:19 às 15:38 dá 4h19, sem o almoço.
+> - **Tempos de cada OS no quadro:**
+>   - espera: do fim da OS anterior até o início desta, ou até agora se ainda não começou;
+>   - execução: do início ao fim, ou até agora se está em andamento.
+> - **No card:** a OS em andamento mostra há quanto tempo útil está rodando. Os detalhes mostram espera e execução por OS e um balanço (previsto, atual, perdas, tempo útil total).
+> - **Pendente (4.1-c):** o lançamento de estoque no Bling quando a OP é concluída. Ainda falta decidir quem lança a produção no Bling depois que o iApp sair.
+
+
 - **Tempos por OS:**
   - espera: do fim da OS anterior ao início desta;
   - execução: do início ao fim;

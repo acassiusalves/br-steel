@@ -12,6 +12,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import * as svc from '@/services/production-kanban-service';
+import { formatMinutes } from '@/lib/pcp/business-time';
 import type { Board, BoardCard } from '@/server/persistence/pcp-kanban-contract';
 
 const STEP_STYLE: Record<string, string> = {
@@ -45,7 +46,7 @@ function CardView({ card, board, busy, act, openFinish }: {
         Qtde <strong>{fmt(card.currentQuantity)}</strong>
         {lost > 0 && <span className="ml-2 text-destructive">· perda {fmt(lost)}</span>}
       </div>
-      {running && <div className="text-xs text-amber-700 dark:text-amber-300">{running.operationName}: {running.workerName} desde {time(running.startedAt)}</div>}
+      {running && <div className="text-xs text-amber-700 dark:text-amber-300">{running.operationName}: {running.workerName} desde {time(running.startedAt)} · {formatMinutes(running.runMinutes)} úteis</div>}
       <div className="flex flex-wrap gap-1">
         {card.steps.map(s => <span key={s.id} title={`${s.operationName}: ${STEP_LABEL[s.status]}`} className={`rounded border px-1.5 py-0.5 text-[10px] ${STEP_STYLE[s.status]}`}>{s.operationName}</span>)}
       </div>
@@ -84,10 +85,21 @@ function CardView({ card, board, busy, act, openFinish }: {
               <span className="font-medium">{s.position + 1}. {s.operationName}</span> · {STEP_LABEL[s.status]}
               {s.workerName && <> · {s.workerName}</>}
               {s.startedAt && <> · {time(s.startedAt)}{s.finishedAt && <> → {time(s.finishedAt)}</>}</>}
+              {(s.waitMinutes !== null || s.runMinutes !== null) && (
+                <div className="text-muted-foreground">
+                  {s.waitMinutes !== null && <>espera {formatMinutes(s.waitMinutes)}</>}
+                  {s.waitMinutes !== null && s.runMinutes !== null && ' · '}
+                  {s.runMinutes !== null && <>execução {formatMinutes(s.runMinutes)}{s.status === 'em_execucao' && ' (em andamento)'}</>}
+                </div>
+              )}
               {s.notes && <div className="text-muted-foreground">“{s.notes}”</div>}
             </div>
           ))}
           {card.losses.map((l, i) => <div key={i} className="text-destructive">Perda de {fmt(l.quantity)}: {l.reason}{l.notes ? ` (${l.notes})` : ''}</div>)}
+          <div className="border-t pt-1 font-medium">
+            Balanço: previsto {fmt(card.quantity)} · atual {fmt(card.currentQuantity)} · perdas {fmt(card.quantity - card.currentQuantity)}
+            <div className="font-normal text-muted-foreground">Tempo útil: execução {formatMinutes(card.totals.runMinutes)} · espera {formatMinutes(card.totals.waitMinutes)}</div>
+          </div>
         </div>
       )}
     </div>

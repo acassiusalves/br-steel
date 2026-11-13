@@ -291,4 +291,17 @@ test('Kanban de OPs: líder move, membro executa, perda reduz a quantidade e o c
   assert.deepEqual(c.steps.map(s => [s.status, s.workerName]), [['executada', 'Líder K'], ['executada', 'Dobrador K']]);
   const kinds = (await pool.query('select kind from brsteel_pcp.production_order_events where order_id = $1 order by created_at, kind', [orderId])).rows.map(r => r.kind);
   assert.deepEqual(kinds, ['move', 'start', 'finish', 'loss', 'move', 'start', 'finish', 'move']);
+
+  // Tempos úteis com horários fixos, sobre o expediente da fábrica (o teste da carga regrava o expediente).
+  await repo.replaceWorkPeriods([1, 2, 3, 4, 5].flatMap(weekday => [
+    { weekday, startsAt: '07:45', endsAt: '12:00' }, { weekday, startsAt: '13:00', endsAt: '16:00' }, { weekday, startsAt: '16:15', endsAt: '17:30' },
+  ]), actor);
+  const [first, second] = c.steps;
+  await pool.query(`update brsteel_pcp.production_order_steps set started_at = $2, finished_at = $3 where id = $1`,
+    [first.id, '2026-11-04T10:19:00-03:00', '2026-11-04T15:38:00-03:00']);
+  await pool.query(`update brsteel_pcp.production_order_steps set started_at = $2, finished_at = $3 where id = $1`,
+    [second.id, '2026-11-04T16:30:00-03:00', '2026-11-05T08:00:00-03:00']);
+  c = await card();
+  assert.deepEqual(c.steps.map(s => [s.waitMinutes, s.runMinutes]), [[null, 259], [37, 75]]);
+  assert.deepEqual(c.totals, { runMinutes: 334, waitMinutes: 37 });
 });

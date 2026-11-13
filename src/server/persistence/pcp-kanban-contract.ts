@@ -7,11 +7,17 @@ export type BoardColumn = { key: string; name: string };
 export type BoardStep = {
   id: string; operationName: string; phaseId: string; position: number; status: StepStatus;
   workerName: string | null; startedAt: string | null; finishedAt: string | null; notes: string | null;
+  /** Minutos úteis (expediente, sem feriados) entre o fim da OS anterior e o início desta. */
+  waitMinutes: number | null;
+  /** Minutos úteis de execução; numa OS em andamento, até agora. */
+  runMinutes: number | null;
 };
 export type BoardLoss = { quantity: number; reason: string; notes: string | null; createdAt: string };
 export type BoardCard = {
   id: string; number: number; kind: OrderKind; sku: string; description: string | null; quantity: number; currentQuantity: number;
   column: string; createdAt: string; steps: BoardStep[]; losses: BoardLoss[];
+  /** Soma dos tempos úteis de execução e de espera das OS. */
+  totals: { runMinutes: number; waitMinutes: number };
   /** O que o usuário logado pode fazer neste card agora. */
   allowed: { moveTo: string | null; start: { stepId: string; workers: { id: string; name: string }[] } | null; finishStepId: string | null };
 };

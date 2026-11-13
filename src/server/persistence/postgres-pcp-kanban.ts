@@ -6,6 +6,7 @@ import {
   type KanbanActor, type KanbanOrder, type KanbanTeam,
 } from '@/lib/pcp/kanban-rules';
 import type { OrderKind } from '@/lib/pcp/op-generator';
+import { businessMinutes, type WorkPeriod } from '@/lib/pcp/business-time';
 import type { Board, BoardActor, BoardCard, FinishInput, KanbanRepository } from './pcp-kanban-contract';
 import { recordWriteAudit } from './write-audit';
 import { withOperationalWrite } from './postgres-write';
@@ -86,10 +87,15 @@ export function createPostgresKanbanRepository(pool: Pool): KanbanRepository {
           from brsteel_pcp.production_order_losses l join brsteel_pcp.loss_reasons r on r.id = l.reason_id
           where l.order_id = any($1) order by l.created_at`, [ids])).rows as Row[];
         const reasons = (await client.query('select id, name from brsteel_pcp.loss_reasons where active order by name')).rows as Row[];
+        const periods: WorkPeriod[] = ((await client.query('select weekday, starts_at, ends_at from brsteel_pcp.work_periods')).rows as Row[])
+          .map(p => ({ weekday: Number(p.weekday), startsAt: String(p.starts_at).slice(0, 5), endsAt: String(p.ends_at).slice(0, 5) }));
+        const holidays = new Set(((await client.query('select day::text as day from brsteel_pcp.holidays')).rows as Row[]).map(h => String(h.day)));
         const people = await loadPeople(client, actor);
         await client.query('commit');
 
         const workerName = new Map(people.workers.map(w => [String(w.id), String(w.name)]));
+        const now = new Date();
+        const minutes = (from: unknown, to: unknown) => (from ? businessMinutes(from as Date, (to as Date) ?? now, periods, holidays) : null);
         const cards: BoardCard[] = orders.map(o => {
           const orderSteps = steps.filter(s => s.order_id === o.id);
           const state: KanbanOrder = {
@@ -102,12 +108,17 @@ export function createPostgresKanbanRepository(pool: Pool): KanbanRepository {
           const eligible = startable ? people.workers.filter(w => !startError(state, startable.id, String(w.id),
             people.workerOps.get(String(w.id)) ?? [], Boolean(w.active), people.kanbanActor, people.teams)) : [];
           const running = state.steps.find(s => s.status === 'em_execucao');
+          const boardSteps = orderSteps.map((s, i) => ({ id: String(s.id), operationName: String(s.operation_name), phaseId: String(s.phase_id), position: Number(s.position),
+            status: s.status as BoardCard['steps'][number]['status'], workerName: s.worker_id ? workerName.get(String(s.worker_id)) ?? null : null,
+            startedAt: iso(s.started_at), finishedAt: iso(s.finished_at), notes: (s.notes as string) ?? null,
+            // A espera vai do fim da OS anterior até o início desta; se ela ainda não começou, até agora.
+            waitMinutes: i > 0 && orderSteps[i - 1].finished_at ? minutes(orderSteps[i - 1].finished_at, s.started_at ?? null) : null,
+            runMinutes: minutes(s.started_at, s.finished_at ?? null) }));
           return {
             id: String(o.id), number: Number(o.number), kind: o.kind as OrderKind, sku: String(o.sku), description: (o.description as string) ?? null,
             quantity: state.quantity, currentQuantity: currentQuantity(state), column: columnOf(state), createdAt: iso(o.created_at)!,
-            steps: orderSteps.map(s => ({ id: String(s.id), operationName: String(s.operation_name), phaseId: String(s.phase_id), position: Number(s.position),
-              status: s.status as BoardCard['steps'][number]['status'], workerName: s.worker_id ? workerName.get(String(s.worker_id)) ?? null : null,
-              startedAt: iso(s.started_at), finishedAt: iso(s.finished_at), notes: (s.notes as string) ?? null })),
+            steps: boardSteps,
+            totals: { runMinutes: boardSteps.reduce((n, t) => n + (t.runMinutes ?? 0), 0), waitMinutes: boardSteps.reduce((n, t) => n + (t.waitMinutes ?? 0), 0) },
             losses: losses.filter(l => l.order_id === o.id).map(l => ({ quantity: Number(l.quantity), reason: String(l.reason), notes: (l.notes as string) ?? null, createdAt: iso(l.created_at)! })),
             allowed: {
               moveTo: target && !moveError(state, target, people.kanbanActor, people.teams) ? target : null,
