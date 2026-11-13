@@ -55,6 +55,8 @@ utilização é a reunião com a equipe da fábrica.
 - **Navegação.** "Reportes" entra no grupo Configurações. "Meus reportes" entra no menu da conta, como no Calculaqui.
 - **Limite de envio.** O Administrador não tem limite, porque vai registrar vários chamados seguidos na reunião. Os
   demais papéis seguem com 5 envios a cada 10 minutos.
+- **Backup.** `brsteel_support.tickets` entra no backup operacional (lista de tabelas, catálogo e `pg_dump`), porque
+  os chamados só existem no PostgreSQL.
 - **Captura no cliente.** Um módulo único (`src/lib/report-capture.ts`), instalado pelo layout logado, sobrevive à
   navegação entre páginas.
 
@@ -63,8 +65,6 @@ utilização é a reunião com a equipe da fábrica.
 - O link "Ver o que mudou" ligado ao changelog: o BR Steel não tem changelog.
 - O aviso no sino quando um chamado é resolvido: o acompanhamento fica em "Meus reportes".
 - O registro em nome de outro usuário: na reunião, os chamados ficam no nome de quem registra.
-- A inclusão de `brsteel_support` no backup operacional: as listas do backup mudam junto com o PR do PCP e serão
-  ajustadas depois dos dois merges.
 
 ## Verificação
 

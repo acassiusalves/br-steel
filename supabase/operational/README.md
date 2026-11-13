@@ -70,7 +70,7 @@ Pelos objetos, não pelo registro. Cada consulta devolve o valor esperado quando
 
 Em 13/09/2026 as sete devolviam o valor esperado no projeto antigo (`mlumbvxpaqfzpdjnvzxc`). No projeto atual, `mmewkphsrnttkzvpyddv`, as oito devolvem o valor esperado desde 11/11/2026: as sete primeiras foram aplicadas na migração do Supabase, e a oitava, `operational_history`, no mesmo dia, depois do merge do código que a usa. O projeto antigo não recebeu a oitava.
 
-`support_tickets` cria o schema `brsteel_support`, dos chamados de erros e melhorias. Ele nasce no PostgreSQL e fica fora da carga, da reconciliação e, por enquanto, do backup operacional. Foi aplicada em `mmewkphsrnttkzvpyddv` em 13/11/2026, numa transação, com `supabase db query --linked -f`; a consulta da tabela devolveu 1, com as três políticas (writer, reader, backup_reader) e o gatilho `tickets_touch`.
+`support_tickets` cria o schema `brsteel_support`, dos chamados de erros e melhorias. Ele nasce no PostgreSQL e fica fora da carga e da reconciliação, mas entra no backup operacional. Foi aplicada em `mmewkphsrnttkzvpyddv` em 13/11/2026, numa transação, com `supabase db query --linked -f`; a consulta da tabela devolveu 1, com as três políticas (writer, reader, backup_reader) e o gatilho `tickets_touch`.
 
 Ao acrescentar uma migration nova, acrescente também a linha correspondente nesta tabela. Uma verificação que não cobre o arquivo novo não é verificação.
 

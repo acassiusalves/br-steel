@@ -21,6 +21,8 @@ const tables = [
   'brsteel_ops.sales_order_items',
   'brsteel_ops.stock_observation_log',
   'brsteel_ops.sku_weekly_demand',
+  // Chamados de erros e melhorias: só existem no PostgreSQL, então o backup precisa lê-los.
+  'brsteel_support.tickets',
   'brsteel_write.audit',
   'brsteel_write.idempotency',
 ] as const;
@@ -72,7 +74,7 @@ test('backup role reads every current operational table without mutation or esca
     where grantee.rolname = 'brsteel_ops_backup'
       and privilege.privilege_type = 'USAGE'
     order by namespace.nspname`)).rows.map(row => row.nspname);
-  assert.deepEqual(schemas, ['brsteel_import', 'brsteel_ops', 'brsteel_write']);
+  assert.deepEqual(schemas, ['brsteel_import', 'brsteel_ops', 'brsteel_support', 'brsteel_write']);
 
   const policies = (await pool.query(`select schemaname || '.' || tablename as table_name, policyname, cmd, roles, qual
     from pg_policies
