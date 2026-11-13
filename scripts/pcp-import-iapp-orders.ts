@@ -14,6 +14,7 @@
  * O iApp não informa quem iniciou cada OS nem quando. Uma OS em execução ou executada lá entra marcada
  * como `imported`, sem funcionário e sem horário; no quadro, o líder da operação pode finalizá-la.
  */
+import { randomBytes } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { parseArgs } from 'node:util';
 import pg from 'pg';
@@ -92,12 +93,15 @@ export function normalizeOrders(data: IappOrdersExport) {
 /** SQL único, transacional e idempotente. As fases e operações são achadas pelo nome, que veio do iApp. */
 export function buildOrdersSql(data: IappOrdersExport): string {
   const payload = JSON.stringify(normalizeOrders(data));
-  if (payload.includes('$iapp$')) throw new Error('A exportação contém um delimitador reservado.');
+  // Delimitadores sorteados a cada execução, e nenhum $ na exportação: o texto nunca fecha o bloco nem o literal.
+  if (payload.includes('$')) throw new Error('A exportação contém o caractere $, reservado como delimitador.');
+  const body = `$do_${randomBytes(8).toString('hex')}$`;
+  const literal = `$iapp_${randomBytes(8).toString('hex')}$`;
   const s = 'brsteel_pcp';
   return `begin;
-do $do$
+do ${body}
 declare
-  payload jsonb := $iapp$${payload}$iapp$::jsonb;
+  payload jsonb := ${literal}${payload}${literal}::jsonb;
   op jsonb; os jsonb; v_order uuid; v_touched boolean; v_phase uuid; v_operation uuid; v_prev uuid; v_step uuid; v_position int;
 begin
   for op in select value from jsonb_array_elements(payload->'orders') loop
@@ -140,7 +144,7 @@ begin
       and o.iapp_id not in (select (jsonb_array_elements_text(payload->'openIds'))::bigint)
       and not exists (select 1 from ${s}.production_order_events e where e.order_id = o.id);
 end
-$do$;
+${body};
 insert into brsteel_write.audit (id, operation, user_id, source, target_collection, target_id)
   values (gen_random_uuid()::text, 'pcp.importIappOrders', 'script', 'web', 'pcp.orders', ${pgLiteral(data.capturedAt.slice(0, 40))});
 commit;

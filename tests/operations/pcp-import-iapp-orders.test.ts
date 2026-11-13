@@ -37,7 +37,11 @@ describe('carga das OPs do iApp', () => {
     expect(sql.trim().endsWith('commit;')).toBe(true);
     expect(sql).toContain('if v_touched then continue; end if;');
     expect(sql).toContain("'pcp.importIappOrders'");
-    const hostil = base(); hostil.orders[0].description = 'x$iapp$; drop table y; --';
-    expect(() => buildOrdersSql(hostil)).toThrow(/delimitador/);
+    for (const ataque of ['x$iapp$; drop table y; --', 'x$do$; drop table y; --', '$$']) {
+      const hostil = base(); hostil.orders[0].description = ataque;
+      expect(() => buildOrdersSql(hostil)).toThrow(/delimitador/);
+    }
+    // Os delimitadores mudam a cada execução.
+    expect(buildOrdersSql(base()).split('\n')[1]).not.toBe(sql.split('\n')[1]);
   });
 });
