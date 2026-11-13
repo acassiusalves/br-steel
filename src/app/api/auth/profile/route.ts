@@ -6,6 +6,7 @@ import { getSessionFromRequest, hashPassword, sessionCookieHeader, createSession
 import { needsPasswordChange } from '@/server/access/passwords';
 import { isKnownRole, publicUser, storedUserFromDoc } from '@/server/access/users';
 import { rejectCrossOrigin } from '@/server/access/request';
+import { BADGE_INITIAL_PASSWORD, BADGE_MIN_PASSWORD, isBadgeUser } from '@/server/access/badges';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -26,8 +27,8 @@ export async function PATCH(request: Request) {
   const parsed = profileInput.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return NextResponse.json({ ok: false, error: 'Nome ou senha inválidos.' }, { status: 400 });
   const { name, currentPassword, newPassword } = parsed.data;
-  if (newPassword && newPassword.length < 12) {
-    return NextResponse.json({ ok: false, error: 'A nova senha deve ter pelo menos 12 caracteres.' }, { status: 400 });
+  if (newPassword && newPassword.length < BADGE_MIN_PASSWORD) {
+    return NextResponse.json({ ok: false, error: `A nova senha deve ter pelo menos ${BADGE_MIN_PASSWORD} caracteres.` }, { status: 400 });
   }
   const credential = newPassword ? hashPassword(newPassword) : null;
   const ref = adminDb.collection('users').doc(session.user.id);
@@ -36,6 +37,13 @@ export async function PATCH(request: Request) {
     const stored = snapshot.exists ? storedUserFromDoc(snapshot.id, snapshot.data()!) : null;
     if (!stored || stored.active === false || !isKnownRole(stored.role) || stored.authVersion !== session.authVersion) {
       return { error: 'Sessão expirada.', status: 401 } as const;
+    }
+    // Crachá: 6 caracteres ou mais, nunca a senha de primeiro acesso. Com e-mail: 12 ou mais, como antes.
+    if (newPassword && !isBadgeUser(stored) && newPassword.length < 12) {
+      return { error: 'A nova senha deve ter pelo menos 12 caracteres.', status: 400 } as const;
+    }
+    if (newPassword && newPassword === BADGE_INITIAL_PASSWORD) {
+      return { error: 'Escolha uma senha diferente de 123456.', status: 400 } as const;
     }
     const mustChange = needsPasswordChange(stored);
     if (mustChange && !newPassword) return { error: 'Cadastre uma nova senha para concluir o primeiro acesso.', status: 400 } as const;

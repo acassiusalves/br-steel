@@ -5,7 +5,7 @@ import { engineering as e } from '@/server/operations/engineering';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-const actions = ['saveLine', 'saveOperation', 'saveTeam', 'saveWorker', 'replaceWorkPeriods', 'saveHoliday', 'deleteHoliday', 'saveLossReason', 'saveSheet'] as const;
+const actions = ['saveLine', 'saveOperation', 'saveTeam', 'saveWorker', 'replaceWorkPeriods', 'saveHoliday', 'deleteHoliday', 'saveLossReason', 'saveSheet', 'createBadgeAccess', 'resetBadgePassword'] as const;
 
 export async function GET(request: Request) {
   return operationJson(async () => {
@@ -32,6 +32,8 @@ export async function POST(request: Request) {
       case 'deleteHoliday': return e.deleteHoliday(ctx, id);
       case 'saveLossReason': return e.saveLossReason(ctx, id, data);
       case 'saveSheet': return e.saveSheet(ctx, id, data);
+      case 'createBadgeAccess': return e.createBadgeAccess(ctx, id);
+      case 'resetBadgePassword': return e.resetBadgePassword(ctx, id);
     }
   });
 }

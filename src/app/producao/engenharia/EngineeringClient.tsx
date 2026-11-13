@@ -86,11 +86,12 @@ export default function EngineeringClient() {
   const [editing, setEditing] = React.useState<Editing>(null);
   const [form, setForm] = React.useState<Record<string, unknown>>({});
   const [saving, setSaving] = React.useState(false);
-  const [users, setUsers] = React.useState<{ id: string; name: string; role: string }[]>([]);
+  const [users, setUsers] = React.useState<{ id: string; name: string; role: string; badge?: string }[]>([]);
   const isAdmin = user?.role === 'Administrador';
 
   // Usuários de login, para vincular ao funcionário: é por esse vínculo que ele age no Kanban de OPs.
-  React.useEffect(() => { if (isAdmin) void getAssignableUsers().then(setUsers).catch(() => setUsers([])); }, [isAdmin]);
+  const loadUsers = React.useCallback(() => { if (isAdmin) void getAssignableUsers().then(setUsers).catch(() => setUsers([])); }, [isAdmin]);
+  React.useEffect(loadUsers, [loadUsers]);
 
   React.useEffect(() => subscribeOperation(svc.getEngineering,
     snapshot => { setData(snapshot); setError(null); },
@@ -235,8 +236,24 @@ export default function EngineeringClient() {
                 {data.workers.map(w => (
                   <TableRow key={w.id}>
                     <TableCell className="font-mono text-xs">{w.badge}</TableCell><TableCell>{w.name}</TableCell><TableCell>{w.kind}</TableCell>
-                    <TableCell className="text-xs">{data.teams.filter(t => t.members.some(m => m.workerId === w.id)).map(t => t.name).join(', ') || '—'}</TableCell><TableCell className="text-xs">{w.userId ? users.find(u => u.id === w.userId)?.name ?? 'Vinculado' : '—'}</TableCell><TableCell>{status(w.active)}</TableCell>
-                    <TableCell>{editButton({ kind: 'worker', value: w })}</TableCell>
+                    <TableCell className="text-xs">{data.teams.filter(t => t.members.some(m => m.workerId === w.id)).map(t => t.name).join(', ') || '—'}</TableCell><TableCell className="text-xs">{w.userId ? (users.find(u => u.id === w.userId)?.badge ? 'Crachá' : users.find(u => u.id === w.userId)?.name ?? 'Vinculado') : '—'}</TableCell><TableCell>{status(w.active)}</TableCell>
+                    <TableCell className="whitespace-nowrap">
+                      {editButton({ kind: 'worker', value: w })}
+                      {isAdmin && !w.userId && w.badge && (
+                        <Button size="sm" variant="outline" className="ml-2" disabled={saving}
+                          onClick={() => window.confirm(`Criar o acesso de ${w.name} pelo crachá ${w.badge}? No primeiro acesso a senha é 123456 e ele cadastra a senha pessoal.`)
+                            && void run(() => svc.createBadgeAccess(w.id).then(loadUsers), `Acesso criado. Primeiro acesso: crachá ${w.badge} e senha 123456.`)}>
+                          Criar acesso pelo crachá
+                        </Button>
+                      )}
+                      {isAdmin && w.userId && users.find(u => u.id === w.userId)?.badge && (
+                        <Button size="sm" variant="outline" className="ml-2" disabled={saving}
+                          onClick={() => window.confirm(`Resetar a senha de ${w.name}? Ele volta a entrar com 123456 e cadastra uma senha nova. As sessões abertas dele serão encerradas.`)
+                            && void run(() => svc.resetBadgePassword(w.id), `Senha resetada. ${w.name} entra com o crachá e a senha 123456.`)}>
+                          Resetar senha
+                        </Button>
+                      )}
+                    </TableCell>
                   </TableRow>
                 ))}
               </TableBody>

@@ -22,12 +22,12 @@ export async function getUsers(): Promise<User[]> {
     .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
 }
 /** Minimal directory for the Kanban, separate from user administration. */
-export async function getAssignableUsers(): Promise<Array<Pick<User, 'id' | 'name' | 'role'>>> {
+export async function getAssignableUsers(): Promise<Array<Pick<User, 'id' | 'name' | 'role' | 'badge'>>> {
   await requireActionPage('/producao/kanban');
   const snapshot = await adminDb.collection('users').get();
   return snapshot.docs.map(d => storedUserFromDoc(d.id, d.data()))
     .filter(u => u.active !== false && ['Administrador', 'Operador'].includes(u.role))
-    .map(({ id, name, role }) => ({ id, name, role }))
+    .map(({ id, name, role, badge }) => ({ id, name, role, ...(badge ? { badge } : {}) }))
     .sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'));
 }
 export async function addUser(input: Pick<User, 'name' | 'email' | 'role'>): Promise<{ id: string; temporaryPassword: string }> {
