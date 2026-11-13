@@ -11,10 +11,12 @@ export type BoardStep = {
   waitMinutes: number | null;
   /** Minutos úteis de execução; numa OS em andamento, até agora. */
   runMinutes: number | null;
+  /** OS trazida do iApp já iniciada: sem funcionário e sem horário de início. */
+  imported: boolean;
 };
 export type BoardLoss = { quantity: number; reason: string; notes: string | null; createdAt: string };
 export type BoardCard = {
-  id: string; number: number; kind: OrderKind; sku: string; description: string | null; quantity: number; currentQuantity: number;
+  id: string; number: number; /** Número da OP no iApp, quando ela veio de lá. */ iappNumber: string | null; kind: OrderKind; sku: string; description: string | null; quantity: number; currentQuantity: number;
   column: string; createdAt: string; steps: BoardStep[]; losses: BoardLoss[];
   /** Soma dos tempos úteis de execução e de espera das OS. */
   totals: { runMinutes: number; waitMinutes: number };

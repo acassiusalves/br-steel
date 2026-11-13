@@ -70,17 +70,17 @@ export function createPostgresKanbanRepository(pool: Pool): KanbanRepository {
           join brsteel_pcp.production_lines l on l.id = p.line_id where l.active order by l.name, p.position`)).rows as Row[];
         // Quadro do dia a dia: o que está em produção e os últimos concluídos.
         const orders = (await client.query(`select * from (
-            select o.id, o.number, o.kind, o.sku, o.description, o.quantity, o.status, o.phase_id, o.created_at, o.updated_at,
+            select o.id, o.number, o.iapp_number, o.kind, o.sku, o.description, o.quantity, o.status, o.phase_id, o.created_at, o.updated_at,
               (select coalesce(sum(quantity), 0) from brsteel_pcp.production_order_losses l where l.order_id = o.id) loss_total
             from brsteel_pcp.production_orders o where o.status in ('a_produzir', 'produzindo')
             union all
-            select * from (select o.id, o.number, o.kind, o.sku, o.description, o.quantity, o.status, o.phase_id, o.created_at, o.updated_at,
+            select * from (select o.id, o.number, o.iapp_number, o.kind, o.sku, o.description, o.quantity, o.status, o.phase_id, o.created_at, o.updated_at,
               (select coalesce(sum(quantity), 0) from brsteel_pcp.production_order_losses l where l.order_id = o.id) loss_total
               from brsteel_pcp.production_orders o where o.status = 'concluido' order by o.updated_at desc limit 50) done
           ) cards order by number`)).rows as Row[];
         const ids = orders.map(o => o.id);
         const steps = (await client.query(`select t.id, t.order_id, t.operation_id, op.name as operation_name, op.phase_id, t.position, t.status,
-            t.worker_id, w.name as worker_name, t.started_at, t.finished_at, t.notes, t.predecessor_step_id
+            t.worker_id, w.name as worker_name, t.started_at, t.finished_at, t.notes, t.predecessor_step_id, t.imported
           from brsteel_pcp.production_order_steps t join brsteel_pcp.production_operations op on op.id = t.operation_id
           left join brsteel_pcp.workers w on w.id = t.worker_id where t.order_id = any($1) order by t.position`, [ids])).rows as Row[];
         const losses = (await client.query(`select l.order_id, l.quantity, r.name as reason, l.notes, l.created_at
@@ -113,9 +113,9 @@ export function createPostgresKanbanRepository(pool: Pool): KanbanRepository {
             startedAt: iso(s.started_at), finishedAt: iso(s.finished_at), notes: (s.notes as string) ?? null,
             // A espera vai do fim da OS anterior até o início desta; se ela ainda não começou, até agora.
             waitMinutes: i > 0 && orderSteps[i - 1].finished_at ? minutes(orderSteps[i - 1].finished_at, s.started_at ?? null) : null,
-            runMinutes: minutes(s.started_at, s.finished_at ?? null) }));
+            runMinutes: minutes(s.started_at, s.finished_at ?? null), imported: Boolean(s.imported) }));
           return {
-            id: String(o.id), number: Number(o.number), kind: o.kind as OrderKind, sku: String(o.sku), description: (o.description as string) ?? null,
+            id: String(o.id), number: Number(o.number), iappNumber: (o.iapp_number as string) ?? null, kind: o.kind as OrderKind, sku: String(o.sku), description: (o.description as string) ?? null,
             quantity: state.quantity, currentQuantity: currentQuantity(state), column: columnOf(state), createdAt: iso(o.created_at)!,
             steps: boardSteps,
             totals: { runMinutes: boardSteps.reduce((n, t) => n + (t.runMinutes ?? 0), 0), waitMinutes: boardSteps.reduce((n, t) => n + (t.waitMinutes ?? 0), 0) },
