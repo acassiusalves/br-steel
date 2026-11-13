@@ -66,8 +66,11 @@ Pelos objetos, não pelo registro. Cada consulta devolve o valor esperado quando
 | `operational_writer_role` | `select count(*) from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='brsteel_write' and c.relkind='r'` | 2 |
 | `operational_native_run` | `select count(*) from brsteel_import.runs where id = repeat('0', 64)` | 1 |
 | `operational_history` | `select count(*) from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='brsteel_ops' and c.relname in ('stock_observation_log','sku_weekly_demand') and c.relrowsecurity` | 2 |
+| `support_tickets` | `select count(*) from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='brsteel_support' and c.relname='tickets' and c.relrowsecurity` | 1 |
 
 Em 13/09/2026 as sete devolviam o valor esperado no projeto antigo (`mlumbvxpaqfzpdjnvzxc`). No projeto atual, `mmewkphsrnttkzvpyddv`, as oito devolvem o valor esperado desde 11/11/2026: as sete primeiras foram aplicadas na migração do Supabase, e a oitava, `operational_history`, no mesmo dia, depois do merge do código que a usa. O projeto antigo não recebeu a oitava.
+
+`support_tickets` cria o schema `brsteel_support`, dos chamados de erros e melhorias. Ele nasce no PostgreSQL e fica fora da carga, da reconciliação e, por enquanto, do backup operacional.
 
 Ao acrescentar uma migration nova, acrescente também a linha correspondente nesta tabela. Uma verificação que não cobre o arquivo novo não é verificação.
 
