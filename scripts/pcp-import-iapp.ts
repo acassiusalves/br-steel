@@ -71,6 +71,8 @@ export function validateExport(data: IappEngineeringExport): void {
   const opKeys = new Set([...opIds].map(String));
   const codes = new Set<string>();
   for (const sheet of data.sheets ?? []) {
+    // O iApp tem fichas sem produto vinculado: sem SKU a ficha não serve para gerar OP e o banco recusa.
+    if (!sheet.code?.trim() || !sheet.sku?.trim() || !sheet.name?.trim()) throw new Error(`Ficha sem código, SKU ou nome: ${sheet.code || sheet.iappId}`);
     if (codes.has(sheet.code)) throw new Error(`Ficha repetida: ${sheet.code}`);
     codes.add(sheet.code);
     const message = sheetError(

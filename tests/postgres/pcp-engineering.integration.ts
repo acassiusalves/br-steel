@@ -152,6 +152,7 @@ test('a carga do iApp é idempotente e respeita o organograma', async () => {
     from brsteel_pcp.product_sheets s where s.iapp_id = 700`)).rows[0];
   assert.deepEqual(sheet, { steps: 2, linked: 1, components: 1 });
   assert.throws(() => buildImportSql({ ...data, sheets: [{ ...data.sheets[0], steps: [{ operationIappId: 3, predecessorOperationIappId: 1, plannedMinutes: null }] }] }), /S-0700/);
+  assert.throws(() => buildImportSql({ ...data, sheets: [{ ...data.sheets[0], sku: '' }] }), /sem código, SKU ou nome/);
   // Ciclo de predecessoras é recusado antes de gerar SQL.
   assert.throws(() => buildImportSql({ ...data, operations: data.operations.map(op => (op.iappId === 1 ? { ...op, predecessorIappId: 3 } : op)) }), /ciclo/);
   assert.throws(() => buildImportSql({ ...data, teams: [{ ...data.teams[0], leaderIappId: 10 }] }), /membro da equipe/);

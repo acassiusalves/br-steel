@@ -207,6 +207,20 @@ Telas em `/producao/engenharia/*` e operações em `src/server/operations/engine
 > - O roteiro é guardado por passo (`product_sheet_steps`), com predecessora dentro da própria ficha (chave composta) e minutos previstos. Os componentes (`product_sheet_components`) podem apontar para o passo em que entram.
 > - Uma operação usada em alguma ficha não pode ser apagada.
 > - **13/11/2026:** aplicada no projeto `mmewkphsrnttkzvpyddv` com `supabase db query --linked`. Conferido: 14 tabelas com RLS em `brsteel_pcp`, 18 chaves estrangeiras, 42 políticas; `anon` sem acesso.
+> - **Carga dos dados reais em 13/11/2026** no projeto `mmewkphsrnttkzvpyddv`, aplicada pelo SQL gerado com `--emit-sql` e pelo `supabase db query --linked`. Resultado conferido no banco:
+>   - 11 fases e 11 operações (6 com predecessora);
+>   - 23 funcionários, 6 equipes e 20 vínculos de organograma;
+>   - 15 intervalos de expediente;
+>   - 383 fichas (374 SKUs), 1.286 passos e 736 componentes, todos ligados a um passo. 409 componentes têm ficha própria: são as partes cortadas, usadas nas OPs de corte com multinível "S".
+>   - Reaplicar a carga não duplica nada.
+> - **O que ficou de fora da carga, e por quê:**
+>   - a operação Projetar, que não tem fase na linha; ela aparecia em 2 fichas;
+>   - a ficha `00000083`, sem produto vinculado no iApp;
+>   - 3 fichas sem roteiro (`00000160`, `00000161` e `00000253`), duplicatas de SKUs que têm outra ficha completa;
+>   - o membro 26557 da equipe Limpeza, que não está na lista de funcionários.
+> - **Predecessoras:** só 46 dos 1.286 passos têm predecessora definida no iApp. Nos demais, a ordem do roteiro é a referência.
+> - **SKUs com mais de uma ficha:** alguns SKUs têm até 3 fichas. O gerador de OP precisa escolher uma (Fase 3).
+> - **Correção na extração:** nas linhas de matéria-prima (sem o botão "Gerar Nova Ficha"), a leitura pegava a unidade (UN, KG) no lugar do SKU em 279 componentes. Corrigi antes da carga final. O formato da linha é "DESCRIÇÃO SKU 01 - Matéria Prima % UN".
 > - A carga do iApp (`scripts/pcp-import-iapp.ts`) aceita `sheets` na mesma exportação e gera um SQL único e idempotente, que pode ser aplicado pelo `supabase db query --linked` sem a senha do banco.
 
 
