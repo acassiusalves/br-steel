@@ -95,6 +95,23 @@ function operationalPool(): Pool {
 }
 
 /**
+ * PostgreSQL-only repositories (the PCP) skip the source switch: they have no Firestore twin, so the
+ * switch would only decide whether they work. Rebuilt when the pool is discarded, like `selectRepository`.
+ */
+export function postgresOnlyRepository<T extends object>(build: (client: Pool) => T): T {
+  type Methods = Record<string | symbol, (...input: unknown[]) => unknown>;
+  let built: { value: T; generation: number } | null = null;
+  return new Proxy({} as T, {
+    get(_target, property) {
+      return async (...args: unknown[]) => {
+        if (!built || built.generation !== generation) built = { value: build(operationalPool()), generation };
+        return (built.value as Methods)[property](...args);
+      };
+    },
+  });
+}
+
+/**
  * Resolves the active implementation per call, not at module load. A repository bound once at import
  * would freeze the source for the lifetime of the instance, and the cutover has to take effect without
  * a redeploy. Every method of every repository contract is async, which is what makes this safe.

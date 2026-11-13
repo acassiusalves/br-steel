@@ -23,4 +23,6 @@ export const pagePermissions: Record<string, string[]> = {
     '/configuracoes': ['Administrador'],
     '/api-settings': ['Administrador'],
     '/perfil': ['Administrador', 'Vendedor', 'Operador'],
+    '/reportes': ['Administrador'],
+    '/meus-reportes': ['Administrador', 'Vendedor', 'Operador'],
 };
