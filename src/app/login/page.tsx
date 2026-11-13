@@ -35,18 +35,20 @@ function LoginForm() {
   const { toast } = useToast();
   const { login } = useAuth();
   const [isLoading, setIsLoading] = React.useState(false);
+  // Líderes e funcionários da fábrica entram pelo código do crachá, como no iApp.
+  const [mode, setMode] = React.useState<'email' | 'badge'>('email');
 
   const handleLogin = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setIsLoading(true);
 
     const formData = new FormData(event.currentTarget);
-    const email = formData.get('email') as string;
+    const identifier = (mode === 'badge' ? formData.get('badge') : formData.get('email')) as string;
     const password = formData.get('password') as string;
 
     try {
         // Login via AuthContext - carrega user + permissions de uma vez
-        const result = await login(email, password);
+        const result = await login(identifier, password, mode);
 
         if (!result.success) {
             throw new Error(result.error || "Usuário ou senha inválidos.");
@@ -85,20 +87,37 @@ function LoginForm() {
             </div>
             <CardTitle className="text-2xl">Login</CardTitle>
             <CardDescription>
-              Digite seu e-mail e senha para acessar o painel.
+              {mode === 'badge'
+                ? 'Digite o código do seu crachá e a senha. No primeiro acesso, a senha é 123456.'
+                : 'Digite seu e-mail e senha para acessar o painel.'}
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="email">E-mail</Label>
-              <Input 
-                id="email" 
-                name="email"
-                type="email" 
-                placeholder="seu@email.com" 
-                required 
-              />
+            <div className="grid grid-cols-2 gap-1 rounded-lg border bg-muted p-1" role="tablist" aria-label="Forma de entrar">
+              {(['email', 'badge'] as const).map(option => (
+                <button key={option} type="button" role="tab" aria-selected={mode === option} onClick={() => setMode(option)}
+                  className={`rounded-md px-3 py-1.5 text-sm font-medium transition ${mode === option ? 'bg-white text-foreground shadow-sm ring-1 ring-black/5' : 'text-muted-foreground hover:bg-white/50 hover:text-foreground'}`}>
+                  {option === 'email' ? 'E-mail' : 'Crachá'}
+                </button>
+              ))}
             </div>
+            {mode === 'badge' ? (
+              <div className="space-y-2">
+                <Label htmlFor="badge">Código do crachá</Label>
+                <Input id="badge" name="badge" inputMode="numeric" autoComplete="username" placeholder="Ex.: 26557" maxLength={40} required />
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <Label htmlFor="email">E-mail</Label>
+                <Input 
+                  id="email" 
+                  name="email"
+                  type="email" 
+                  placeholder="seu@email.com" 
+                  required 
+                />
+              </div>
+            )}
             <div className="space-y-2">
               <Label htmlFor="password">Senha</Label>
               <Input 

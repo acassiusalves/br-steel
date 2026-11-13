@@ -8,4 +8,6 @@ export interface User {
     createdAt?: string;
     mustChangePassword?: boolean;
     lastLogin?: string;
+    /** Código do crachá, nas contas que entram pelo crachá em vez de e-mail. */
+    badge?: string;
 }

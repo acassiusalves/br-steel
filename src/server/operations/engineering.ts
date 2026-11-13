@@ -4,6 +4,7 @@ import type { AccessContext } from '@/server/access/types';
 import type { EngineeringRepository } from '@/server/persistence/pcp-engineering-contract';
 import { engineeringRepository } from '@/server/persistence/pcp-engineering';
 import type { WriteActor } from '@/server/persistence/write-audit';
+import { firestoreBadgeAccounts, normalizeBadge, type BadgeAccounts } from '@/server/access/badges';
 import { dateSchema, requireOperation, OperationError } from './common';
 
 export const ENGINEERING_PAGE = '/producao/engenharia';
@@ -55,11 +56,16 @@ const writeActor = (context: AccessContext): WriteActor => ({
  * Cadastros de engenharia do PCP. Leitura para quem acessa a produção; gravação só para Administrador,
  * porque estes cadastros definem as regras que valem para todos no Kanban.
  */
-export function createEngineeringOperations(repository: EngineeringRepository) {
+export function createEngineeringOperations(repository: EngineeringRepository, accounts: BadgeAccounts = firestoreBadgeAccounts) {
   const write = (ctx: AccessContext) => {
     requireOperation(ctx, 'producao:write', ENGINEERING_PAGE);
     if (ctx.actor.role !== 'Administrador') throw new OperationError('FORBIDDEN', 'Só administradores alteram os cadastros de engenharia.', 403);
     return writeActor(ctx);
+  };
+  const findWorker = async (id: string) => {
+    const worker = (await repository.read()).data.workers.find(w => w.id === id);
+    if (!worker) throw new OperationError('NOT_FOUND', 'Funcionário não encontrado.', 404);
+    return worker;
   };
   return {
     async readEngineering(ctx: AccessContext) {
@@ -100,6 +106,29 @@ export function createEngineeringOperations(repository: EngineeringRepository) {
     },
     async saveLossReason(ctx: AccessContext, id: unknown, input: unknown) {
       const actor = write(ctx); return repository.saveLossReason(idInput.parse(id), lossReasonSchema.parse(input), actor);
+    },
+    /** Cria o login do funcionário pelo crachá e já o vincula, para ele agir no Kanban de OPs. */
+    async createBadgeAccess(ctx: AccessContext, id: unknown) {
+      const actor = write(ctx);
+      const worker = await findWorker(uuid.parse(id));
+      if (worker.userId) throw new OperationError('ALREADY_LINKED', 'Este funcionário já tem um login vinculado.', 409);
+      const badge = normalizeBadge(worker.badge);
+      if (!badge) throw new OperationError('NO_BADGE', 'Cadastre um código de crachá válido (letras, números ou hífen) antes de criar o acesso.');
+      let userId: string;
+      try { ({ userId } = await accounts.create(worker.name, badge)); }
+      catch (error) { throw new OperationError('BADGE_TAKEN', error instanceof Error ? error.message : 'Não foi possível criar o acesso.', 409); }
+      const { id: workerId, ...fields } = worker;
+      await repository.saveWorker(workerId, { ...fields, userId }, actor);
+      return { data: { userId, badge }, source: 'postgres' as const, asOf: new Date().toISOString(), warnings: [], nextCursor: null };
+    },
+    /** Volta o login do crachá para o primeiro acesso (senha 123456 e troca obrigatória). */
+    async resetBadgePassword(ctx: AccessContext, id: unknown) {
+      write(ctx);
+      const worker = await findWorker(uuid.parse(id));
+      if (!worker.userId) throw new OperationError('NOT_LINKED', 'Este funcionário não tem login.', 409);
+      try { await accounts.reset(worker.userId); }
+      catch (error) { throw new OperationError('NOT_BADGE', error instanceof Error ? error.message : 'Não foi possível resetar a senha.', 409); }
+      return { data: null, source: 'postgres' as const, asOf: new Date().toISOString(), warnings: [], nextCursor: null };
     },
   };
 }

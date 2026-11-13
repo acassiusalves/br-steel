@@ -511,7 +511,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
                 <div className="absolute right-0 top-12 z-50 w-56 rounded-xl border border-zinc-200 bg-white py-2 shadow-xl">
                   <div className="border-b border-zinc-100 px-4 py-3">
                     <p className="truncate text-sm font-semibold text-zinc-900">{displayName}</p>
-                    <p className="truncate text-xs text-zinc-500">{user?.email}</p>
+                    <p className="truncate text-xs text-zinc-500">{user?.badge ? `Crachá ${user.badge}` : user?.email}</p>
                   </div>
 
                   <div className="py-1">

@@ -30,6 +30,7 @@ export function storedUserFromDoc(id: string, data: FirebaseFirestore.DocumentDa
     passwordHash: typeof data.passwordHash === 'string' ? data.passwordHash : undefined,
     passwordSalt: typeof data.passwordSalt === 'string' ? data.passwordSalt : undefined,
     authVersion: Number.isSafeInteger(data.authVersion) && data.authVersion >= 0 ? data.authVersion : 0,
+    ...(typeof data.badge === 'string' && data.badge ? { badge: data.badge } : {}),
   };
 }
 export function publicUser(user: StoredUser): User {
@@ -38,6 +39,7 @@ export function publicUser(user: StoredUser): User {
     active: user.active !== false, mustChangePassword: needsPasswordChange(user),
     ...(user.createdAt ? { createdAt: user.createdAt } : {}),
     ...(user.lastLogin ? { lastLogin: user.lastLogin } : {}),
+    ...(user.badge ? { badge: user.badge } : {}),
   };
 }
 export async function findUserById(id: string): Promise<StoredUser | null> {

@@ -10,7 +10,8 @@ interface AuthContextType {
     inactivePages: string[];
     isAuthenticated: boolean;
     isLoading: boolean;
-    login: (email: string, password: string) => Promise<{ success: boolean; mustChangePassword?: boolean; error?: string }>;
+    /** `badge`: entra pelo código do crachá em vez do e-mail. */
+    login: (identifier: string, password: string, kind?: 'email' | 'badge') => Promise<{ success: boolean; mustChangePassword?: boolean; error?: string }>;
     logout: () => void;
     refreshPermissions: () => Promise<void>;
     updateUser: (userData: Partial<User>) => void;
@@ -78,12 +79,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         localStorage.setItem(STORAGE_KEYS.inactivePages, JSON.stringify(inactive));
     };
 
-    const login = useCallback(async (email: string, password: string): Promise<{ success: boolean; mustChangePassword?: boolean; error?: string }> => {
+    const login = useCallback(async (identifier: string, password: string, kind: 'email' | 'badge' = 'email'): Promise<{ success: boolean; mustChangePassword?: boolean; error?: string }> => {
         try {
             const response = await fetch('/api/auth/login', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ email, password }),
+                body: JSON.stringify(kind === 'badge' ? { badge: identifier, password } : { email: identifier, password }),
             });
             const data = await response.json().catch(() => ({}));
             if (!response.ok || !data?.ok) {
