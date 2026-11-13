@@ -65,5 +65,7 @@ describe('iniciar e finalizar OS', () => {
     expect(finishError(doIapp, 's2', lider, teams, 0)).toBeNull();
     expect(finishError(doIapp, 's2', admin, teams, 0)).toBeNull();
     expect(finishError(doIapp, 's2', dobrador, teams, 0)).toMatch(/Só quem iniciou/);
+    // Usuário sem funcionário vinculado não "coincide" com a OS sem funcionário.
+    expect(finishError(doIapp, 's2', { isAdmin: false, workerId: null }, teams, 0)).toMatch(/Só quem iniciou/);
   });
 });
