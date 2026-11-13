@@ -107,6 +107,11 @@ try {
       from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='brsteel_pcp' and c.relkind='r'`)).rows[0];
     if (pcp.tables !== 19 || pcp.rls_tables !== 19) throw new Error('PCP schema catalog verification failed');
     console.log('PCP schema catalog:', JSON.stringify(pcp));
+    // Os chamados ficam em schema próprio, fora da contagem do núcleo copiado do Firestore.
+    const support = (await pool.query(`select count(*)::int as tables, count(*) filter (where c.relrowsecurity)::int as rls_tables
+      from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='brsteel_support' and c.relkind='r'`)).rows[0];
+    if (support.tables !== 1 || support.rls_tables !== 1) throw new Error('Support schema catalog verification failed');
+    console.log('Support schema catalog:', JSON.stringify(support));
   } finally { await pool.end(); }
   if (process.env.BRSTEEL_PG_ADVISORS === '1') {
     // The repository's Supabase config belongs to OAuth and expects its own signing keys.

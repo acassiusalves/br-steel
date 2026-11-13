@@ -7,7 +7,7 @@ const user = { id: 'operations-user', email: 'operations@example.test', name: 'O
 beforeEach(async () => { await resetDatabase(); const { hash, salt } = hashPassword('individual-operations-password'); await seedUser(user.id, { ...user, passwordHash: hash, passwordSalt: salt }); });
 it('derives current identity and role from the cookie, never request data', async () => {
   const request = new Request('http://localhost/api/operations/sales', { method: 'POST', headers: { cookie: `brsteel_session=${createSessionToken(user)}` }, body: JSON.stringify({ role: 'Administrador', userId: 'someone-else' }) });
-  expect((await requireWebContext(request)).actor).toEqual({ userId: user.id, role: 'Vendedor', source: 'web' });
+  expect((await requireWebContext(request)).actor).toEqual({ userId: user.id, role: 'Vendedor', source: 'web', name: user.name, email: user.email });
   await adminDb.collection('users').doc(user.id).update({ role: 'Operador' });
   expect((await requireWebContext(request)).actor.role).toBe('Operador');
   await expect(requireWebContext(new Request('http://localhost/api/operations/sales'))).rejects.toThrow();

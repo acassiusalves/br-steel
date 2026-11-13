@@ -19,6 +19,7 @@ import {
   LogOut,
   Menu,
   MessageCircle,
+  MessageSquareWarning,
   Package,
   PackagePlus,
   Plug,
@@ -37,6 +38,8 @@ import * as React from "react";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/contexts/AuthContext";
+import FloatingReportButton from "@/components/reports/FloatingReportButton";
+import { installReportCapture, trackRoute } from "@/lib/report-capture";
 
 type NavSubItem = {
   href: string;
@@ -115,6 +118,7 @@ const allNavItems: NavItem[] = [
     subItems: [
       { href: "/configuracoes", icon: Users, label: "Usuários e Permissões" },
       { href: "/api-settings", icon: Plug, label: "Conexão API" },
+      { href: "/reportes", icon: MessageSquareWarning, label: "Reportes" },
       { href: "/ml-docs", icon: BookOpen, label: "Docs Mercado Livre" },
     ],
   },
@@ -338,6 +342,12 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
     setIsAccountMenuOpen(false);
   }, [pathname, currentTab]);
 
+  // Contexto para o botão "Problemas?": erros e passos da sessão, que sobrevivem à troca de página.
+  React.useEffect(() => {
+    installReportCapture();
+    trackRoute(currentTab ? `${pathname}?tab=${currentTab}` : pathname);
+  }, [pathname, currentTab]);
+
   const isDesktopViewport = () => typeof window !== "undefined" && window.matchMedia("(min-width: 768px)").matches;
 
   const handleSidebarMouseEnter = () => {
@@ -383,6 +393,8 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
   const isSidebarVisuallyCollapsed = !isSidebarOpen && isSidebarCollapsed;
   const homeHref = navItems[0]?.subItems?.[0]?.href ?? navItems[0]?.href ?? "/perfil";
   const displayName = user?.name || user?.email?.split("@")[0] || "Usuário";
+  const canReport = Boolean(user) && !inactivePages.includes("/meus-reportes")
+    && (user?.role === "Administrador" || permissions["/meus-reportes"]?.includes(user?.role ?? "") === true);
   const userInitial = displayName.trim().charAt(0).toUpperCase() || "U";
 
   return (
@@ -510,6 +522,15 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
                       <User size={16} className="text-zinc-400" />
                       Meu Perfil
                     </Link>
+                    {canReport && (
+                      <Link
+                        href="/meus-reportes"
+                        className="flex items-center gap-3 px-4 py-2.5 text-sm text-zinc-700 transition-colors hover:bg-zinc-50"
+                      >
+                        <MessageSquareWarning size={16} className="text-zinc-400" />
+                        Meus reportes
+                      </Link>
+                    )}
                   </div>
 
                   <div className="border-t border-zinc-100 pt-1">
@@ -530,6 +551,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
 
         <div className="min-w-0 flex-1">{children}</div>
       </main>
+      {canReport && <FloatingReportButton />}
     </div>
   );
 }

@@ -70,8 +70,11 @@ Pelos objetos, não pelo registro. Cada consulta devolve o valor esperado quando
 | `pcp_product_sheets` | `select count(*) from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='brsteel_pcp' and c.relname in ('product_sheets','product_sheet_steps','product_sheet_components') and c.relrowsecurity` | 3 |
 | `pcp_production_orders` | `select count(*) from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='brsteel_pcp' and c.relname in ('production_order_batches','production_orders','production_order_steps') and c.relrowsecurity` | 3 |
 | `pcp_kanban` | `select count(*) from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='brsteel_pcp' and c.relname in ('production_order_losses','production_order_events') and c.relrowsecurity` | 2 |
+| `support_tickets` | `select count(*) from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='brsteel_support' and c.relname='tickets' and c.relrowsecurity` | 1 |
 
 Em 13/09/2026 as sete devolviam o valor esperado no projeto antigo (`mlumbvxpaqfzpdjnvzxc`). No projeto atual, `mmewkphsrnttkzvpyddv`, as oito devolvem o valor esperado desde 11/11/2026: as sete primeiras foram aplicadas na migração do Supabase, e a oitava, `operational_history`, no mesmo dia, depois do merge do código que a usa. O projeto antigo não recebeu a oitava. A nona, `pcp_engineering` (cadastros do PCP), foi aplicada em 13/11/2026 pelo `supabase db query --linked`. A décima, `pcp_product_sheets` (fichas técnicas), a décima primeira, `pcp_production_orders` (OPs), e a décima segunda, `pcp_kanban` (Kanban de OPs), foram aplicadas no mesmo dia, pelo mesmo caminho.
+
+`support_tickets` cria o schema `brsteel_support`, dos chamados de erros e melhorias. Ele nasce no PostgreSQL e fica fora da carga e da reconciliação, mas entra no backup operacional. Foi aplicada em `mmewkphsrnttkzvpyddv` em 13/11/2026, numa transação, com `supabase db query --linked -f`; a consulta da tabela devolveu 1, com as três políticas (writer, reader, backup_reader) e o gatilho `tickets_touch`.
 
 Ao acrescentar uma migration nova, acrescente também a linha correspondente nesta tabela. Uma verificação que não cobre o arquivo novo não é verificação.
 
