@@ -1,6 +1,7 @@
 'use client';
 
 import * as React from 'react';
+import Image from 'next/image';
 import { ArrowRight, ChevronDown, ChevronUp, Loader2, Play, Search, Square } from 'lucide-react';
 import DashboardLayout from '@/components/dashboard-layout';
 import { useToast } from '@/hooks/use-toast';
@@ -22,6 +23,10 @@ const STEP_STYLE: Record<string, string> = {
 };
 const STEP_LABEL: Record<string, string> = { executada: 'executada', em_execucao: 'em execução', aberto: 'aberta' };
 const fmt = (n: number) => n.toLocaleString('pt-BR', { maximumFractionDigits: 2 });
+/** Marca do iApp no lugar do nome: indica a OP ou a OS que veio de lá. */
+const IappLogo = ({ className = '' }: { className?: string }) => (
+  <Image src="/brand/iapp.png" alt="iApp" title="Veio do iApp" width={24} height={14} className={`inline-block h-3.5 w-auto align-[-2px] ${className}`} />
+);
 /** Número da OP: o do iApp, quando ela veio de lá, porque é o que a equipe conhece. */
 const opLabel = (card: { number: number; iappNumber: string | null }) => card.iappNumber ?? String(card.number).padStart(7, '0');
 const time = (iso: string | null) => (iso ? new Date(iso).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '');
@@ -39,7 +44,7 @@ function CardView({ card, board, busy, act, openFinish }: {
   return (
     <div className="space-y-2 rounded-md border bg-card p-3 text-sm shadow-sm">
       <div className="flex items-center justify-between gap-2">
-        <span className="font-mono text-xs font-semibold">{opLabel(card)}{card.iappNumber && <span className="ml-1 font-sans text-[10px] font-normal text-muted-foreground">iApp</span>}</span>
+        <span className="font-mono text-xs font-semibold">{opLabel(card)}{card.iappNumber && <IappLogo className="ml-1.5" />}</span>
         <Badge variant="outline" className="text-[10px]">{card.kind === 'corte' ? 'Corte' : 'Semanal'}</Badge>
       </div>
       <div className="font-medium leading-snug" title={card.description ?? card.sku}>{card.description ?? card.sku}</div>
@@ -49,7 +54,7 @@ function CardView({ card, board, busy, act, openFinish }: {
         {lost > 0 && <span className="ml-2 text-destructive">· perda {fmt(lost)}</span>}
       </div>
       {running && <div className="text-xs text-amber-700 dark:text-amber-300">{running.imported
-        ? <>{running.operationName}: em execução (iniciada no iApp)</>
+        ? <>{running.operationName}: em execução, iniciada no <IappLogo /></>
         : <>{running.operationName}: {running.workerName} desde {time(running.startedAt)} · {formatMinutes(running.runMinutes)} úteis</>}</div>}
       <div className="flex flex-wrap gap-1">
         {card.steps.map(s => <span key={s.id} title={`${s.operationName}: ${STEP_LABEL[s.status]}`} className={`rounded border px-1.5 py-0.5 text-[10px] ${STEP_STYLE[s.status]}`}>{s.operationName}</span>)}
@@ -88,7 +93,7 @@ function CardView({ card, board, busy, act, openFinish }: {
             <div key={s.id}>
               <span className="font-medium">{s.position + 1}. {s.operationName}</span> · {STEP_LABEL[s.status]}
               {s.workerName && <> · {s.workerName}</>}
-              {s.imported && !s.workerName && <> · no iApp</>}
+              {s.imported && !s.workerName && <> · no <IappLogo /></>}
               {s.startedAt && <> · {time(s.startedAt)}{s.finishedAt && <> → {time(s.finishedAt)}</>}</>}
               {(s.waitMinutes !== null || s.runMinutes !== null) && (
                 <div className="text-muted-foreground">
