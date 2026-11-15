@@ -25,7 +25,11 @@ export type IappExport = { batchId: string; kind: OrderKind; header: readonly st
  * Bling, mín/máx da cópia do cadastro do Bling, vendas faturadas gravadas no banco e as fichas técnicas; a geração grava o lote, as OPs e as ordens de serviço numa transação.
  */
 export interface ProductionOrderRepository {
-  preview(input: PreviewInput): Promise<OperationResult<GenerationPreview>>;
+  /**
+   * Lê o mín/máx do Bling (reaproveita a leitura da última hora) e o saldo do depósito Estoque, e monta a fila.
+   * `actor` nulo: quem só consulta não dispara a releitura do cadastro; usa a última, com aviso.
+   */
+  preview(input: PreviewInput, actor: WriteActor | null): Promise<OperationResult<GenerationPreview>>;
   /** Copia do Bling o cadastro (mín/máx, formato) dos SKUs da linha oficial. Só lê o Bling. */
   syncBlingCatalog(actor: WriteActor): Promise<OperationResult<{ synced: number; missing: string[] }>>;
   createBatch(input: BatchInput, actor: WriteActor): Promise<OperationResult<{ batchId: string; orderCount: number; childCount: number }>>;

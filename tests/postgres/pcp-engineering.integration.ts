@@ -325,10 +325,11 @@ test('gerador mín/máx: cadastro copiado do Bling, saldo do depósito Estoque e
   };
   const orders = createPostgresProductionOrderRepository(writerPool, bling);
   const range = { from: '2026-08-19', to: '2026-11-10' };
-  await assert.rejects(orders.preview({ kind: 'semanal', factor: 1, ...range }), /Atualize o cadastro do Bling/);
   const synced = (await orders.syncBlingCatalog(actor)).data;
   assert.equal(synced.synced, 5);
   assert.equal(synced.missing.length, 66);
+  // Uma leitura com mais de uma hora é refeita pelo próprio cálculo; dentro da hora, reaproveitada.
+  await pool.query("update brsteel_pcp.bling_products set synced_at = now() - interval '2 hours'");
 
   const snapshot = (await repo.read()).data;
   const op = (name: string) => snapshot.operations.find(o => o.name === name)!.id;
@@ -340,7 +341,7 @@ test('gerador mín/máx: cadastro copiado do Bling, saldo do depósito Estoque e
   // Já há 20 calhas em OP semanal aberta: o mín/máx desconta para não duplicar.
   await orders.createBatch({ kind: 'semanal', factor: 1, ...range, items: [{ sku: 'CNUL440205140IN', sheetId: cnulSheet, quantity: 20, description: null }] }, actor);
 
-  const semanal = (await orders.preview({ kind: 'semanal', factor: 1, ...range })).data;
+  const semanal = (await orders.preview({ kind: 'semanal', factor: 1, ...range }, actor)).data;
   // Os dois estão zerados e sem venda no teste: o empate segue a ordem da linha oficial.
   assert.deepEqual(semanal.suggestions.map(s => [s.sku, s.minMaxQuantity, s.quantity, s.openQuantity]),
     [['CNUL440205140IN', 60, 60, 20], ['PTU200200150', 64, 64, 0]]);
@@ -349,14 +350,31 @@ test('gerador mín/máx: cadastro copiado do Bling, saldo do depósito Estoque e
   assert.ok(semanal.warnings.some(w => w.includes('Kits fora da fila') && w.includes('KIT50OSSOME')));
   assert.ok(semanal.warnings.some(w => w.includes('66 SKU(s) da linha oficial')));
   assert.deepEqual(calls.filter(c => c.startsWith('balances')), ['balances:5']);
+  assert.deepEqual(calls.filter(c => c.startsWith('products')), ['products:71', 'products:71']);
 
   // No corte, a margem do pulmão vale sobre o Q do mín/máx (a OP semanal aberta não conta para o corte).
-  const corte = (await orders.preview({ kind: 'corte', factor: 1.47, ...range })).data;
+  const corte = (await orders.preview({ kind: 'corte', factor: 1.47, ...range }, actor)).data;
   assert.deepEqual(corte.suggestions.map(s => [s.sku, s.minMaxQuantity, s.quantity]), [['CNUL440205140IN', 80, 118], ['PTU200200150', 64, 95]]);
+
+  // Quem só consulta não relê o cadastro: usa a última leitura, com aviso.
+  await pool.query("update brsteel_pcp.bling_products set synced_at = now() - interval '2 hours'");
+  const readOnly = (await orders.preview({ kind: 'semanal', factor: 1, ...range }, null)).data;
+  assert.equal(readOnly.suggestions.length, 2);
+  assert.ok(readOnly.warnings.some(w => w.includes('última leitura do Bling')));
+  assert.deepEqual(calls.filter(c => c.startsWith('products')), ['products:71', 'products:71']);
+  // Releitura que falha: segue com a leitura anterior, com aviso, e não tenta de novo logo em seguida.
+  let failures = 0;
+  const flaky = createPostgresProductionOrderRepository(writerPool, { ...bling, async products() { failures++; throw new Error('timeout'); } });
+  const stale = (await flaky.preview({ kind: 'semanal', factor: 1, ...range }, actor)).data;
+  assert.ok(stale.warnings.some(w => w.includes('não foi possível reler agora')));
+  await flaky.preview({ kind: 'semanal', factor: 1, ...range }, actor);
+  assert.equal(failures, 1);
+  await pool.query("update brsteel_pcp.bling_products set synced_at = now()");
 
   // Bling fora do ar: a prévia não inventa saldo.
   const offline = createPostgresProductionOrderRepository(writerPool, { ...bling, async estoqueBalances() { throw new Error('timeout'); } });
-  await assert.rejects(offline.preview({ kind: 'semanal', factor: 1, ...range }), /saldo do depósito Estoque/);
+  await assert.rejects(offline.preview({ kind: 'semanal', factor: 1, ...range }, actor), /saldo do depósito Estoque/);
+  assert.deepEqual(calls.filter(c => c.startsWith('products')), ['products:71', 'products:71']);
   const audit = (await pool.query("select count(*)::int as n from brsteel_write.audit where operation = 'pcp.syncBlingCatalog'")).rows[0].n;
-  assert.equal(audit, 1);
+  assert.equal(audit, 2);
 });
