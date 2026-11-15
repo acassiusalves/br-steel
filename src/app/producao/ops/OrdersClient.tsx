@@ -3,7 +3,7 @@
 import * as React from 'react';
 import * as XLSX from 'xlsx';
 import { format, subDays } from 'date-fns';
-import { Download, Loader2, Sparkles } from 'lucide-react';
+import { Download, Loader2, RefreshCw, Sparkles } from 'lucide-react';
 import DashboardLayout from '@/components/dashboard-layout';
 import { useToast } from '@/hooks/use-toast';
 import { subscribeOperation } from '@/lib/operation-client';
@@ -41,7 +41,7 @@ function Generator({ onCreated }: { onCreated: () => void }) {
   const [to, setTo] = React.useState(format(new Date(), 'yyyy-MM-dd'));
   const [preview, setPreview] = React.useState<GenerationPreview | null>(null);
   const [selected, setSelected] = React.useState<Record<string, number | null>>({});
-  const [busy, setBusy] = React.useState<'preview' | 'create' | null>(null);
+  const [busy, setBusy] = React.useState<'preview' | 'create' | 'sync' | null>(null);
 
   const changeKind = (next: OrderKind) => { setKind(next); setFactor(DEFAULT_FACTORS[next]); setPreview(null); };
 
@@ -54,6 +54,19 @@ function Generator({ onCreated }: { onCreated: () => void }) {
       setSelected(Object.fromEntries(result.suggestions.filter(s => s.sheet).map(s => [s.sku, s.quantity])));
     } catch (e) {
       toast({ variant: 'destructive', title: 'Não foi possível calcular a fila', description: e instanceof Error ? e.message : undefined });
+    } finally { setBusy(null); }
+  };
+
+  // Cópia do mín/máx do Bling: roda sozinha todo dia às 6h; o botão serve para quando o cadastro mudou agora.
+  const syncCatalog = async () => {
+    setBusy('sync');
+    try {
+      const synced = await svc.syncBlingCatalog();
+      toast({ title: `Cadastro do Bling atualizado: ${synced.synced} SKU(s)`,
+        description: synced.missing.length ? `Não encontrados no Bling: ${synced.missing.join(', ')}.` : undefined });
+      setPreview(null);
+    } catch (e) {
+      toast({ variant: 'destructive', title: 'Não foi possível atualizar do Bling', description: e instanceof Error ? e.message : undefined });
     } finally { setBusy(null); }
   };
 
@@ -82,16 +95,22 @@ function Generator({ onCreated }: { onCreated: () => void }) {
               <Button key={k} type="button" size="sm" variant={kind === k ? 'default' : 'outline'} onClick={() => changeKind(k)}>{KIND_LABEL[k]}</Button>))}</div></div>
           <div className="space-y-1"><Label htmlFor="ops-from">Vendas de</Label><Input id="ops-from" type="date" value={from} onChange={e => setFrom(e.target.value)} /></div>
           <div className="space-y-1"><Label htmlFor="ops-to">até</Label><Input id="ops-to" type="date" value={to} onChange={e => setTo(e.target.value)} /></div>
-          <div className="space-y-1"><Label htmlFor="ops-factor">Fator sobre a média semanal</Label>
-            <Input id="ops-factor" className="w-28" type="number" step="0.1" min={0.1} value={factor} onChange={e => setFactor(Number(e.target.value))} /></div>
+          <div className="space-y-1"><Label htmlFor="ops-factor">{kind === 'corte' ? 'Margem do corte' : 'Margem'}</Label>
+            <Input id="ops-factor" className="w-28" type="number" step="0.01" min={0.1} value={factor} onChange={e => setFactor(Number(e.target.value))} /></div>
           <Button onClick={calculate} disabled={busy !== null}>{busy === 'preview' ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <Sparkles className="mr-1 h-4 w-4" />}Calcular sugestão</Button>
+          <Button variant="outline" onClick={syncCatalog} disabled={busy !== null}>{busy === 'sync' ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-1 h-4 w-4" />}Atualizar do Bling</Button>
         </div>
-        <p className="text-xs text-muted-foreground">Entram os itens abaixo do estoque mínimo, na ordem da fila: zerados primeiro, depois o maior déficit, depois os mais vendidos. A quantidade sugerida é a média semanal × fator, sem ficar abaixo do que falta para o mínimo.</p>
+        <p className="text-xs text-muted-foreground">
+          Política mín/máx: entram os 71 SKUs da linha oficial cujo saldo no depósito Estoque do Bling, somado ao que já está em OP aberta, está no mínimo ou abaixo.
+          A OP leva até o máximo (máximo − saldo − em OP) vezes a margem: 1 na produção semanal; no corte, o pulmão de peças cortadas sobre a dobra.
+          Ordem da fila: zerados primeiro, depois o maior déficit, depois os mais vendidos. Mínimo e máximo vêm do Bling, copiados todo dia às 6h.
+        </p>
 
         {preview && <>
           {preview.warnings.map(w => <p key={w} className="text-sm text-amber-600">{w}</p>)}
+          <p className="text-xs text-muted-foreground">Mínimo e máximo copiados do Bling em {format(new Date(preview.catalogSyncedAt), 'dd/MM/yyyy HH:mm')}. Saldo do depósito Estoque lido agora.</p>
           <Table>
-            <TableHeader><TableRow><TableHead className="w-8" /><TableHead>#</TableHead><TableHead>SKU</TableHead><TableHead>Produto</TableHead><TableHead className="text-right">Estoque</TableHead><TableHead className="text-right">Mín.</TableHead><TableHead className="text-right">Vendidos</TableHead><TableHead className="text-right">Média/sem.</TableHead><TableHead>Ficha</TableHead><TableHead className="w-28">Quantidade</TableHead></TableRow></TableHeader>
+            <TableHeader><TableRow><TableHead className="w-8" /><TableHead>#</TableHead><TableHead>SKU</TableHead><TableHead>Produto</TableHead><TableHead className="text-right">Estoque</TableHead><TableHead className="text-right">Mín./Máx.</TableHead><TableHead className="text-right">Em OP</TableHead><TableHead className="text-right">Vendidos</TableHead><TableHead className="text-right">Média/sem.</TableHead><TableHead className="text-right">Q mín/máx</TableHead><TableHead>Ficha</TableHead><TableHead className="w-28">Quantidade</TableHead></TableRow></TableHeader>
             <TableBody>
               {preview.suggestions.map((s, i) => (
                 <TableRow key={s.sku} className={s.sheet ? '' : 'opacity-60'}>
@@ -100,7 +119,8 @@ function Generator({ onCreated }: { onCreated: () => void }) {
                   <TableCell className="text-muted-foreground">{i + 1}</TableCell>
                   <TableCell className="font-mono text-xs">{s.sku}</TableCell><TableCell className="max-w-64 truncate" title={s.description}>{s.description}</TableCell>
                   <TableCell className={`text-right ${s.stock === 0 ? 'font-semibold text-destructive' : ''}`}>{fmt(s.stock)}</TableCell>
-                  <TableCell className="text-right">{fmt(s.min)}</TableCell><TableCell className="text-right">{fmt(s.sold)}</TableCell><TableCell className="text-right">{fmt(s.weeklyAverage)}</TableCell>
+                  <TableCell className="text-right">{fmt(s.min)}/{fmt(s.max)}</TableCell><TableCell className="text-right">{s.openQuantity ? fmt(s.openQuantity) : '—'}</TableCell>
+                  <TableCell className="text-right">{fmt(s.sold)}</TableCell><TableCell className="text-right">{fmt(s.weeklyAverage)}</TableCell><TableCell className="text-right">{fmt(s.minMaxQuantity)}</TableCell>
                   <TableCell className="font-mono text-xs">{s.sheet ? s.sheet.code : <Badge variant="outline">Sem ficha</Badge>}</TableCell>
                   <TableCell><Input className="h-8" type="number" min={1} aria-label={`Quantidade de ${s.sku}`} disabled={selected[s.sku] == null}
                     value={selected[s.sku] ?? s.quantity} onChange={e => setSelected(cur => ({ ...cur, [s.sku]: Number(e.target.value) }))} /></TableCell>
@@ -108,7 +128,7 @@ function Generator({ onCreated }: { onCreated: () => void }) {
               ))}
             </TableBody>
           </Table>
-          {!preview.suggestions.length && <p className="text-sm text-muted-foreground">Nenhum item abaixo do mínimo no período.</p>}
+          {!preview.suggestions.length && <p className="text-sm text-muted-foreground">Nenhum SKU da linha oficial está no mínimo ou abaixo.</p>}
           <div className="flex items-center justify-end gap-3">
             <span className="text-sm text-muted-foreground">{chosen.length} item(ns) selecionado(s)</span>
             <Button onClick={create} disabled={!chosen.length || busy !== null}>{busy === 'create' && <Loader2 className="mr-1 h-4 w-4 animate-spin" />}Gerar {chosen.length} OP(s)</Button>

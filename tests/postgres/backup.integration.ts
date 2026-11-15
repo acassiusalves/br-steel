@@ -26,6 +26,7 @@ const tables = [
   'brsteel_write.audit',
   'brsteel_write.idempotency',
   // Cadastros do PCP: só existem no PostgreSQL, então o backup precisa lê-los.
+  'brsteel_pcp.bling_products',
   'brsteel_pcp.holidays',
   'brsteel_pcp.loss_reasons',
   'brsteel_pcp.product_sheet_components',

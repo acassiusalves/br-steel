@@ -1,33 +1,51 @@
 /**
  * Regras do gerador de ordens de produção (OP), sem acesso a banco.
  *
- * A fila segue a "Fila de Produção" da tela /producao: entra quem está abaixo do mínimo e não está
- * acima do máximo; primeiro os zerados (por quantidade vendida), depois o maior déficit, depois os
- * mais vendidos. É a mesma regra do script de OPs apresentado na reunião de 10/11/2026.
+ * Política mín/máx do script de OP da fábrica (padrão decidido em 25/09/2026): entra na fila o SKU da
+ * linha oficial cujo saldo no depósito Estoque, somado ao que já está em OP aberta, está no mínimo ou
+ * abaixo dele; a OP leva a posição até o máximo (Q = máx − saldo − em OP). Ordem da fila: primeiro os
+ * zerados (por quantidade vendida), depois o maior déficit, depois os mais vendidos.
  */
 
 export type OrderKind = 'semanal' | 'corte';
 
-export type DemandRow = {
+/** Um SKU da linha oficial com o que o gerador precisa saber. Saldo e limites vêm do Bling. */
+export type PlanningRow = {
   sku: string; description?: string | null; totalQuantitySold: number; weeklyAverage: number;
-  stockLevel?: number | null; stockMin?: number; stockMax?: number;
+  /** Saldo do depósito Estoque no Bling; null quando não foi lido. */
+  stockLevel: number | null; stockMin: number | null; stockMax: number | null;
+  /** Quantidade já em OP aberta deste SKU no BR Steel (evita OP duplicada). */
+  openQuantity: number;
 };
 
 export type SheetOption = { id: string; code: string; sku: string; name: string; stepCount: number };
 
 export type OrderSuggestion = {
   sku: string; description: string; stock: number; min: number; max: number; sold: number; weeklyAverage: number;
+  openQuantity: number;
+  /** Quantidade da política mín/máx, antes da margem do tipo de OP. */
+  minMaxQuantity: number;
   sheet: SheetOption | null; quantity: number;
 };
 
+/**
+ * Q da política mín/máx: se saldo + em OP ≤ mínimo, Q = máximo − saldo − em OP; senão 0. Null quando
+ * faltam saldo ou limites: sem esses dados o SKU não é dimensionado, nunca recebe número inventado.
+ */
+export function minMaxQuantity(row: PlanningRow): number | null {
+  if (row.stockLevel === null || row.stockMin === null || row.stockMax === null) return null;
+  const position = row.stockLevel + row.openQuantity;
+  if (position > row.stockMin) return 0;
+  return Math.max(0, Math.ceil(row.stockMax - position - 1e-9));
+}
+
 /** Itens que precisam de produção, na ordem de prioridade da fila. */
-export function productionQueue<T extends DemandRow>(demand: readonly T[]): T[] {
-  return demand
-    .filter(item => item.stockLevel != null && item.stockMin !== undefined && item.stockMax !== undefined
-      && item.stockLevel < item.stockMin && item.stockLevel <= item.stockMax)
+export function productionQueue<T extends PlanningRow>(rows: readonly T[]): T[] {
+  return rows
+    .filter(row => (minMaxQuantity(row) ?? 0) > 0)
     .sort((a, b) => {
       const aStock = a.stockLevel ?? 0, bStock = b.stockLevel ?? 0;
-      const aZero = aStock === 0, bZero = bStock === 0;
+      const aZero = aStock <= 0, bZero = bStock <= 0;
       if (aZero && bZero) return b.totalQuantitySold - a.totalQuantitySold;
       if (aZero !== bZero) return aZero ? -1 : 1;
       const aDeficit = (a.stockMin ?? 0) - aStock, bDeficit = (b.stockMin ?? 0) - bStock;
@@ -47,23 +65,26 @@ export function pickSheet(options: readonly SheetOption[]): SheetOption | null {
 }
 
 /**
- * Quantidade sugerida: a média semanal vezes o fator do tipo de produção, sem ficar abaixo do que
- * falta para chegar ao estoque mínimo. Sempre ao menos 1, porque o item já está na fila.
+ * Quantidade da OP: o Q do mín/máx vezes a margem do tipo, arredondado para cima. Na produção semanal a
+ * margem é 1 (Q puro); no corte é o pulmão de peças cortadas que a fábrica mantém sobre a dobra.
  */
-export function suggestedQuantity(row: DemandRow, factor: number): number {
-  const byAverage = Math.floor(row.weeklyAverage * factor);
-  const deficit = Math.ceil((row.stockMin ?? 0) - (row.stockLevel ?? 0));
-  return Math.max(1, byAverage, deficit);
+export function suggestedQuantity(row: PlanningRow, factor: number): number {
+  const q = minMaxQuantity(row) ?? 0;
+  return q > 0 ? Math.max(1, Math.ceil(q * factor - 1e-9)) : 0;
 }
 
-export const DEFAULT_FACTORS: Record<OrderKind, number> = { semanal: 1.5, corte: 2 };
+/**
+ * Margem por tipo de OP. O corte corta mais do que a dobra executa (2,2 ÷ 1,5 nos fatores que a fábrica
+ * usava, cerca de 47% a mais), para ter peças cortadas à mão quando surge venda fora da curva.
+ */
+export const DEFAULT_FACTORS: Record<OrderKind, number> = { semanal: 1, corte: 1.47 };
 
-export function suggestOrders(demand: readonly DemandRow[], sheetsBySku: ReadonlyMap<string, readonly SheetOption[]>,
+export function suggestOrders(rows: readonly PlanningRow[], sheetsBySku: ReadonlyMap<string, readonly SheetOption[]>,
   factor: number): OrderSuggestion[] {
-  return productionQueue(demand).map(row => ({
+  return productionQueue(rows).map(row => ({
     sku: row.sku, description: row.description ?? row.sku, stock: row.stockLevel ?? 0, min: row.stockMin ?? 0,
-    max: row.stockMax ?? 0, sold: row.totalQuantitySold, weeklyAverage: row.weeklyAverage,
-    sheet: pickSheet(sheetsBySku.get(row.sku) ?? []), quantity: suggestedQuantity(row, factor),
+    max: row.stockMax ?? 0, sold: row.totalQuantitySold, weeklyAverage: row.weeklyAverage, openQuantity: row.openQuantity,
+    minMaxQuantity: minMaxQuantity(row) ?? 0, sheet: pickSheet(sheetsBySku.get(row.sku) ?? []), quantity: suggestedQuantity(row, factor),
   }));
 }
 

@@ -20,3 +20,4 @@ export async function getBatches(): Promise<BatchSummary[]> { return (await fetc
 export async function getOrders(batchId?: string | null): Promise<ProductionOrderRow[]> {
   return (await fetchOperation<ProductionOrderRow[]>(`${path}?view=orders${batchId ? `&batchId=${encodeURIComponent(batchId)}` : ''}`)).data;
 }
+export const syncBlingCatalog = () => post<{ synced: number; missing: string[] }>('syncBlingCatalog');
