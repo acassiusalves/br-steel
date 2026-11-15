@@ -8,6 +8,9 @@ import type {
   BatchInput, BatchSummary, GenerationPreview, OrderKind, OrderStatus, PreviewInput, ProductionOrderRepository, ProductionOrderRow,
 } from './pcp-orders-contract';
 import { createPostgresProductionDemandRepository } from './postgres-production-demand';
+import { OFFICIAL_LINE_SKUS } from '@/lib/pcp/official-line';
+import { createBlingReader, type BlingReader } from '@/server/integrations/bling-catalog';
+import type { PlanningRow } from '@/lib/pcp/op-generator';
 import { recordWriteAudit, type WriteActor } from './write-audit';
 import { withOperationalWrite } from './postgres-write';
 
@@ -51,18 +54,79 @@ async function insertOrder(client: PoolClient, order: { batchId: string; parentI
   return id;
 }
 
-export function createPostgresProductionOrderRepository(pool: Pool): ProductionOrderRepository {
+/** A cópia do cadastro do Bling vale por um dia; mais velha que isso, a prévia avisa. */
+const CATALOG_STALE_MS = 36 * 3_600_000;
+
+export function createPostgresProductionOrderRepository(pool: Pool, bling: BlingReader = createBlingReader()): ProductionOrderRepository {
   const demand = createPostgresProductionDemandRepository(pool);
   return {
     async preview(input: PreviewInput) {
+      const catalogRows = (await pool.query(
+        'select sku, bling_id, name, format, stock_min, stock_max, synced_at from brsteel_pcp.bling_products where sku = any($1)',
+        [OFFICIAL_LINE_SKUS])).rows as Row[];
+      if (!catalogRows.length) {
+        throw new OperationError('NO_CATALOG', 'Atualize o cadastro do Bling (botão "Atualizar do Bling") antes de gerar as OPs.', 409);
+      }
+      const catalog = new Map(catalogRows.map(r => [String(r.sku), r]));
+      const warnings: string[] = [];
+      // Saldo do depósito Estoque lido do Bling agora: é o único que decide OP (sem Perdas, cortado ou matéria-prima).
+      let balances: Map<number, number>;
+      try { balances = await bling.estoqueBalances(catalogRows.map(r => Number(r.bling_id))); }
+      catch { throw new OperationError('BLING_UNAVAILABLE', 'Não foi possível ler o saldo do depósito Estoque no Bling. Tente de novo em instantes.', 503); }
+      // Vendidos e média continuam vindo dos pedidos faturados gravados no banco (a troca pelas notas fiscais vem depois).
       const read = await demand.read({ from: input.from, to: input.to });
+      const sold = new Map(read.data.map(d => [String(d.sku), d]));
+      const open = new Map(((await pool.query(
+        `select sku, sum(quantity) as quantity from brsteel_pcp.production_orders
+         where parent_order_id is null and kind = $1 and status in ('a_produzir', 'produzindo', 'suspenso') group by sku`,
+        [input.kind])).rows as Row[]).map(r => [String(r.sku), Number(r.quantity)]));
+      const rows: PlanningRow[] = [];
+      const missingCatalog: string[] = [], missingLimits: string[] = [], kits: string[] = [];
+      for (const sku of OFFICIAL_LINE_SKUS) {
+        const product = catalog.get(sku);
+        if (!product) { missingCatalog.push(sku); continue; }
+        if (product.format === 'E') { kits.push(sku); continue; }
+        const limitsKnown = product.stock_min !== null && product.stock_max !== null;
+        if (!limitsKnown) missingLimits.push(sku);
+        const demandRow = sold.get(sku);
+        rows.push({
+          sku, description: (product.name as string) ?? (demandRow?.description as string | undefined) ?? null,
+          totalQuantitySold: Number(demandRow?.totalQuantitySold ?? 0), weeklyAverage: Number(demandRow?.weeklyAverage ?? 0),
+          stockLevel: balances.get(Number(product.bling_id)) ?? null,
+          stockMin: limitsKnown ? Number(product.stock_min) : null, stockMax: limitsKnown ? Number(product.stock_max) : null,
+          openQuantity: open.get(sku) ?? 0,
+        });
+      }
       const sheets = groupBySku((await pool.query(SHEETS_SQL)).rows as Row[]);
-      const suggestions = suggestOrders(read.data.map(d => ({ ...d, description: d.description ?? null })), sheets, input.factor);
-      const warnings = [...read.warnings];
+      const suggestions = suggestOrders(rows, sheets, input.factor);
+      const syncedAt = catalogRows.reduce((latest, r) => Math.max(latest, (r.synced_at as Date).getTime()), 0);
+      if (Date.now() - syncedAt > CATALOG_STALE_MS) warnings.push('O cadastro do Bling (mínimo e máximo) foi atualizado há mais de um dia. Use "Atualizar do Bling".');
+      if (missingCatalog.length) warnings.push(`${missingCatalog.length} SKU(s) da linha oficial não estão no cadastro copiado do Bling: ${missingCatalog.join(', ')}.`);
+      if (missingLimits.length) warnings.push(`${missingLimits.length} SKU(s) sem estoque mínimo e máximo no Bling não foram dimensionados: ${missingLimits.join(', ')}.`);
+      if (kits.length) warnings.push(`Kits fora da fila de fábrica: ${kits.join(', ')}.`);
       const missing = suggestions.filter(s => !s.sheet).length;
       if (missing) warnings.push(`${missing} item(ns) da fila não têm ficha técnica com roteiro e não podem virar OP.`);
-      const preview: GenerationPreview = { ...input, suggestions, warnings };
+      const preview: GenerationPreview = { ...input, suggestions, warnings, catalogSyncedAt: new Date(syncedAt).toISOString() };
       return result(preview, 'postgres', [], null, read.asOf);
+    },
+
+    async syncBlingCatalog(actor: WriteActor) {
+      let products;
+      try { products = await bling.products(OFFICIAL_LINE_SKUS); }
+      catch { throw new OperationError('BLING_UNAVAILABLE', 'Não foi possível ler o cadastro no Bling. Tente de novo em instantes.', 503); }
+      return withOperationalWrite(pool, async client => {
+        for (const p of products) {
+          await client.query(
+            `insert into brsteel_pcp.bling_products (sku, bling_id, name, format, stock_min, stock_max, synced_at)
+             values ($1, $2, $3, $4, $5, $6, now())
+             on conflict (sku) do update set bling_id = excluded.bling_id, name = excluded.name, format = excluded.format,
+               stock_min = excluded.stock_min, stock_max = excluded.stock_max, synced_at = now()`,
+            [p.sku, p.blingId, p.name?.slice(0, 300) ?? null, p.format?.slice(0, 5) ?? null, p.stockMin, p.stockMax]);
+        }
+        await recordWriteAudit(client, { operation: 'pcp.syncBlingCatalog', actor, target: { collection: 'pcp.blingProducts', id: 'linha-oficial' } });
+        const found = new Set(products.map(p => p.sku));
+        return result({ synced: products.length, missing: OFFICIAL_LINE_SKUS.filter(sku => !found.has(sku)) }, 'postgres');
+      });
     },
 
     async createBatch(input: BatchInput, actor: WriteActor) {

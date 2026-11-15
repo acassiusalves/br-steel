@@ -10,6 +10,7 @@ const crons = [
  { path: '/api/cron/ml-messages-backfill', schedule: '*/5 * * * *' },
  { path: '/api/cron/bling-webhook-drain', schedule: '*/5 * * * *' },
  { path: '/api/cron/sku-weekly-rollup', schedule: '15 3 * * 1' },
+ { path: '/api/cron/pcp-bling-catalog', schedule: '0 9 * * *' },
 ];
 // Match the raw JSON forms accepted by src/lib/firebase-admin.ts without loading the SDK or credentials.
 function parseCredential(raw: string) {

@@ -25,7 +25,7 @@ before(async () => {
   await pool.query('truncate brsteel_write.audit, brsteel_write.idempotency');
   await pool.query(`truncate brsteel_pcp.production_lines, brsteel_pcp.production_phases, brsteel_pcp.workers,
     brsteel_pcp.production_operations, brsteel_pcp.work_teams, brsteel_pcp.work_team_operations, brsteel_pcp.worker_operations,
-    brsteel_pcp.work_periods, brsteel_pcp.holidays, brsteel_pcp.loss_reasons cascade`);
+    brsteel_pcp.work_periods, brsteel_pcp.holidays, brsteel_pcp.loss_reasons, brsteel_pcp.bling_products cascade`);
   await pool.query(`insert into brsteel_import.runs (id, source_project, captured_at, status, next_index, total_records, completed_at)
     values ($1, 'brsteel-native', '-infinity', 'complete', 0, 0, '-infinity')`, [NATIVE_RUN_ID]);
   await pool.query(`insert into brsteel_import.state (singleton, source_project, active_run, ready, captured_at, completed_at)
@@ -304,4 +304,59 @@ test('Kanban de OPs: líder move, membro executa, perda reduz a quantidade e o c
   c = await card();
   assert.deepEqual(c.steps.map(s => [s.waitMinutes, s.runMinutes]), [[null, 259], [37, 75]]);
   assert.deepEqual(c.totals, { runMinutes: 334, waitMinutes: 37 });
+});
+
+test('gerador mín/máx: cadastro copiado do Bling, saldo do depósito Estoque e OP aberta descontada', async () => {
+  const { createPostgresProductionOrderRepository } = await import('@/server/persistence/postgres-pcp-orders');
+  // Bling falso: só a linha oficial interessa; o saldo é o do depósito Estoque (não o total).
+  const calls: string[] = [];
+  const bling = {
+    async products(skus: readonly string[]) {
+      calls.push(`products:${skus.length}`);
+      return [
+        { sku: 'PTU200200150', blingId: 101, name: 'PORTA UTENSILIOS', format: 'S', stockMin: 30, stockMax: 64 },
+        { sku: 'CNUL440205140IN', blingId: 102, name: 'CALHA UMIDA 440', format: 'S', stockMin: 40, stockMax: 80 },
+        { sku: 'CBA600400350', blingId: 103, name: 'CUBA 600x400x350', format: 'S', stockMin: 15, stockMax: 30 },
+        { sku: 'TMPCLH440230', blingId: 104, name: 'TAMPA 440', format: 'S', stockMin: null, stockMax: null },
+        { sku: 'KIT50OSSOME', blingId: 105, name: 'KIT 50', format: 'E', stockMin: 1, stockMax: 2 },
+      ];
+    },
+    async estoqueBalances(ids: readonly number[]) { calls.push(`balances:${ids.length}`); return new Map([[101, 0], [102, 0], [103, 31], [104, 23]]); },
+  };
+  const orders = createPostgresProductionOrderRepository(writerPool, bling);
+  const range = { from: '2026-08-19', to: '2026-11-10' };
+  await assert.rejects(orders.preview({ kind: 'semanal', factor: 1, ...range }), /Atualize o cadastro do Bling/);
+  const synced = (await orders.syncBlingCatalog(actor)).data;
+  assert.equal(synced.synced, 5);
+  assert.equal(synced.missing.length, 66);
+
+  const snapshot = (await repo.read()).data;
+  const op = (name: string) => snapshot.operations.find(o => o.name === name)!.id;
+  const step = (operationId: string) => ({ operationId, predecessorOperationId: null, plannedMinutes: null, notes: null });
+  const ptuSheet = (await repo.saveSheet(null, { code: 'MM-0001', sku: 'PTU200200150', name: 'Porta utensílios', status: 'aberto', baseQuantity: 1,
+    lineId: null, steps: [step(op('Dobrar'))], components: [] }, actor)).data.id;
+  const cnulSheet = (await repo.saveSheet(null, { code: 'MM-0002', sku: 'CNUL440205140IN', name: 'Calha 440', status: 'aberto', baseQuantity: 1,
+    lineId: null, steps: [step(op('Dobrar'))], components: [] }, actor)).data.id;
+  // Já há 20 calhas em OP semanal aberta: o mín/máx desconta para não duplicar.
+  await orders.createBatch({ kind: 'semanal', factor: 1, ...range, items: [{ sku: 'CNUL440205140IN', sheetId: cnulSheet, quantity: 20, description: null }] }, actor);
+
+  const semanal = (await orders.preview({ kind: 'semanal', factor: 1, ...range })).data;
+  // Os dois estão zerados e sem venda no teste: o empate segue a ordem da linha oficial.
+  assert.deepEqual(semanal.suggestions.map(s => [s.sku, s.minMaxQuantity, s.quantity, s.openQuantity]),
+    [['CNUL440205140IN', 60, 60, 20], ['PTU200200150', 64, 64, 0]]);
+  assert.equal(semanal.suggestions.find(s => s.sku === 'PTU200200150')?.sheet?.id, ptuSheet);
+  assert.ok(semanal.warnings.some(w => w.includes('sem estoque mínimo e máximo') && w.includes('TMPCLH440230')));
+  assert.ok(semanal.warnings.some(w => w.includes('Kits fora da fila') && w.includes('KIT50OSSOME')));
+  assert.ok(semanal.warnings.some(w => w.includes('66 SKU(s) da linha oficial')));
+  assert.deepEqual(calls.filter(c => c.startsWith('balances')), ['balances:5']);
+
+  // No corte, a margem do pulmão vale sobre o Q do mín/máx (a OP semanal aberta não conta para o corte).
+  const corte = (await orders.preview({ kind: 'corte', factor: 1.47, ...range })).data;
+  assert.deepEqual(corte.suggestions.map(s => [s.sku, s.minMaxQuantity, s.quantity]), [['CNUL440205140IN', 80, 118], ['PTU200200150', 64, 95]]);
+
+  // Bling fora do ar: a prévia não inventa saldo.
+  const offline = createPostgresProductionOrderRepository(writerPool, { ...bling, async estoqueBalances() { throw new Error('timeout'); } });
+  await assert.rejects(offline.preview({ kind: 'semanal', factor: 1, ...range }), /saldo do depósito Estoque/);
+  const audit = (await pool.query("select count(*)::int as n from brsteel_write.audit where operation = 'pcp.syncBlingCatalog'")).rows[0].n;
+  assert.equal(audit, 1);
 });

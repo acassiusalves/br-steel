@@ -45,6 +45,11 @@ export function createProductionOrderOperations(repository: ProductionOrderRepos
       requireOperation(ctx, 'producao:read', ORDERS_PAGE);
       return repository.listOrders(batchId == null || batchId === '' ? null : z.string().uuid().parse(batchId));
     },
+    /** Copia do Bling o mín/máx e o formato da linha oficial. Quem gera OP pode atualizar. */
+    async syncBlingCatalog(ctx: AccessContext) {
+      requireOperation(ctx, 'producao:write', ORDERS_PAGE);
+      return repository.syncBlingCatalog(writeActor(ctx));
+    },
     async exportIapp(ctx: AccessContext, batchId: unknown) {
       requireOperation(ctx, 'producao:write', ORDERS_PAGE);
       return repository.exportIapp(z.string().uuid().parse(batchId), writeActor(ctx));

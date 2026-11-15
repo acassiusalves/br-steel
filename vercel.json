@@ -20,6 +20,10 @@
     {
       "path": "/api/cron/sku-weekly-rollup",
       "schedule": "15 3 * * 1"
+    },
+    {
+      "path": "/api/cron/pcp-bling-catalog",
+      "schedule": "0 9 * * *"
     }
   ]
 }
