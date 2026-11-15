@@ -54,19 +54,24 @@ async function insertOrder(client: PoolClient, order: { batchId: string; parentI
   return id;
 }
 
-/** A cópia do cadastro do Bling vale por um dia; mais velha que isso, a prévia avisa. */
-const CATALOG_STALE_MS = 36 * 3_600_000;
+/**
+ * O mín/máx exige um GET por produto no Bling (~30 s para a linha toda). O cálculo relê o cadastro
+ * quando a última leitura passou de uma hora; dentro da hora, reaproveita. O saldo é lido sempre.
+ */
+const CATALOG_FRESH_MS = 3_600_000;
+const CATALOG_SQL = 'select sku, bling_id, name, format, stock_min, stock_max, synced_at from brsteel_pcp.bling_products where sku = any($1)';
 
 export function createPostgresProductionOrderRepository(pool: Pool, bling: BlingReader = createBlingReader()): ProductionOrderRepository {
   const demand = createPostgresProductionDemandRepository(pool);
-  return {
-    async preview(input: PreviewInput) {
-      const catalogRows = (await pool.query(
-        'select sku, bling_id, name, format, stock_min, stock_max, synced_at from brsteel_pcp.bling_products where sku = any($1)',
-        [OFFICIAL_LINE_SKUS])).rows as Row[];
-      if (!catalogRows.length) {
-        throw new OperationError('NO_CATALOG', 'Atualize o cadastro do Bling (botão "Atualizar do Bling") antes de gerar as OPs.', 409);
+  const repository: ProductionOrderRepository = {
+    async preview(input: PreviewInput, actor: WriteActor) {
+      let catalogRows = (await pool.query(CATALOG_SQL, [OFFICIAL_LINE_SKUS])).rows as Row[];
+      const lastSync = catalogRows.reduce((latest, r) => Math.max(latest, (r.synced_at as Date).getTime()), 0);
+      if (Date.now() - lastSync > CATALOG_FRESH_MS) {
+        await repository.syncBlingCatalog(actor);
+        catalogRows = (await pool.query(CATALOG_SQL, [OFFICIAL_LINE_SKUS])).rows as Row[];
       }
+      if (!catalogRows.length) throw new OperationError('NO_CATALOG', 'O Bling não devolveu nenhum SKU da linha oficial.', 502);
       const catalog = new Map(catalogRows.map(r => [String(r.sku), r]));
       const warnings: string[] = [];
       // Saldo do depósito Estoque lido do Bling agora: é o único que decide OP (sem Perdas, cortado ou matéria-prima).
@@ -100,7 +105,6 @@ export function createPostgresProductionOrderRepository(pool: Pool, bling: Bling
       const sheets = groupBySku((await pool.query(SHEETS_SQL)).rows as Row[]);
       const suggestions = suggestOrders(rows, sheets, input.factor);
       const syncedAt = catalogRows.reduce((latest, r) => Math.max(latest, (r.synced_at as Date).getTime()), 0);
-      if (Date.now() - syncedAt > CATALOG_STALE_MS) warnings.push('O cadastro do Bling (mínimo e máximo) foi atualizado há mais de um dia. Use "Atualizar do Bling".');
       if (missingCatalog.length) warnings.push(`${missingCatalog.length} SKU(s) da linha oficial não estão no cadastro copiado do Bling: ${missingCatalog.join(', ')}.`);
       if (missingLimits.length) warnings.push(`${missingLimits.length} SKU(s) sem estoque mínimo e máximo no Bling não foram dimensionados: ${missingLimits.join(', ')}.`);
       if (kits.length) warnings.push(`Kits fora da fila de fábrica: ${kits.join(', ')}.`);
@@ -205,4 +209,5 @@ export function createPostgresProductionOrderRepository(pool: Pool, bling: Bling
       });
     },
   };
+  return repository;
 }

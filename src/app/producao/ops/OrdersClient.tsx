@@ -3,7 +3,7 @@
 import * as React from 'react';
 import * as XLSX from 'xlsx';
 import { format, subDays } from 'date-fns';
-import { Download, Loader2, RefreshCw, Sparkles } from 'lucide-react';
+import { Download, Loader2, Sparkles } from 'lucide-react';
 import DashboardLayout from '@/components/dashboard-layout';
 import { useToast } from '@/hooks/use-toast';
 import { subscribeOperation } from '@/lib/operation-client';
@@ -41,7 +41,7 @@ function Generator({ onCreated }: { onCreated: () => void }) {
   const [to, setTo] = React.useState(format(new Date(), 'yyyy-MM-dd'));
   const [preview, setPreview] = React.useState<GenerationPreview | null>(null);
   const [selected, setSelected] = React.useState<Record<string, number | null>>({});
-  const [busy, setBusy] = React.useState<'preview' | 'create' | 'sync' | null>(null);
+  const [busy, setBusy] = React.useState<'preview' | 'create' | null>(null);
 
   const changeKind = (next: OrderKind) => { setKind(next); setFactor(DEFAULT_FACTORS[next]); setPreview(null); };
 
@@ -54,19 +54,6 @@ function Generator({ onCreated }: { onCreated: () => void }) {
       setSelected(Object.fromEntries(result.suggestions.filter(s => s.sheet).map(s => [s.sku, s.quantity])));
     } catch (e) {
       toast({ variant: 'destructive', title: 'Não foi possível calcular a fila', description: e instanceof Error ? e.message : undefined });
-    } finally { setBusy(null); }
-  };
-
-  // Cópia do mín/máx do Bling: roda sozinha todo dia às 6h; o botão serve para quando o cadastro mudou agora.
-  const syncCatalog = async () => {
-    setBusy('sync');
-    try {
-      const synced = await svc.syncBlingCatalog();
-      toast({ title: `Cadastro do Bling atualizado: ${synced.synced} SKU(s)`,
-        description: synced.missing.length ? `Não encontrados no Bling: ${synced.missing.join(', ')}.` : undefined });
-      setPreview(null);
-    } catch (e) {
-      toast({ variant: 'destructive', title: 'Não foi possível atualizar do Bling', description: e instanceof Error ? e.message : undefined });
     } finally { setBusy(null); }
   };
 
@@ -97,18 +84,17 @@ function Generator({ onCreated }: { onCreated: () => void }) {
           <div className="space-y-1"><Label htmlFor="ops-to">até</Label><Input id="ops-to" type="date" value={to} onChange={e => setTo(e.target.value)} /></div>
           <div className="space-y-1"><Label htmlFor="ops-factor">{kind === 'corte' ? 'Margem do corte' : 'Margem'}</Label>
             <Input id="ops-factor" className="w-28" type="number" step="0.01" min={0.1} value={factor} onChange={e => setFactor(Number(e.target.value))} /></div>
-          <Button onClick={calculate} disabled={busy !== null}>{busy === 'preview' ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <Sparkles className="mr-1 h-4 w-4" />}Calcular sugestão</Button>
-          <Button variant="outline" onClick={syncCatalog} disabled={busy !== null}>{busy === 'sync' ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-1 h-4 w-4" />}Atualizar do Bling</Button>
+          <Button onClick={calculate} disabled={busy !== null}>{busy === 'preview' ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <Sparkles className="mr-1 h-4 w-4" />}{busy === 'preview' ? 'Lendo o Bling…' : 'Calcular sugestão'}</Button>
         </div>
         <p className="text-xs text-muted-foreground">
           Política mín/máx: entram os 71 SKUs da linha oficial cujo saldo no depósito Estoque do Bling, somado ao que já está em OP aberta, está no mínimo ou abaixo.
           A OP leva até o máximo (máximo − saldo − em OP) vezes a margem: 1 na produção semanal; no corte, o pulmão de peças cortadas sobre a dobra.
-          Ordem da fila: zerados primeiro, depois o maior déficit, depois os mais vendidos. Mínimo e máximo vêm do Bling, copiados todo dia às 6h.
+          Ordem da fila: zerados primeiro, depois o maior déficit, depois os mais vendidos. O cálculo lê do Bling o saldo e o mínimo/máximo; a leitura do mínimo/máximo é reaproveitada por uma hora e pode levar cerca de 30 segundos.
         </p>
 
         {preview && <>
           {preview.warnings.map(w => <p key={w} className="text-sm text-amber-600">{w}</p>)}
-          <p className="text-xs text-muted-foreground">Mínimo e máximo copiados do Bling em {format(new Date(preview.catalogSyncedAt), 'dd/MM/yyyy HH:mm')}. Saldo do depósito Estoque lido agora.</p>
+          <p className="text-xs text-muted-foreground">Mínimo e máximo lidos do Bling em {format(new Date(preview.catalogSyncedAt), 'dd/MM/yyyy HH:mm')}. Saldo do depósito Estoque lido agora.</p>
           <Table>
             <TableHeader><TableRow><TableHead className="w-8" /><TableHead>#</TableHead><TableHead>SKU</TableHead><TableHead>Produto</TableHead><TableHead className="text-right">Estoque</TableHead><TableHead className="text-right">Mín./Máx.</TableHead><TableHead className="text-right">Em OP</TableHead><TableHead className="text-right">Vendidos</TableHead><TableHead className="text-right">Média/sem.</TableHead><TableHead className="text-right">Q mín/máx</TableHead><TableHead>Ficha</TableHead><TableHead className="w-28">Quantidade</TableHead></TableRow></TableHeader>
             <TableBody>
