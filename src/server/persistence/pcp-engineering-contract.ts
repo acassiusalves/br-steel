@@ -3,7 +3,8 @@ import type { WriteActor } from './write-audit';
 
 export type Extras = Record<string, unknown>;
 
-export type ProductionPhase = { id: string; name: string; position: number };
+/** `asksBadge`: ao receber o card no Kanban, pede o crachá de quem executa (as fases de Check Q/Q não pedem). */
+export type ProductionPhase = { id: string; name: string; position: number; asksBadge: boolean };
 export type ProductionLine = {
   id: string; name: string; monthlyCapacity: number; active: boolean; phases: ProductionPhase[];
 };
@@ -31,7 +32,7 @@ export type EngineeringSnapshot = {
   workPeriods: WorkPeriodRow[]; holidays: Holiday[]; lossReasons: LossReason[];
 };
 
-export type LineInput = { name: string; monthlyCapacity: number; active: boolean; phases: { id?: string; name: string }[] };
+export type LineInput = { name: string; monthlyCapacity: number; active: boolean; phases: { id?: string; name: string; asksBadge?: boolean }[] };
 export type OperationInput = {
   code: string; name: string; phaseId: string; position: number; predecessorId: string | null;
   location: 'interno' | 'externo'; classification: string | null; defaultWorkerId: string | null; active: boolean;

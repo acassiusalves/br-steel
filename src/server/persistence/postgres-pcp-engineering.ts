@@ -43,7 +43,7 @@ export function createPostgresEngineeringRepository(pool: Pool): EngineeringRepo
       // em paralelo ocupava todas as conexões e fazia outras requisições esperarem até o tempo limite.
       const statements = [
         'select id, name, monthly_capacity, active from brsteel_pcp.production_lines order by name',
-        'select id, line_id, name, position from brsteel_pcp.production_phases order by line_id, position',
+        'select id, line_id, name, position, asks_badge from brsteel_pcp.production_phases order by line_id, position',
         `select o.*, p.line_id from brsteel_pcp.production_operations o
           join brsteel_pcp.production_phases p on p.id = o.phase_id order by p.position, o.position, o.name`,
         'select id, name, status, shift, leader_id from brsteel_pcp.work_teams order by name',
@@ -78,7 +78,7 @@ export function createPostgresEngineeringRepository(pool: Pool): EngineeringRepo
         lines: lines.rows.map((l: Row) => ({
           id: String(l.id), name: String(l.name), monthlyCapacity: Number(l.monthly_capacity), active: Boolean(l.active),
           phases: phases.rows.filter((p: Row) => p.line_id === l.id)
-            .map((p: Row) => ({ id: String(p.id), name: String(p.name), position: Number(p.position) })),
+            .map((p: Row) => ({ id: String(p.id), name: String(p.name), position: Number(p.position), asksBadge: Boolean(p.asks_badge) })),
         })),
         operations: operations.rows.map((o: Row) => ({
           id: String(o.id), code: String(o.code), name: String(o.name), lineId: String(o.line_id), phaseId: String(o.phase_id),
@@ -121,14 +121,16 @@ export function createPostgresEngineeringRepository(pool: Pool): EngineeringRepo
         const kept = new Set<string>();
         // A unicidade de (linha, posição) é verificada no commit, então a reordenação não colide no meio.
         for (const [position, phase] of input.phases.entries()) {
+          // Sem a marca, a fase de Check Q/Q fica como fila (sem crachá) e as demais pedem crachá.
+          const asksBadge = phase.asksBadge ?? !/^check/i.test(phase.name);
           if (phase.id) {
             if (!existing.has(phase.id)) throw missing('Fase');
             kept.add(phase.id);
-            await client.query('update brsteel_pcp.production_phases set name = $2, position = $3, updated_at = now() where id = $1',
-              [phase.id, phase.name, position]);
+            await client.query('update brsteel_pcp.production_phases set name = $2, position = $3, asks_badge = $4, updated_at = now() where id = $1',
+              [phase.id, phase.name, position, asksBadge]);
           } else {
-            await client.query('insert into brsteel_pcp.production_phases (line_id, name, position) values ($1, $2, $3)',
-              [lineId, phase.name, position]);
+            await client.query('insert into brsteel_pcp.production_phases (line_id, name, position, asks_badge) values ($1, $2, $3, $4)',
+              [lineId, phase.name, position, asksBadge]);
           }
         }
         const removed = [...existing].filter(phaseId => !kept.has(phaseId));

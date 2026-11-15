@@ -102,7 +102,8 @@ export function buildImportSql(data: IappEngineeringExport): string {
   out.push(`insert into ${s}.production_lines (iapp_id, name, monthly_capacity) values (${line}, ${lit(data.line.name)}, ${int(data.line.monthlyCapacity)})
   on conflict (iapp_id) do update set name = excluded.name, monthly_capacity = excluded.monthly_capacity, updated_at = now();`);
   data.line.phases.forEach((phase, position) => out.push(
-    `insert into ${s}.production_phases (line_id, name, position) select id, ${lit(phase)}, ${position} from ${s}.production_lines where iapp_id = ${line}
+    // Colunas de Check Q/Q são fila de espera: não pedem crachá ao receber o card.
+    `insert into ${s}.production_phases (line_id, name, position, asks_badge) select id, ${lit(phase)}, ${position}, ${!/^check/i.test(phase)} from ${s}.production_lines where iapp_id = ${line}
   on conflict (line_id, name) do update set position = excluded.position, updated_at = now();`));
 
   for (const w of data.workers) {

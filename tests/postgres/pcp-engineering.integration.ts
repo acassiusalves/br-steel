@@ -278,12 +278,31 @@ test('Kanban de OPs: líder move, membro executa, perda reduz a quantidade e o c
   assert.equal(c.currentQuantity, 9);
   assert.deepEqual(c.losses.map(l => l.reason), ['Peça amassada']);
 
-  await kanban.move(orderId, dobrar.phaseId, asLider);
+  // Coluna de operação: o líder bipa o crachá do dobrador, que não tem login, e a OS já começa.
+  assert.equal((await kanban.board(asLider)).data.columns.find(col => col.key === dobrar.phaseId)?.asksBadge, true);
+  assert.equal((await kanban.board(asLider)).data.columns.find(col => col.key === check.phaseId)?.asksBadge, false);
+  await assert.rejects(kanban.move(orderId, dobrar.phaseId, asLider), /crachá/);
+  await assert.rejects(kanban.move(orderId, dobrar.phaseId, asLider, 'K-99'), /Crachá não encontrado/);
   c = await card();
-  const dobraStep = c.allowed.start!.stepId;
-  // O líder inicia em nome do dobrador, que não tem login.
-  await kanban.start(orderId, dobraStep, dobrador, asLider);
+  assert.equal(c.column, check.phaseId);
+  await kanban.move(orderId, dobrar.phaseId, asLider, ' k-02 ');
+  c = await card();
+  const dobraStep = c.steps[1].id;
+  assert.deepEqual([c.column, c.steps[1].status, c.steps[1].workerName], [dobrar.phaseId, 'em_execucao', 'Dobrador K']);
+
+  // Pausa: o tempo parado vira espera; finalizar pausada fecha a pausa.
+  assert.equal(c.allowed.pauseStepId, dobraStep);
+  await assert.rejects(kanban.pause(orderId, dobraStep, outsider), /pausá-la/);
+  await kanban.pause(orderId, dobraStep, asLider);
+  await assert.rejects(kanban.pause(orderId, dobraStep, asLider), /já está pausada/);
+  c = await card();
+  assert.ok(c.steps[1].pausedSince);
+  assert.deepEqual([c.allowed.pauseStepId, c.allowed.resumeStepId], [null, dobraStep]);
+  await kanban.resume(orderId, dobraStep, asLider);
+  assert.equal((await card()).steps[1].pausedSince, null);
+  await kanban.pause(orderId, dobraStep, asLider);
   await kanban.finish(orderId, dobraStep, { lossQuantity: 0, lossReasonId: null, notes: null }, asLider);
+  assert.equal(Number((await pool.query('select count(*) from brsteel_pcp.production_order_step_pauses where step_id = $1 and resumed_at is null', [dobraStep])).rows[0].count), 0);
   c = await card();
   assert.equal(c.allowed.moveTo, 'concluido');
   await kanban.move(orderId, 'concluido', asLider);
@@ -291,7 +310,7 @@ test('Kanban de OPs: líder move, membro executa, perda reduz a quantidade e o c
   assert.equal(c.column, 'concluido');
   assert.deepEqual(c.steps.map(s => [s.status, s.workerName]), [['executada', 'Líder K'], ['executada', 'Dobrador K']]);
   const kinds = (await pool.query('select kind from brsteel_pcp.production_order_events where order_id = $1 order by created_at, kind', [orderId])).rows.map(r => r.kind);
-  assert.deepEqual(kinds, ['move', 'start', 'finish', 'loss', 'move', 'start', 'finish', 'move']);
+  assert.deepEqual(kinds, ['move', 'start', 'finish', 'loss', 'move', 'start', 'pause', 'resume', 'pause', 'finish', 'move']);
 
   // Tempos úteis com horários fixos, sobre o expediente da fábrica (o teste da carga regrava o expediente).
   await repo.replaceWorkPeriods([1, 2, 3, 4, 5].flatMap(weekday => [
@@ -302,9 +321,30 @@ test('Kanban de OPs: líder move, membro executa, perda reduz a quantidade e o c
     [first.id, '2026-11-04T10:19:00-03:00', '2026-11-04T15:38:00-03:00']);
   await pool.query(`update brsteel_pcp.production_order_steps set started_at = $2, finished_at = $3 where id = $1`,
     [second.id, '2026-11-04T16:30:00-03:00', '2026-11-05T08:00:00-03:00']);
+  // Uma pausa de 20 minutos úteis no meio da dobra: sai da execução e entra na espera.
+  await pool.query('delete from brsteel_pcp.production_order_step_pauses where step_id = $1', [second.id]);
+  await pool.query(`insert into brsteel_pcp.production_order_step_pauses (order_id, step_id, paused_at, resumed_at, paused_by, resumed_by)
+    values ($1, $2, '2026-11-04T16:40:00-03:00', '2026-11-04T17:00:00-03:00', 'u-lider', 'u-lider')`, [orderId, second.id]);
   c = await card();
-  assert.deepEqual(c.steps.map(s => [s.waitMinutes, s.runMinutes]), [[null, 259], [37, 75]]);
-  assert.deepEqual(c.totals, { runMinutes: 334, waitMinutes: 37 });
+  assert.deepEqual(c.steps.map(s => [s.waitMinutes, s.runMinutes, s.pausedMinutes]), [[null, 259, 0], [37, 55, 20]]);
+  assert.deepEqual(c.totals, { runMinutes: 314, waitMinutes: 57 });
+
+  // Excluir: só o administrador, só em "A produzir"; a OP vira "encerrado" e sai do quadro.
+  const extra = (await createPostgresProductionOrderRepository(writerPool).createBatch({ kind: 'semanal', factor: 1.5, from: '2026-08-01', to: '2026-11-12',
+    items: [{ sku: 'SKU-K', sheetId, quantity: 4, description: 'Produto K' }] }, actor)).data;
+  const extraId = (await pool.query('select id from brsteel_pcp.production_orders where batch_id = $1', [extra.batchId])).rows[0].id as string;
+  const asAdmin = { ...asLider, userId: 'admin', isAdmin: true };
+  assert.equal((await card()).allowed.close, false);
+  assert.equal((await kanban.board(asLider)).data.cards.find(x => x.id === extraId)!.allowed.close, false);
+  assert.equal((await kanban.board(asAdmin)).data.cards.find(x => x.id === extraId)!.allowed.close, true);
+  await assert.rejects(kanban.close(extraId, asLider), /administrador/);
+  await assert.rejects(kanban.close(orderId, asAdmin), /A produzir/);
+  await kanban.close(extraId, asAdmin);
+  assert.equal((await pool.query('select status from brsteel_pcp.production_orders where id = $1', [extraId])).rows[0].status, 'encerrado');
+  assert.equal((await kanban.board(asAdmin)).data.cards.some(x => x.id === extraId), false);
+  assert.deepEqual((await pool.query('select kind from brsteel_pcp.production_order_events where order_id = $1', [extraId])).rows.map(r => r.kind), ['close']);
+  // A planilha do iApp do lote não leva a OP excluída.
+  assert.equal((await createPostgresProductionOrderRepository(writerPool).exportIapp(extra.batchId, actor)).data.rows.length, 0);
 });
 
 test('gerador mín/máx: cadastro copiado do Bling, saldo do depósito Estoque e OP aberta descontada', async () => {

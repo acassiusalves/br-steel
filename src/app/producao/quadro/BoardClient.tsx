@@ -2,7 +2,7 @@
 
 import * as React from 'react';
 import Image from 'next/image';
-import { ArrowRight, ChevronDown, ChevronUp, Loader2, Play, Search, Square } from 'lucide-react';
+import { ArrowRight, ChevronDown, ChevronUp, IdCard, Loader2, Pause, Play, Search, Square, Trash2 } from 'lucide-react';
 import DashboardLayout from '@/components/dashboard-layout';
 import { useToast } from '@/hooks/use-toast';
 import { subscribeOperation } from '@/lib/operation-client';
@@ -31,13 +31,14 @@ const IappLogo = ({ className = '' }: { className?: string }) => (
 const opLabel = (card: { number: number; iappNumber: string | null }) => card.iappNumber ?? String(card.number).padStart(7, '0');
 const time = (iso: string | null) => (iso ? new Date(iso).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '');
 
-function CardView({ card, board, busy, act, openFinish }: {
+function CardView({ card, board, busy, act, openFinish, openMove, openClose }: {
   card: BoardCard; board: Board; busy: string | null; act: (key: string, run: () => Promise<void>, done: string) => void;
-  openFinish: (card: BoardCard) => void;
+  openFinish: (card: BoardCard) => void; openMove: (card: BoardCard) => void; openClose: (card: BoardCard) => void;
 }) {
   const [open, setOpen] = React.useState(false);
   const [worker, setWorker] = React.useState('');
   const columnName = (key: string) => board.columns.find(c => c.key === key)?.name ?? key;
+  const asksBadge = (key: string) => Boolean(board.columns.find(c => c.key === key)?.asksBadge);
   const running = card.steps.find(s => s.status === 'em_execucao');
   const start = card.allowed.start;
   const lost = card.quantity - card.currentQuantity;
@@ -56,6 +57,7 @@ function CardView({ card, board, busy, act, openFinish }: {
       {running && <div className="text-xs text-amber-700 dark:text-amber-300">{running.imported
         ? <>{running.operationName}: em execução, iniciada no <IappLogo /></>
         : <>{running.operationName}: {running.workerName} desde {time(running.startedAt)} · {formatMinutes(running.runMinutes)} úteis</>}</div>}
+      {running?.pausedSince && <div className="rounded bg-muted px-2 py-1 text-xs font-medium">Pausada desde {time(running.pausedSince)}</div>}
       <div className="flex flex-wrap gap-1">
         {card.steps.map(s => <span key={s.id} title={`${s.operationName}: ${STEP_LABEL[s.status]}`} className={`rounded border px-1.5 py-0.5 text-[10px] ${STEP_STYLE[s.status]}`}>{s.operationName}</span>)}
       </div>
@@ -73,14 +75,34 @@ function CardView({ card, board, busy, act, openFinish }: {
         </div>
       )}
       {card.allowed.finishStepId && (
-        <Button size="sm" variant="secondary" className="h-8 w-full" disabled={busy !== null} onClick={() => openFinish(card)}>
-          <Square className="mr-1 h-3 w-3" />Finalizar {running?.operationName}
-        </Button>
+        <div className="flex gap-1">
+          {(card.allowed.pauseStepId || card.allowed.resumeStepId) && (() => {
+            const pausing = Boolean(card.allowed.pauseStepId), stepId = (card.allowed.pauseStepId ?? card.allowed.resumeStepId)!;
+            return (
+              <Button size="sm" variant="outline" className="h-8 flex-1" disabled={busy !== null}
+                onClick={() => act(`pause-${card.id}`, () => svc.pauseStep(card.id, stepId, pausing), pausing ? 'OS pausada.' : 'OS retomada.')}>
+                {busy === `pause-${card.id}` ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : pausing ? <Pause className="mr-1 h-3 w-3" /> : <Play className="mr-1 h-3 w-3" />}
+                {pausing ? 'Pausar' : 'Retomar'}
+              </Button>
+            );
+          })()}
+          <Button size="sm" variant="secondary" className="h-8 flex-1" disabled={busy !== null} onClick={() => openFinish(card)}
+            title={`Finalizar ${running?.operationName ?? ''}`}>
+            <Square className="mr-1 h-3 w-3" />Finalizar
+          </Button>
+        </div>
       )}
       {card.allowed.moveTo && (
         <Button size="sm" variant="outline" className="h-8 w-full" disabled={busy !== null}
-          onClick={() => act(`move-${card.id}`, () => svc.moveCard(card.id, card.allowed.moveTo!), 'Card movido.')}>
-          {busy === `move-${card.id}` ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <ArrowRight className="mr-1 h-3 w-3" />}Passar para {columnName(card.allowed.moveTo)}
+          onClick={() => (asksBadge(card.allowed.moveTo!) ? openMove(card)
+            : act(`move-${card.id}`, () => svc.moveCard(card.id, card.allowed.moveTo!), 'Card movido.'))}>
+          {busy === `move-${card.id}` ? <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+            : asksBadge(card.allowed.moveTo) ? <IdCard className="mr-1 h-3 w-3" /> : <ArrowRight className="mr-1 h-3 w-3" />}Passar para {columnName(card.allowed.moveTo)}
+        </Button>
+      )}
+      {card.allowed.close && (
+        <Button size="sm" variant="ghost" className="h-7 w-full text-xs text-destructive hover:text-destructive" disabled={busy !== null} onClick={() => openClose(card)}>
+          <Trash2 className="mr-1 h-3 w-3" />Excluir OP
         </Button>
       )}
 
@@ -100,6 +122,7 @@ function CardView({ card, board, busy, act, openFinish }: {
                   {s.waitMinutes !== null && <>espera {formatMinutes(s.waitMinutes)}</>}
                   {s.waitMinutes !== null && s.runMinutes !== null && ' · '}
                   {s.runMinutes !== null && <>execução {formatMinutes(s.runMinutes)}{s.status === 'em_execucao' && ' (em andamento)'}</>}
+                  {s.pausedMinutes > 0 && <> · pausada {formatMinutes(s.pausedMinutes)}</>}
                 </div>
               )}
               {s.notes && <div className="text-muted-foreground">“{s.notes}”</div>}
@@ -124,6 +147,9 @@ export default function BoardClient() {
   const [search, setSearch] = React.useState('');
   const [finishing, setFinishing] = React.useState<BoardCard | null>(null);
   const [loss, setLoss] = React.useState({ quantity: 0, reasonId: '', notes: '' });
+  const [moving, setMoving] = React.useState<BoardCard | null>(null);
+  const [badge, setBadge] = React.useState('');
+  const [closing, setClosing] = React.useState<BoardCard | null>(null);
 
   React.useEffect(() => subscribeOperation(svc.getBoard, b => { setBoard(b); setError(null); }, e => setError(e.message)), []);
 
@@ -134,6 +160,17 @@ export default function BoardClient() {
       .finally(() => setBusy(null));
   };
   const openFinish = (card: BoardCard) => { setLoss({ quantity: 0, reasonId: '', notes: '' }); setFinishing(card); };
+  const openMove = (card: BoardCard) => { setBadge(''); setMoving(card); };
+  const confirmMove = () => {
+    if (!moving?.allowed.moveTo || !badge.trim()) return;
+    const card = moving, target = moving.allowed.moveTo;
+    act(`move-${card.id}`, async () => { await svc.moveCard(card.id, target, badge.trim()); setMoving(null); }, 'Card movido e OS iniciada.');
+  };
+  const confirmClose = () => {
+    if (!closing) return;
+    const card = closing;
+    act(`close-${card.id}`, async () => { await svc.closeOrder(card.id); setClosing(null); }, 'OP excluída.');
+  };
   const confirmFinish = () => {
     if (!finishing?.allowed.finishStepId) return;
     const card = finishing;
@@ -157,7 +194,7 @@ export default function BoardClient() {
             <h1 className="text-2xl font-semibold">Kanban de OPs</h1>
             <p className="text-sm text-muted-foreground">
               {board.actorWorker ? <>Você age como <strong>{board.actorWorker.name}</strong>.</> : 'Seu usuário não está vinculado a um funcionário: só administradores agem sem vínculo.'}
-              {' '}O card só passa de fase quando a OS terminou, e quem passa é o líder da fase.
+              {' '}O card só passa de fase quando a OS terminou, e quem passa é o líder da fase. Nas colunas de operação, o card entra com o crachá de quem executa.
             </p>
           </div>
           <div className="relative w-64"><Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
@@ -169,7 +206,7 @@ export default function BoardClient() {
             return (
               <div key={column.key} className="flex w-64 shrink-0 flex-col gap-2 rounded-lg bg-muted/40 p-2">
                 <div className="flex items-center justify-between px-1 text-sm font-semibold"><span>{column.name}</span><Badge variant="secondary">{inColumn.length}</Badge></div>
-                {inColumn.map(card => <CardView key={card.id} card={card} board={board} busy={busy} act={act} openFinish={openFinish} />)}
+                {inColumn.map(card => <CardView key={card.id} card={card} board={board} busy={busy} act={act} openFinish={openFinish} openMove={openMove} openClose={setClosing} />)}
               </div>
             );
           })}
@@ -197,6 +234,35 @@ export default function BoardClient() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setFinishing(null)}>Cancelar</Button>
             <Button onClick={confirmFinish} disabled={busy !== null || (loss.quantity > 0 && !loss.reasonId)}>{busy?.startsWith('finish') && <Loader2 className="mr-1 h-4 w-4 animate-spin" />}Finalizar</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={moving !== null} onOpenChange={o => !o && setMoving(null)}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader><DialogTitle>Passar a OP {moving ? opLabel(moving) : ''} para {moving?.allowed.moveTo ? board.columns.find(c => c.key === moving.allowed.moveTo)?.name : ''}</DialogTitle></DialogHeader>
+          <form className="space-y-2" onSubmit={e => { e.preventDefault(); confirmMove(); }}>
+            <Label htmlFor="move-badge">Crachá de quem vai executar</Label>
+            <Input id="move-badge" autoFocus autoComplete="off" placeholder="Bipe ou digite o crachá" value={badge} onChange={e => setBadge(e.target.value)} />
+            <p className="text-xs text-muted-foreground">A OS começa no nome dessa pessoa assim que o card entrar na coluna.</p>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setMoving(null)}>Cancelar</Button>
+              <Button type="submit" disabled={busy !== null || !badge.trim()}>{busy?.startsWith('move') && <Loader2 className="mr-1 h-4 w-4 animate-spin" />}Passar e iniciar</Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={closing !== null} onOpenChange={o => !o && setClosing(null)}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader><DialogTitle>Excluir a OP {closing ? opLabel(closing) : ''}?</DialogTitle></DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            {closing?.description ?? closing?.sku} · {closing ? fmt(closing.quantity) : ''} un. A OP sai do quadro e não conta mais em nenhum relatório
+            nem no "Em OP" do gerador. As OPs das partes para o corte, se houver, saem junto. Fica registrada como encerrada.
+          </p>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setClosing(null)}>Cancelar</Button>
+            <Button variant="destructive" onClick={confirmClose} disabled={busy !== null}>{busy?.startsWith('close') && <Loader2 className="mr-1 h-4 w-4 animate-spin" />}Excluir OP</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

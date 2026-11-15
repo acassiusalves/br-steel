@@ -117,7 +117,7 @@ export default function EngineeringClient() {
       team: { name: '', status: 'aberto', shift: 'integral', leaderId: null, operationIds: [], members: [] },
       worker: { name: '', badge: '', kind: '', active: true, userId: null, operationIds: [] },
     };
-    setForm(v ? { ...v, phases: next.kind === 'line' ? (next.value as ProductionLine).phases.map(p => ({ id: p.id, name: p.name })) : undefined } : defaults[next.kind]);
+    setForm(v ? { ...v, phases: next.kind === 'line' ? (next.value as ProductionLine).phases.map(p => ({ id: p.id, name: p.name, asksBadge: p.asksBadge })) : undefined } : defaults[next.kind]);
   };
   const set = (key: string, value: unknown) => setForm(f => ({ ...f, [key]: value }));
   const run = async (action: () => Promise<unknown>, done = 'Salvo.') => {
@@ -135,7 +135,7 @@ export default function EngineeringClient() {
     switch (editing.kind) {
       case 'line':
         return run(() => svc.saveLine(id, { name: String(f.name), monthlyCapacity: Number(f.monthlyCapacity) || 0, active: Boolean(f.active),
-          phases: (f.phases as { id?: string; name: string }[]).filter(p => p.name.trim()) }));
+          phases: (f.phases as { id?: string; name: string; asksBadge?: boolean }[]).filter(p => p.name.trim()) }));
       case 'operation':
         return run(() => svc.saveOperation(id, { code: String(f.code), name: String(f.name), phaseId: String(f.phaseId), position: Number(f.position) || 0,
           predecessorId: orNull(f.predecessorId) as string | null, location: f.location as 'interno', classification: orNull(f.classification) as string | null,
@@ -273,11 +273,15 @@ export default function EngineeringClient() {
             {editing && <Field label="Nome"><Input value={String(form.name ?? '')} onChange={e => set('name', e.target.value)} /></Field>}
             {editing?.kind === 'line' && <>
               <Field label="Capacidade (un/mês)"><Input type="number" value={String(form.monthlyCapacity ?? 0)} onChange={e => set('monthlyCapacity', e.target.value)} /></Field>
-              <Field label="Fases, na ordem do Kanban">
+              <Field label="Fases, na ordem do Kanban (marque as que pedem o crachá de quem executa ao receber o card)">
                 <div className="space-y-1">
-                  {(form.phases as { id?: string; name: string }[] ?? []).map((p, i, list) => (
-                    <div key={p.id ?? `new-${i}`} className="flex gap-1">
+                  {(form.phases as { id?: string; name: string; asksBadge?: boolean }[] ?? []).map((p, i, list) => (
+                    <div key={p.id ?? `new-${i}`} className="flex items-center gap-1">
                       <Input value={p.name} onChange={e => set('phases', list.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)))} />
+                      <label className="flex shrink-0 items-center gap-1 px-1 text-xs" title="Ao passar o card para esta fase, o líder bipa o crachá de quem executa e a OS já começa">
+                        <input type="checkbox" checked={p.asksBadge ?? !/^check/i.test(p.name)}
+                          onChange={e => set('phases', list.map((x, j) => (j === i ? { ...x, asksBadge: e.target.checked } : x)))} />Crachá
+                      </label>
                       <Button variant="ghost" size="icon" disabled={i === 0} aria-label="Subir" onClick={() => { const n = [...list]; [n[i - 1], n[i]] = [n[i], n[i - 1]]; set('phases', n); }}><ArrowUp className="h-4 w-4" /></Button>
                       <Button variant="ghost" size="icon" disabled={i === list.length - 1} aria-label="Descer" onClick={() => { const n = [...list]; [n[i + 1], n[i]] = [n[i], n[i + 1]]; set('phases', n); }}><ArrowDown className="h-4 w-4" /></Button>
                       <Button variant="ghost" size="icon" aria-label="Remover" onClick={() => set('phases', list.filter((_, j) => j !== i))}><Trash2 className="h-4 w-4" /></Button>

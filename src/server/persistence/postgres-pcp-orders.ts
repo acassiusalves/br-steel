@@ -233,10 +233,10 @@ export function createPostgresProductionOrderRepository(pool: Pool, bling: Bling
       return withOperationalWrite(pool, async client => {
         const batch = (await client.query('select kind from brsteel_pcp.production_order_batches where id = $1 for update', [batchId])).rows[0];
         if (!batch) throw new OperationError('NOT_FOUND', 'Lote não encontrado.', 404);
-        // Só as OPs mães: no corte o iApp gera as OPs das partes a partir do multinível "S".
+        // Só as OPs mães, sem as excluídas: no corte o iApp gera as OPs das partes a partir do multinível "S".
         const orders = (await client.query(
           `select s.code, o.quantity, o.kind from brsteel_pcp.production_orders o join brsteel_pcp.product_sheets s on s.id = o.sheet_id
-           where o.batch_id = $1 and o.parent_order_id is null order by o.number`, [batchId])).rows as Row[];
+           where o.batch_id = $1 and o.parent_order_id is null and o.status <> 'encerrado' order by o.number`, [batchId])).rows as Row[];
         await client.query('update brsteel_pcp.production_order_batches set exported_at = now() where id = $1', [batchId]);
         await recordWriteAudit(client, { operation: 'pcp.exportIapp', actor, target: { collection: 'pcp.orderBatches', id: batchId } });
         const rows = iappImportRows(orders.map(o => ({ sheetCode: String(o.code), quantity: Number(o.quantity), kind: o.kind as OrderKind })));

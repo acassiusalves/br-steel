@@ -16,7 +16,7 @@ const idInput = uuid.nullable().optional().transform(v => v ?? null);
 
 const lineSchema = z.object({
   name, monthlyCapacity: z.number().int().min(0).max(1_000_000), active: z.boolean(),
-  phases: z.array(z.object({ id: uuid.optional(), name }).strict()).min(1).max(50)
+  phases: z.array(z.object({ id: uuid.optional(), name, asksBadge: z.boolean().optional() }).strict()).min(1).max(50)
     .refine(list => new Set(list.map(p => p.name.toLowerCase())).size === list.length, 'Fases com nomes repetidos.'),
 }).strict();
 const operationSchema = z.object({
