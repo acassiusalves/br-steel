@@ -89,7 +89,7 @@ function Generator({ onCreated }: { onCreated: () => void }) {
         <p className="text-xs text-muted-foreground">
           Política mín/máx: entram os 71 SKUs da linha oficial cujo saldo no depósito Estoque do Bling, somado ao que já está em OP aberta, está no mínimo ou abaixo.
           A OP leva até o máximo (máximo − saldo − em OP) vezes a margem: 1 na produção semanal; no corte, o pulmão de peças cortadas sobre a dobra.
-          Ordem da fila: zerados primeiro, depois o maior déficit, depois os mais vendidos. O cálculo lê do Bling o saldo e o mínimo/máximo; a leitura do mínimo/máximo é reaproveitada por uma hora e pode levar cerca de 30 segundos.
+          Ordem da fila: zerados primeiro, depois o maior déficit, depois os mais vendidos. O cálculo lê do Bling o saldo e o mínimo/máximo; a leitura do mínimo/máximo é reaproveitada por uma hora e pode levar cerca de 30 segundos. Vendidos e média vêm das notas fiscais de saída (pendentes contam, canceladas não; só CFOP de venda), copiadas do Bling a cada 15 minutos.
         </p>
 
         {preview && <>

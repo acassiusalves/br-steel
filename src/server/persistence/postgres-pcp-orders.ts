@@ -7,7 +7,8 @@ import {
 import type {
   BatchInput, BatchSummary, GenerationPreview, OrderKind, OrderStatus, PreviewInput, ProductionOrderRepository, ProductionOrderRow,
 } from './pcp-orders-contract';
-import { createPostgresProductionDemandRepository } from './postgres-production-demand';
+import { createPostgresSalesInvoices, INVOICE_WINDOW_DAYS, saoPauloDate, type SalesInvoices } from './postgres-sales-invoices';
+import { invoiceDemand, weeksInRange } from '@/lib/pcp/invoice-demand';
 import { OFFICIAL_LINE_SKUS } from '@/lib/pcp/official-line';
 import { createBlingReader, type BlingReader } from '@/server/integrations/bling-catalog';
 import type { PlanningRow } from '@/lib/pcp/op-generator';
@@ -63,8 +64,12 @@ const CATALOG_FRESH_MS = 3_600_000;
 const CATALOG_RETRY_MS = 5 * 60_000;
 const CATALOG_SQL = 'select sku, bling_id, name, format, stock_min, stock_max, synced_at from brsteel_pcp.bling_products where sku = any($1)';
 
-export function createPostgresProductionOrderRepository(pool: Pool, bling: BlingReader = createBlingReader()): ProductionOrderRepository {
-  const demand = createPostgresProductionDemandRepository(pool);
+/** Cópia das notas mais velha que isso gera aviso: o cron roda a cada 15 minutos. */
+const INVOICES_FRESH_MS = 3_600_000;
+const brt = (date: Date) => date.toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
+
+export function createPostgresProductionOrderRepository(pool: Pool, bling: BlingReader = createBlingReader(),
+  invoices: Pick<SalesInvoices, 'demand'> = createPostgresSalesInvoices(pool)): ProductionOrderRepository {
   // Uma releitura por vez nesta instância: cálculos simultâneos esperam a mesma leitura do Bling.
   let refreshing: Promise<unknown> | null = null;
   let lastAttempt = 0;
@@ -94,7 +99,7 @@ export function createPostgresProductionOrderRepository(pool: Pool, bling: Bling
         }
         const syncedAt = latestSync(catalogRows);
         if (Date.now() - syncedAt > CATALOG_FRESH_MS) {
-          warnings.push(`Mínimo e máximo da última leitura do Bling (${new Date(syncedAt).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })}); não foi possível reler agora.`);
+          warnings.push(`Mínimo e máximo da última leitura do Bling (${brt(new Date(syncedAt))}); não foi possível reler agora.`);
         }
       }
       const catalog = new Map(catalogRows.map(r => [String(r.sku), r]));
@@ -102,9 +107,10 @@ export function createPostgresProductionOrderRepository(pool: Pool, bling: Bling
       let balances: Map<number, number>;
       try { balances = await bling.estoqueBalances(catalogRows.map(r => Number(r.bling_id))); }
       catch { throw new OperationError('BLING_UNAVAILABLE', 'Não foi possível ler o saldo do depósito Estoque no Bling. Tente de novo em instantes.', 503); }
-      // Vendidos e média continuam vindo dos pedidos faturados gravados no banco (a troca pelas notas fiscais vem depois).
-      const read = await demand.read({ from: input.from, to: input.to });
-      const sold = new Map(read.data.map(d => [String(d.sku), d]));
+      // Vendidos e média vêm das NF-e de saída copiadas do Bling (regra do Marcos), nunca dos pedidos.
+      const invoiceRead = await invoices.demand(input.from, input.to);
+      const { sold, missingCfop } = invoiceDemand(invoiceRead.items, invoiceRead.kits, new Set(OFFICIAL_LINE_SKUS));
+      const weeks = weeksInRange(input.from, input.to);
       const open = new Map(((await pool.query(
         `select sku, sum(quantity) as quantity from brsteel_pcp.production_orders
          where parent_order_id is null and kind = $1 and status in ('a_produzir', 'produzindo', 'suspenso') group by sku`,
@@ -117,10 +123,10 @@ export function createPostgresProductionOrderRepository(pool: Pool, bling: Bling
         if (product.format === 'E') { kits.push(sku); continue; }
         const limitsKnown = product.stock_min !== null && product.stock_max !== null;
         if (!limitsKnown) missingLimits.push(sku);
-        const demandRow = sold.get(sku);
+        const quantitySold = sold.get(sku) ?? 0;
         rows.push({
-          sku, description: (product.name as string) ?? (demandRow?.description as string | undefined) ?? null,
-          totalQuantitySold: Number(demandRow?.totalQuantitySold ?? 0), weeklyAverage: Number(demandRow?.weeklyAverage ?? 0),
+          sku, description: (product.name as string) ?? null,
+          totalQuantitySold: quantitySold, weeklyAverage: quantitySold / weeks,
           stockLevel: balances.get(Number(product.bling_id)) ?? null,
           stockMin: limitsKnown ? Number(product.stock_min) : null, stockMax: limitsKnown ? Number(product.stock_max) : null,
           openQuantity: open.get(sku) ?? 0,
@@ -132,10 +138,15 @@ export function createPostgresProductionOrderRepository(pool: Pool, bling: Bling
       if (missingCatalog.length) warnings.push(`${missingCatalog.length} SKU(s) da linha oficial não estão no cadastro copiado do Bling: ${missingCatalog.join(', ')}.`);
       if (missingLimits.length) warnings.push(`${missingLimits.length} SKU(s) sem estoque mínimo e máximo no Bling não foram dimensionados: ${missingLimits.join(', ')}.`);
       if (kits.length) warnings.push(`Kits fora da fila de fábrica: ${kits.join(', ')}.`);
+      if (!invoiceRead.listedAt) warnings.push('As notas fiscais de saída ainda não foram copiadas do Bling: vendidos e média aparecem zerados.');
+      else if (Date.now() - invoiceRead.listedAt.getTime() > INVOICES_FRESH_MS) warnings.push(`Vendidos das notas fiscais copiadas até ${brt(invoiceRead.listedAt)}.`);
+      if (invoiceRead.pendingInvoices) warnings.push(`${invoiceRead.pendingInvoices} nota(s) do período ainda sem itens copiados do Bling: os vendidos podem estar abaixo do real.`);
+      if (input.from < saoPauloDate(Date.now() - INVOICE_WINDOW_DAYS * 86_400_000)) warnings.push(`Só as notas dos últimos ${INVOICE_WINDOW_DAYS} dias são copiadas do Bling: o começo do período fica sem vendas.`);
+      if (missingCfop.size) warnings.push(`Itens sem CFOP nas notas ficaram fora dos vendidos: ${[...missingCfop.keys()].join(', ')}.`);
       const missing = suggestions.filter(s => !s.sheet).length;
       if (missing) warnings.push(`${missing} item(ns) da fila não têm ficha técnica com roteiro e não podem virar OP.`);
       const preview: GenerationPreview = { ...input, suggestions, warnings, catalogSyncedAt: new Date(syncedAt).toISOString() };
-      return result(preview, 'postgres', [], null, read.asOf);
+      return result(preview, 'postgres', [], null, (invoiceRead.listedAt ?? new Date()).toISOString());
     },
 
     async syncBlingCatalog(actor: WriteActor) {

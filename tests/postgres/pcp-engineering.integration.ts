@@ -25,7 +25,8 @@ before(async () => {
   await pool.query('truncate brsteel_write.audit, brsteel_write.idempotency');
   await pool.query(`truncate brsteel_pcp.production_lines, brsteel_pcp.production_phases, brsteel_pcp.workers,
     brsteel_pcp.production_operations, brsteel_pcp.work_teams, brsteel_pcp.work_team_operations, brsteel_pcp.worker_operations,
-    brsteel_pcp.work_periods, brsteel_pcp.holidays, brsteel_pcp.loss_reasons, brsteel_pcp.bling_products cascade`);
+    brsteel_pcp.work_periods, brsteel_pcp.holidays, brsteel_pcp.loss_reasons, brsteel_pcp.bling_products,
+    brsteel_pcp.sales_invoices, brsteel_pcp.sales_invoice_items, brsteel_pcp.sales_item_products cascade`);
   await pool.query(`insert into brsteel_import.runs (id, source_project, captured_at, status, next_index, total_records, completed_at)
     values ($1, 'brsteel-native', '-infinity', 'complete', 0, 0, '-infinity')`, [NATIVE_RUN_ID]);
   await pool.query(`insert into brsteel_import.state (singleton, source_project, active_run, ready, captured_at, completed_at)
@@ -376,5 +377,90 @@ test('gerador mín/máx: cadastro copiado do Bling, saldo do depósito Estoque e
   await assert.rejects(offline.preview({ kind: 'semanal', factor: 1, ...range }, actor), /saldo do depósito Estoque/);
   assert.deepEqual(calls.filter(c => c.startsWith('products')), ['products:71', 'products:71']);
   const audit = (await pool.query("select count(*)::int as n from brsteel_write.audit where operation = 'pcp.syncBlingCatalog'")).rows[0].n;
+  assert.equal(audit, 2);
+});
+
+test('vendidos das NF-e de saída: pendente conta, cancelada não, só CFOP de venda e kit explodido só quando aparece na nota', async () => {
+  const { createPostgresSalesInvoices } = await import('@/server/persistence/postgres-sales-invoices');
+  const { createPostgresProductionOrderRepository } = await import('@/server/persistence/postgres-pcp-orders');
+  await pool.query(`insert into brsteel_pcp.bling_products (sku, bling_id, name, format, stock_min, stock_max) values
+    ('GPTOALHA', 201, 'GANCHO PORTA TOALHA', 'S', 10, 20), ('CNUL440205140IN', 102, 'CALHA UMIDA 440', 'S', 40, 80),
+    ('TMPCLH440230', 104, 'TAMPA 440', 'S', null, null)
+    on conflict (sku) do update set bling_id = excluded.bling_id, stock_min = excluded.stock_min, stock_max = excluded.stock_max, synced_at = now()`);
+  type Header = { blingId: number; number: string; situation: number; issuedAt: string };
+  const notes = new Map<number, Header & { items: { sku: string; quantity: number; cfop: string | null }[] }>([
+    // Pendente: conta. O kit veio com o próprio código e é explodido; o item fora da linha não conta.
+    [1, { blingId: 1, number: '000001', situation: 1, issuedAt: '2026-11-05T10:00:00-03:00', items: [
+      { sku: 'GPTOALHA', quantity: 4, cfop: '6102' }, { sku: 'CLHLINCOMTAM440INOX', quantity: 3, cfop: '6102' }, { sku: 'LCO21250', quantity: 9, cfop: '6102' }] }],
+    // Último minuto do período no horário de Brasília; a remessa (5915) não é venda.
+    [2, { blingId: 2, number: '000002', situation: 5, issuedAt: '2026-11-10T23:30:00-03:00', items: [
+      { sku: 'GPTOALHA', quantity: 10, cfop: '5102' }, { sku: 'GPTOALHA', quantity: 7, cfop: '5915' }] }],
+    // Já é o dia seguinte em Brasília: fora do período.
+    [3, { blingId: 3, number: '000003', situation: 5, issuedAt: '2026-11-11T00:10:00-03:00', items: [{ sku: 'GPTOALHA', quantity: 100, cfop: '6102' }] }],
+    [4, { blingId: 4, number: '000004', situation: 2, issuedAt: '2026-11-06T09:00:00-03:00', items: [{ sku: 'GPTOALHA', quantity: 50, cfop: '6102' }] }],
+    // O detalhe desta falha: fica pendente para a próxima execução.
+    [5, { blingId: 5, number: '000005', situation: 5, issuedAt: '2026-11-07T09:00:00-03:00', items: [] }],
+  ]);
+  const calls: string[] = [];
+  const reader = {
+    async listOutgoing(input: { from: string; to: string; page: number; cancelled: boolean }) {
+      calls.push(`list:${input.cancelled ? 'canceladas' : 'demais'}:${input.page}:${input.from}..${input.to}`);
+      return [...notes.values()].filter(n => (n.situation === 2) === input.cancelled).map(n => ({ blingId: n.blingId, number: n.number, situation: n.situation, issuedAt: n.issuedAt }));
+    },
+    async invoice(id: number) {
+      calls.push(`nota:${id}`);
+      if (id === 5) throw new Error('timeout');
+      return notes.get(id)!;
+    },
+    async productsByCode(codes: readonly string[]) {
+      calls.push(`produtos:${codes.join(',')}`);
+      return [{ sku: 'CLHLINCOMTAM440INOX', blingId: 900, format: 'E' }, { sku: 'LCO21250', blingId: 901, format: 'S' }];
+    },
+    async kitStructure(id: number) { calls.push(`kit:${id}`); return [{ blingId: 102, quantity: 1 }, { blingId: 104, quantity: 1 }]; },
+  };
+  const invoices = createPostgresSalesInvoices(writerPool, reader);
+  const now = () => Date.parse('2026-11-12T12:00:00-03:00');
+  // Nota que sumiu das listagens do Bling há mais de duas horas: foi excluída lá.
+  await pool.query(`insert into brsteel_pcp.sales_invoices (bling_id, number, situation, issued_at, items_situation, listed_at)
+    values (99, '000099', 1, '2026-11-06T10:00:00-03:00', 1, '2026-11-12T08:00:00-03:00')`);
+  await pool.query(`insert into brsteel_pcp.sales_invoice_items (invoice_id, position, sku, quantity, cfop) values (99, 0, 'GPTOALHA', 1000, '6102')`);
+
+  const first = (await invoices.sync(actor, { now })).data;
+  assert.deepEqual(first, { listed: 5, fetched: 3, failed: 1, pending: 1, removed: 1, codesChecked: 2 });
+  assert.deepEqual(calls.slice(0, 2), ['list:demais:1:2026-07-15..2026-11-13', 'list:canceladas:1:2026-07-15..2026-11-13']);
+  // A cancelada não tem os itens lidos; as demais, da mais recente para a mais antiga.
+  assert.deepEqual(calls.filter(c => c.startsWith('nota:')), ['nota:3', 'nota:2', 'nota:5', 'nota:1']);
+  assert.deepEqual(calls.filter(c => c.startsWith('produtos') || c.startsWith('kit')), ['produtos:CLHLINCOMTAM440INOX,LCO21250', 'kit:900']);
+
+  const bling = {
+    async products(): Promise<never> { throw new Error('o cadastro está fresco, não deve ser relido'); },
+    async estoqueBalances() { return new Map([[201, 0], [102, 0], [104, 0]]); },
+  };
+  const orders = createPostgresProductionOrderRepository(writerPool, bling, invoices);
+  const range = { from: '2026-11-01', to: '2026-11-10' };
+  let preview = (await orders.preview({ kind: 'semanal', factor: 1, ...range }, actor)).data;
+  const sold = (sku: string) => preview.suggestions.find(s => s.sku === sku);
+  assert.equal(sold('GPTOALHA')?.sold, 14);
+  assert.equal(sold('GPTOALHA')?.weeklyAverage, 14 / (10 / 7));
+  assert.equal(sold('CNUL440205140IN')?.sold, 3);
+  assert.ok(preview.warnings.some(w => w.startsWith('1 nota(s) do período ainda sem itens')));
+
+  // A pendente foi autorizada (itens relidos), a 2 foi cancelada e a 5 voltou a responder.
+  notes.set(1, { ...notes.get(1)!, situation: 5 });
+  notes.set(2, { ...notes.get(2)!, situation: 2 });
+  notes.set(5, { ...notes.get(5)!, items: [{ sku: 'GPTOALHA', quantity: 2, cfop: '6102' }] });
+  reader.invoice = async (id: number) => { calls.push(`nota:${id}`); return notes.get(id)!; };
+  calls.length = 0;
+  const second = (await invoices.sync(actor, { now: () => now() + 900_000 })).data;
+  assert.deepEqual(second, { listed: 5, fetched: 2, failed: 0, pending: 0, removed: 0, codesChecked: 0 });
+  assert.deepEqual(calls.filter(c => c.startsWith('nota:')), ['nota:5', 'nota:1']);
+  preview = (await orders.preview({ kind: 'semanal', factor: 1, ...range }, actor)).data;
+  assert.equal(sold('GPTOALHA')?.sold, 6);
+  assert.ok(!preview.warnings.some(w => w.includes('sem itens copiados')));
+
+  // Bling fora do ar na listagem: não grava nada.
+  const offline = createPostgresSalesInvoices(writerPool, { ...reader, async listOutgoing() { throw new Error('timeout'); } });
+  await assert.rejects(offline.sync(actor, { now }), /listar as notas fiscais/);
+  const audit = (await pool.query("select count(*)::int as n from brsteel_write.audit where operation = 'pcp.syncSalesInvoices'")).rows[0].n;
   assert.equal(audit, 2);
 });
