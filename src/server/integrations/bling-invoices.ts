@@ -64,11 +64,14 @@ export function createBlingInvoiceReader(get: (url: string) => Promise<{ data?: 
     async productsByCode(codes) {
       const out: ItemProduct[] = [];
       for (let i = 0; i < codes.length; i += 50) {
-        const query = new URLSearchParams({ criterio: '5', limite: '100' });
-        for (const code of codes.slice(i, i + 50)) query.append('codigos[]', code);
-        const response = await get(`${BASE}/produtos?${query}`);
-        for (const p of (response?.data as { id: number; codigo: string; formato?: string }[] | undefined) ?? []) {
-          out.push({ sku: p.codigo, blingId: Number(p.id), format: p.formato ?? null });
+        // A busca por código do Bling não é exata: um lote pode passar de uma página.
+        for (let page = 1; ; page++) {
+          const query = new URLSearchParams({ criterio: '5', limite: '100', pagina: String(page) });
+          for (const code of codes.slice(i, i + 50)) query.append('codigos[]', code);
+          const items = ((await get(`${BASE}/produtos?${query}`))?.data as { id: number; codigo: string; formato?: string }[] | undefined) ?? [];
+          for (const p of items) out.push({ sku: p.codigo, blingId: Number(p.id), format: p.formato ?? null });
+          if (items.length < 100) break;
+          if (page >= 20) throw new Error('listagem de produtos sem fim');
         }
       }
       return out;

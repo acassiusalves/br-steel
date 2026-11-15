@@ -17,6 +17,8 @@ export type BlingReader = {
 
 const BASE = 'https://api.bling.com.br/Api/v3';
 const BATCH = 50;
+const LIST_PAGE = 100;
+const MAX_LIST_PAGES = 20;
 const chunks = <T,>(items: readonly T[], size: number) => Array.from({ length: Math.ceil(items.length / size) }, (_, i) => items.slice(i * size, i * size + size));
 const num = (value: unknown) => (typeof value === 'number' && Number.isFinite(value) ? value : value != null && value !== '' && Number.isFinite(Number(value)) ? Number(value) : null);
 
@@ -29,14 +31,21 @@ export function createBlingReader(get: (url: string) => Promise<{ data?: unknown
     async products(skus) {
       const listed: ListItem[] = [];
       for (const batch of chunks(skus, BATCH)) {
-        const query = new URLSearchParams({ criterio: '5', limite: String(BATCH) });
-        for (const sku of batch) query.append('codigos[]', sku);
-        const response = await get(`${BASE}/produtos?${query}`);
-        listed.push(...((response?.data as ListItem[] | undefined) ?? []));
+        // Um código pode casar com mais de um cadastro (a busca do Bling não é exata, ex.: TMPCLH440230 e
+        // COMPTMPCLH440230), então o lote passa de uma página: segue as páginas até a última.
+        for (let page = 1; ; page++) {
+          const query = new URLSearchParams({ criterio: '5', limite: String(LIST_PAGE), pagina: String(page) });
+          for (const sku of batch) query.append('codigos[]', sku);
+          const items = ((await get(`${BASE}/produtos?${query}`))?.data as ListItem[] | undefined) ?? [];
+          listed.push(...items);
+          if (items.length < LIST_PAGE) break;
+          if (page >= MAX_LIST_PAGES) throw new Error('listagem de produtos sem fim');
+        }
       }
       const wanted = new Set(skus);
       const out: BlingProduct[] = [];
-      for (const item of listed.filter(p => wanted.has(p.codigo))) {
+      const unique = new Map(listed.filter(p => wanted.has(p.codigo)).map(p => [p.id, p]));
+      for (const item of unique.values()) {
         // A listagem não traz mín/máx: o detalhe é por produto (a fila do cliente respeita o limite do Bling).
         const detail = ((await get(`${BASE}/produtos/${item.id}`))?.data ?? item) as Detail;
         out.push({ sku: item.codigo, blingId: item.id, name: detail.nome ?? item.nome ?? null, format: detail.formato ?? item.formato ?? null,
