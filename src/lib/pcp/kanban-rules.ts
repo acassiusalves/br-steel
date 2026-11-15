@@ -8,6 +8,8 @@ export type StepStatus = 'aberto' | 'em_execucao' | 'executada';
 export type KanbanStep = {
   id: string; operationId: string; phaseId: string; position: number; status: StepStatus;
   workerId: string | null; predecessorId: string | null;
+  /** OS em execução com pausa aberta: o tempo parado conta como espera. */
+  paused?: boolean;
 };
 export type KanbanOrder = {
   status: 'a_produzir' | 'produzindo' | 'concluido' | 'suspenso' | 'encerrado';
@@ -78,8 +80,12 @@ export function moveError(order: KanbanOrder, target: string, actor: KanbanActor
   return null;
 }
 
+/**
+ * Quem pode iniciar a OS. Com `byBadge`, o funcionário se identificou com o crachá no terminal do líder:
+ * o crachá vale como a presença dele, então não importa de qual equipe é quem opera a tela.
+ */
 export function startError(order: KanbanOrder, stepId: string, workerId: string, workerOperationIds: readonly string[],
-  workerActive: boolean, actor: KanbanActor, teams: readonly KanbanTeam[]): string | null {
+  workerActive: boolean, actor: KanbanActor, teams: readonly KanbanTeam[], byBadge = false): string | null {
   const step = order.steps.find(s => s.id === stepId);
   if (!step) return 'OS não encontrada nesta OP.';
   if (order.phaseId !== step.phaseId) return 'Mova o card para a fase desta OS antes de iniciá-la.';
@@ -88,7 +94,7 @@ export function startError(order: KanbanOrder, stepId: string, workerId: string,
   if (predecessor && predecessor.status !== 'executada') return 'A OS anterior ainda não foi executada.';
   if (!workerActive) return 'O funcionário está inativo.';
   if (!workerOperationIds.includes(step.operationId)) return 'Este funcionário não pode executar esta operação.';
-  if (actor.isAdmin || actor.workerId === workerId || leadsWorker(actor, teams, step.operationId, workerId)) return null;
+  if (byBadge || actor.isAdmin || actor.workerId === workerId || leadsWorker(actor, teams, step.operationId, workerId)) return null;
   return 'Você só pode iniciar OS em seu nome ou de membros da equipe que lidera.';
 }
 
@@ -99,11 +105,32 @@ export function finishError(order: KanbanOrder, stepId: string, actor: KanbanAct
   if (step.status !== 'em_execucao') return 'Esta OS não está em execução.';
   if (lossQuantity < 0) return 'Perda inválida.';
   if (lossQuantity > currentQuantity(order)) return 'A perda não pode passar da quantidade atual da OP.';
-  // A OS fica com quem a iniciou: finaliza ele mesmo, ou o líder dele na operação.
+  return holdsStep(actor, teams, step) ? null : 'Só quem iniciou a OS, ou o líder dele, pode finalizá-la.';
+}
+
+/** A OS fica com quem a iniciou: age nela ele mesmo, o líder dele na operação ou o administrador. */
+function holdsStep(actor: KanbanActor, teams: readonly KanbanTeam[], step: KanbanStep): boolean {
   // `workerId` nulo dos dois lados (usuário sem funcionário e OS vinda do iApp) não é a mesma pessoa.
   if (actor.isAdmin || (actor.workerId !== null && actor.workerId === step.workerId)
-    || (step.workerId && leadsWorker(actor, teams, step.operationId, step.workerId))) return null;
-  // OS vinda do iApp em execução: o iApp não diz quem a iniciou, então o líder da operação a finaliza.
-  if (!step.workerId && leadsOperation(actor, teams, step.operationId)) return null;
-  return 'Só quem iniciou a OS, ou o líder dele, pode finalizá-la.';
+    || (step.workerId && leadsWorker(actor, teams, step.operationId, step.workerId))) return true;
+  // OS vinda do iApp em execução: o iApp não diz quem a iniciou, então o líder da operação responde por ela.
+  return !step.workerId && leadsOperation(actor, teams, step.operationId);
+}
+
+/** Pausar (`pause = true`) ou retomar a OS em execução: as mesmas pessoas que podem finalizá-la. */
+export function pauseError(order: KanbanOrder, stepId: string, pause: boolean, actor: KanbanActor, teams: readonly KanbanTeam[]): string | null {
+  const step = order.steps.find(s => s.id === stepId);
+  if (!step) return 'OS não encontrada nesta OP.';
+  if (step.status !== 'em_execucao') return 'Esta OS não está em execução.';
+  if (pause && step.paused) return 'Esta OS já está pausada.';
+  if (!pause && !step.paused) return 'Esta OS não está pausada.';
+  return holdsStep(actor, teams, step) ? null : `Só quem iniciou a OS, ou o líder dele, pode ${pause ? 'pausá-la' : 'retomá-la'}.`;
+}
+
+/** Excluir (encerrar) a OP: só o administrador, só em "A produzir" e antes de qualquer OS começar. */
+export function closeError(order: KanbanOrder, actor: KanbanActor): string | null {
+  if (!actor.isAdmin) return 'Só o administrador exclui OP.';
+  if (order.status !== 'a_produzir' || order.phaseId) return 'Só dá para excluir OP que está em "A produzir".';
+  if (order.steps.some(s => s.status !== 'aberto')) return 'Esta OP já tem OS iniciada e não pode ser excluída.';
+  return null;
 }

@@ -32,8 +32,8 @@ export function createKanbanOperations(repository: KanbanRepository) {
     },
     async move(ctx: AccessContext, input: unknown) {
       requireOperation(ctx, 'producao:write', BOARD_PAGE);
-      const data = z.object({ orderId: uuid, target }).strict().parse(input);
-      return repository.move(data.orderId, data.target, boardActor(ctx));
+      const data = z.object({ orderId: uuid, target, badge: z.string().trim().max(50).nullable().default(null) }).strict().parse(input);
+      return repository.move(data.orderId, data.target, boardActor(ctx), data.badge);
     },
     async start(ctx: AccessContext, input: unknown) {
       requireOperation(ctx, 'producao:write', BOARD_PAGE);
@@ -44,6 +44,16 @@ export function createKanbanOperations(repository: KanbanRepository) {
       requireOperation(ctx, 'producao:write', BOARD_PAGE);
       const data = z.object({ orderId: uuid, stepId: uuid, finish: finishSchema }).strict().parse(input);
       return repository.finish(data.orderId, data.stepId, data.finish, boardActor(ctx));
+    },
+    async pause(ctx: AccessContext, input: unknown) {
+      requireOperation(ctx, 'producao:write', BOARD_PAGE);
+      const data = z.object({ orderId: uuid, stepId: uuid, pause: z.boolean() }).strict().parse(input);
+      return data.pause ? repository.pause(data.orderId, data.stepId, boardActor(ctx)) : repository.resume(data.orderId, data.stepId, boardActor(ctx));
+    },
+    async close(ctx: AccessContext, input: unknown) {
+      requireOperation(ctx, 'producao:write', BOARD_PAGE);
+      const data = z.object({ orderId: uuid }).strict().parse(input);
+      return repository.close(data.orderId, boardActor(ctx));
     },
   };
 }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  columnOf, currentQuantity, finishError, moveError, nextColumn, startError, type KanbanOrder, type KanbanStep, type KanbanTeam,
+  closeError, columnOf, currentQuantity, finishError, moveError, nextColumn, pauseError, startError, type KanbanOrder, type KanbanStep, type KanbanTeam,
 } from '@/lib/pcp/kanban-rules';
 
 // Roteiro do ralo: Check Corte → Dobrar → Check Dobra, cada operação na sua fase.
@@ -67,5 +67,43 @@ describe('iniciar e finalizar OS', () => {
     expect(finishError(doIapp, 's2', dobrador, teams, 0)).toMatch(/Só quem iniciou/);
     // Usuário sem funcionário vinculado não "coincide" com a OS sem funcionário.
     expect(finishError(doIapp, 's2', { isAdmin: false, workerId: null }, teams, 0)).toMatch(/Só quem iniciou/);
+  });
+});
+
+describe('crachá ao passar o card para a operação', () => {
+  const naDobra = order({ status: 'produzindo', phaseId: 'F-dobra' }, [step('s1', 'F-check-corte', 0, 'executada', 'lider'), step('s2', 'F-dobra', 1), step('s3', 'F-check-dobra', 2)]);
+  // O conferente do corte opera a tela, mas não lidera quem dobra: sem o crachá, não iniciaria em nome dele.
+  const conferente = { isAdmin: false, workerId: 'conferente' };
+  it('o crachá vale como a presença de quem executa, mas a permissão da operação continua valendo', () => {
+    expect(startError(naDobra, 's2', 'dobrador2', ['op-s2'], true, conferente, teams)).toMatch(/seu nome/);
+    expect(startError(naDobra, 's2', 'dobrador2', ['op-s2'], true, conferente, teams, true)).toBeNull();
+    expect(startError(naDobra, 's2', 'dobrador2', ['op-s9'], true, conferente, teams, true)).toMatch(/não pode executar/);
+    expect(startError(naDobra, 's2', 'dobrador2', ['op-s2'], false, conferente, teams, true)).toMatch(/inativo/);
+  });
+});
+
+describe('pausa da OS', () => {
+  const emExecucao = (paused: boolean) => order({ status: 'produzindo', phaseId: 'F-dobra' }, [
+    step('s1', 'F-check-corte', 0, 'executada', 'lider'), { ...step('s2', 'F-dobra', 1, 'em_execucao', 'dobrador1'), paused }, step('s3', 'F-check-dobra', 2)]);
+  it('pausa e retoma quem pode finalizar; não pausa duas vezes nem retoma o que não está pausado', () => {
+    expect(pauseError(emExecucao(false), 's2', true, dobrador, teams)).toBeNull();
+    expect(pauseError(emExecucao(false), 's2', true, lider, teams)).toBeNull();
+    expect(pauseError(emExecucao(false), 's2', true, { isAdmin: false, workerId: 'dobrador2' }, teams)).toMatch(/pausá-la/);
+    expect(pauseError(emExecucao(true), 's2', true, lider, teams)).toMatch(/já está pausada/);
+    expect(pauseError(emExecucao(false), 's2', false, lider, teams)).toMatch(/não está pausada/);
+    expect(pauseError(emExecucao(true), 's2', false, dobrador, teams)).toBeNull();
+    expect(pauseError(emExecucao(true), 's3', true, lider, teams)).toMatch(/não está em execução/);
+  });
+  it('a OS pausada ainda pode ser finalizada', () => {
+    expect(finishError(emExecucao(true), 's2', lider, teams, 0)).toBeNull();
+  });
+});
+
+describe('excluir OP', () => {
+  it('só o administrador, só em "A produzir" e antes de qualquer OS começar', () => {
+    expect(closeError(order(), admin)).toBeNull();
+    expect(closeError(order(), lider)).toMatch(/administrador/);
+    expect(closeError(order({ status: 'produzindo', phaseId: 'F-check-corte' }), admin)).toMatch(/A produzir/);
+    expect(closeError(order({}, [step('s1', 'F-check-corte', 0, 'em_execucao', 'lider'), step('s2', 'F-dobra', 1)]), admin)).toMatch(/iniciada/);
   });
 });

@@ -11,11 +11,13 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   return operationJson(async () => {
     const ctx = await requireWebContext(request);
-    const { action, data } = z.object({ action: z.enum(['move', 'start', 'finish']), data: z.unknown() }).strict().parse(await readOperationBody(request));
+    const { action, data } = z.object({ action: z.enum(['move', 'start', 'finish', 'pause', 'close']), data: z.unknown() }).strict().parse(await readOperationBody(request));
     switch (action) {
       case 'move': return k.move(ctx, data);
       case 'start': return k.start(ctx, data);
       case 'finish': return k.finish(ctx, data);
+      case 'pause': return k.pause(ctx, data);
+      case 'close': return k.close(ctx, data);
     }
   });
 }
