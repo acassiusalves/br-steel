@@ -22,7 +22,7 @@ export type IappExport = { batchId: string; kind: OrderKind; header: readonly st
 
 /**
  * OPs do PCP, só no PostgreSQL. A prévia segue a política mín/máx: saldo do depósito Estoque lido do
- * Bling, mín/máx da cópia do cadastro do Bling, vendas faturadas gravadas no banco e as fichas técnicas; a geração grava o lote, as OPs e as ordens de serviço numa transação.
+ * Bling, mín/máx da cópia do cadastro do Bling, vendidos das NF-e de saída copiadas do Bling e as fichas técnicas; a geração grava o lote, as OPs e as ordens de serviço numa transação.
  */
 export interface ProductionOrderRepository {
   /**
