@@ -356,6 +356,21 @@ test('gerador mín/máx: cadastro copiado do Bling, saldo do depósito Estoque e
   const corte = (await orders.preview({ kind: 'corte', factor: 1.47, ...range }, actor)).data;
   assert.deepEqual(corte.suggestions.map(s => [s.sku, s.minMaxQuantity, s.quantity]), [['CNUL440205140IN', 80, 118], ['PTU200200150', 64, 95]]);
 
+  // Quem só consulta não relê o cadastro: usa a última leitura, com aviso.
+  await pool.query("update brsteel_pcp.bling_products set synced_at = now() - interval '2 hours'");
+  const readOnly = (await orders.preview({ kind: 'semanal', factor: 1, ...range }, null)).data;
+  assert.equal(readOnly.suggestions.length, 2);
+  assert.ok(readOnly.warnings.some(w => w.includes('última leitura do Bling')));
+  assert.deepEqual(calls.filter(c => c.startsWith('products')), ['products:71', 'products:71']);
+  // Releitura que falha: segue com a leitura anterior, com aviso, e não tenta de novo logo em seguida.
+  let failures = 0;
+  const flaky = createPostgresProductionOrderRepository(writerPool, { ...bling, async products() { failures++; throw new Error('timeout'); } });
+  const stale = (await flaky.preview({ kind: 'semanal', factor: 1, ...range }, actor)).data;
+  assert.ok(stale.warnings.some(w => w.includes('não foi possível reler agora')));
+  await flaky.preview({ kind: 'semanal', factor: 1, ...range }, actor);
+  assert.equal(failures, 1);
+  await pool.query("update brsteel_pcp.bling_products set synced_at = now()");
+
   // Bling fora do ar: a prévia não inventa saldo.
   const offline = createPostgresProductionOrderRepository(writerPool, { ...bling, async estoqueBalances() { throw new Error('timeout'); } });
   await assert.rejects(offline.preview({ kind: 'semanal', factor: 1, ...range }, actor), /saldo do depósito Estoque/);

@@ -31,7 +31,11 @@ export function createProductionOrderOperations(repository: ProductionOrderRepos
   return {
     async previewOrders(ctx: AccessContext, input: unknown) {
       requireOperation(ctx, 'producao:read', ORDERS_PAGE);
-      return repository.preview(previewSchema.parse(input), writeActor(ctx));
+      const input2 = previewSchema.parse(input);
+      // Reler o cadastro do Bling grava a cópia: só para quem pode gerar OP.
+      let canRefresh = true;
+      try { requireOperation(ctx, 'producao:write', ORDERS_PAGE); } catch { canRefresh = false; }
+      return repository.preview(input2, canRefresh ? writeActor(ctx) : null);
     },
     async createOrderBatch(ctx: AccessContext, input: unknown) {
       requireOperation(ctx, 'producao:write', ORDERS_PAGE);
