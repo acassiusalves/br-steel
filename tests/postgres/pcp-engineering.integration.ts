@@ -341,9 +341,10 @@ test('gerador mín/máx: cadastro copiado do Bling, saldo do depósito Estoque e
   await orders.createBatch({ kind: 'semanal', factor: 1, ...range, items: [{ sku: 'CNUL440205140IN', sheetId: cnulSheet, quantity: 20, description: null }] }, actor);
 
   const semanal = (await orders.preview({ kind: 'semanal', factor: 1, ...range })).data;
+  // Os dois estão zerados e sem venda no teste: o empate segue a ordem da linha oficial.
   assert.deepEqual(semanal.suggestions.map(s => [s.sku, s.minMaxQuantity, s.quantity, s.openQuantity]),
-    [['PTU200200150', 64, 64, 0], ['CNUL440205140IN', 60, 60, 20]]);
-  assert.equal(semanal.suggestions[0].sheet?.id, ptuSheet);
+    [['CNUL440205140IN', 60, 60, 20], ['PTU200200150', 64, 64, 0]]);
+  assert.equal(semanal.suggestions.find(s => s.sku === 'PTU200200150')?.sheet?.id, ptuSheet);
   assert.ok(semanal.warnings.some(w => w.includes('sem estoque mínimo e máximo') && w.includes('TMPCLH440230')));
   assert.ok(semanal.warnings.some(w => w.includes('Kits fora da fila') && w.includes('KIT50OSSOME')));
   assert.ok(semanal.warnings.some(w => w.includes('66 SKU(s) da linha oficial')));
@@ -351,7 +352,7 @@ test('gerador mín/máx: cadastro copiado do Bling, saldo do depósito Estoque e
 
   // No corte, a margem do pulmão vale sobre o Q do mín/máx (a OP semanal aberta não conta para o corte).
   const corte = (await orders.preview({ kind: 'corte', factor: 1.47, ...range })).data;
-  assert.deepEqual(corte.suggestions.map(s => [s.sku, s.minMaxQuantity, s.quantity]), [['PTU200200150', 64, 95], ['CNUL440205140IN', 80, 118]]);
+  assert.deepEqual(corte.suggestions.map(s => [s.sku, s.minMaxQuantity, s.quantity]), [['CNUL440205140IN', 80, 118], ['PTU200200150', 64, 95]]);
 
   // Bling fora do ar: a prévia não inventa saldo.
   const offline = createPostgresProductionOrderRepository(writerPool, { ...bling, async estoqueBalances() { throw new Error('timeout'); } });
