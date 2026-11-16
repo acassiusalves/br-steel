@@ -12,7 +12,8 @@ interface AuthContextType {
     isLoading: boolean;
     /** `badge`: entra pelo código do crachá em vez do e-mail. */
     login: (identifier: string, password: string, kind?: 'email' | 'badge') => Promise<{ success: boolean; mustChangePassword?: boolean; role?: string; error?: string }>;
-    logout: () => void;
+    /** Encerra a sessão; a promessa resolve quando o servidor apagou o cookie (ou a chamada falhou). */
+    logout: () => Promise<void>;
     refreshPermissions: () => Promise<void>;
     updateUser: (userData: Partial<User>) => void;
 }
@@ -117,7 +118,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setInactivePages([]);
         setIsAuthenticated(false);
         clearStorage();
-        fetch('/api/auth/logout', { method: 'POST' }).catch(() => undefined);
+        return fetch('/api/auth/logout', { method: 'POST' }).then(() => undefined, () => undefined);
     }, []);
 
     const refreshPermissions = useCallback(async () => {

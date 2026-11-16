@@ -22,7 +22,7 @@ describe('acesso pelo crachá', () => {
   beforeEach(async () => {
     await resetDatabase();
     ip = `203.0.113.${++ipCounter}`;
-    ({ pin } = await firestoreBadgeAccounts.create('Líder de teste', '26557'));
+    ({ pin } = await firestoreBadgeAccounts.create('Líder de teste', '26557', 'admin'));
   });
 
   it('o primeiro acesso usa o PIN sorteado (nunca 123456), nasce como Produção e exige uma senha pessoal diferente do PIN', async () => {
@@ -70,13 +70,13 @@ describe('acesso pelo crachá', () => {
     expect((await login(request('login', 'POST', { email: 'cracha-26557', password: pin }))).status).toBe(401);
   });
 
-  it('o reset gera um PIN novo, desbloqueia e encerra as sessões abertas', async () => {
+  it('o reset gera um PIN novo, desbloqueia, reativa e encerra as sessões abertas', async () => {
     const { hash, salt } = hashPassword('842913');
-    await doc().update({ passwordHash: hash, passwordSalt: salt, mustChangePassword: false, lockedUntil: Date.now() + 60_000 });
+    await doc().update({ passwordHash: hash, passwordSalt: salt, mustChangePassword: false, lockedUntil: Date.now() + 60_000, active: false });
     const before = (await doc().get()).data()!;
-    const { pin: fresh } = await firestoreBadgeAccounts.reset('cracha-26557');
+    const { pin: fresh } = await firestoreBadgeAccounts.reset('cracha-26557', 'admin');
     const after = (await doc().get()).data()!;
-    expect(after).toMatchObject({ mustChangePassword: true, lockedUntil: 0, authVersion: before.authVersion + 1 });
+    expect(after).toMatchObject({ mustChangePassword: true, lockedUntil: 0, active: true, authVersion: before.authVersion + 1 });
     expect(after.initialPasswordExpiresAt).toBeGreaterThan(Date.now() + 71 * 3_600_000);
     expect((await login(request('login', 'POST', { badge: '26557', password: '842913' }))).status).toBe(401);
     const relogin = await login(request('login', 'POST', { badge: '26557', password: fresh }));
@@ -86,9 +86,9 @@ describe('acesso pelo crachá', () => {
 
   it('criar de novo o acesso de um crachá que já tem conta zera a conta: senha, papel, desativação e sessões', async () => {
     const { hash, salt } = hashPassword('senha-de-teste');
-    await doc().update({ passwordHash: hash, passwordSalt: salt, mustChangePassword: false, role: 'Administrador', active: false });
+    await doc().update({ passwordHash: hash, passwordSalt: salt, mustChangePassword: false, role: 'Operador', active: false });
     const before = (await doc().get()).data()!;
-    const again = await firestoreBadgeAccounts.create('Outro nome', '26557');
+    const again = await firestoreBadgeAccounts.create('Outro nome', '26557', 'admin');
     expect(again).toMatchObject({ userId: 'cracha-26557', adopted: true });
     const after = (await doc().get()).data()!;
     expect(after).toMatchObject({ name: 'Outro nome', role: 'Produção', active: true, mustChangePassword: true, authVersion: before.authVersion + 1 });
@@ -96,9 +96,30 @@ describe('acesso pelo crachá', () => {
     expect((await login(request('login', 'POST', { badge: '26557', password: again.pin }))).status).toBe(200);
   });
 
+  it('não reaproveita login de crachá que é de administrador', async () => {
+    await doc().update({ role: 'Administrador' });
+    await expect(firestoreBadgeAccounts.create('Outro nome', '26557', 'admin')).rejects.toThrow(/administrador/);
+    expect((await doc().get()).data()).toMatchObject({ role: 'Administrador' });
+  });
+
+  it('registra criação, reaproveitamento, reset, desativação e bloqueio, sem nome nem senha', async () => {
+    await firestoreBadgeAccounts.create('Outro nome', '26557', 'admin');
+    await firestoreBadgeAccounts.reset('cracha-26557', 'admin');
+    expect(await firestoreBadgeAccounts.deactivate('cracha-26557', 'admin')).toBe(true);
+    expect(await firestoreBadgeAccounts.deactivate('cracha-26557', 'admin')).toBe(false);
+    expect((await doc().get()).data()?.active).toBe(false);
+    await firestoreBadgeAccounts.reset('cracha-26557', 'admin');
+    for (let i = 0; i < 5; i++) await login(request('login', 'POST', { badge: '26557', password: 'errada' }));
+    const entries = (await adminDb.collection('accessAudit').where('targetUserId', '==', 'cracha-26557').get()).docs.map(d => d.data())
+      .sort((a, b) => String(a.at).localeCompare(String(b.at)));
+    expect(entries.map(e => e.operation)).toEqual(['badge.create', 'badge.adopt', 'badge.reset', 'badge.deactivate', 'badge.reset', 'badge.locked']);
+    expect(entries.at(-1)).toMatchObject({ actorUserId: null });
+    expect(JSON.stringify(entries)).not.toMatch(/Outro nome|Líder de teste|passwordHash/);
+  });
+
   it('não reseta conta de e-mail e normaliza o código', async () => {
     await seedUser('email-user', { name: 'E-mail', email: 'pessoa@example.test', role: 'Operador' });
-    await expect(firestoreBadgeAccounts.reset('email-user')).rejects.toThrow();
+    await expect(firestoreBadgeAccounts.reset('email-user', 'admin')).rejects.toThrow();
     expect(normalizeBadge('ab-12')).toBe('AB-12');
     expect(normalizeBadge(' 012 ')).toBe('012');
     expect(normalizeBadge('12 34')).toBeNull();
@@ -132,7 +153,7 @@ describe('acesso pelo crachá', () => {
 
 describe('acesso pelo crachá sob tentativas simultâneas', () => {
   let pin = '';
-  beforeEach(async () => { await resetDatabase(); ip = `203.0.113.${++ipCounter}`; ({ pin } = await firestoreBadgeAccounts.create('Líder de teste', '26557')); });
+  beforeEach(async () => { await resetDatabase(); ip = `203.0.113.${++ipCounter}`; ({ pin } = await firestoreBadgeAccounts.create('Líder de teste', '26557', 'admin')); });
   it('10 senhas erradas ao mesmo tempo bloqueiam o crachá', async () => {
     const statuses = await Promise.all(Array.from({ length: 10 }, () => login(request('login', 'POST', { badge: '26557', password: 'errada' })).then(r => r.status)));
     expect(statuses.every(status => status === 401 || status === 429)).toBe(true);

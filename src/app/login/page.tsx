@@ -31,13 +31,15 @@ const Logo = () => (
 
 
 function LoginForm() {
-  const next = safeOAuthReturnPath(useSearchParams().get('next'));
+  const searchParams = useSearchParams();
+  const next = safeOAuthReturnPath(searchParams.get('next'));
   const router = useRouter();
   const { toast } = useToast();
   const { login } = useAuth();
   const [isLoading, setIsLoading] = React.useState(false);
   // Líderes e funcionários da fábrica entram pelo código do crachá, como no iApp.
-  const [mode, setMode] = React.useState<'email' | 'badge'>('email');
+  // `?modo=cracha` abre direto na aba Crachá: é para onde o quadro manda ao trocar de líder.
+  const [mode, setMode] = React.useState<'email' | 'badge'>(searchParams.get('modo') === 'cracha' ? 'badge' : 'email');
 
   const handleLogin = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();

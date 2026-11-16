@@ -50,6 +50,8 @@ it('changes password, invalidates previous sessions and preserves identity/role'
   const saved = (await adminDb.collection('users').doc(actor.id).get()).data()!;
   expect(saved.role).toBe('Vendedor');
   expect(saved.name).toBe('New name');
+  const audit = (await adminDb.collection('accessAudit').where('targetUserId', '==', actor.id).get()).docs.map(d => d.data());
+  expect(audit).toEqual([expect.objectContaining({ operation: 'password.change', actorUserId: actor.id })]);
   expect(response.headers.get('set-cookie')).toContain('brsteel_oauth_session=;');
   const newCookie = response.headers.get('set-cookie')!.split(';')[0];
   const current = await me(new Request('http://localhost/api/auth/me', { headers: { cookie: newCookie } }));
@@ -87,4 +89,8 @@ it('protects logout against cross-origin requests and clears the cookie for the 
   const cookies = (await logout(request('logout', 'POST'))).headers.get('set-cookie');
   expect(cookies).toContain('Max-Age=0');
   expect(cookies).toContain('brsteel_oauth_session=;');
+});
+it('does not log in an e-mail account without a stored password, not even with 123456', async () => {
+  await seedUser('legacy', { role: 'Operador' });
+  expect((await login(request('login', 'POST', { email: 'legacy@example.test', password: '123456' }))).status).toBe(401);
 });

@@ -10,6 +10,7 @@ import {
 import { adminDb } from '@/lib/firebase-admin';
 import { isKnownRole, publicUser } from '@/server/access/users';
 import { rejectCrossOrigin } from '@/server/access/request';
+import { recordAccessAudit } from '@/server/access/audit';
 import { BADGE_LOCK_MS, BADGE_MAX_FAILURES, badgeUserId, isBadgeUser, normalizeBadge } from '@/server/access/badges';
 import { storedUserFromDoc, type StoredUser } from '@/server/access/users';
 import { clientIp, loginBlockedFor, recordLoginFailure } from '@/server/access/login-rate-limit';
@@ -99,6 +100,7 @@ async function loginWithBadge(badge: string, password: string): Promise<{ user: 
     if (!user.passwordHash || !user.passwordSalt || !verifyPassword(password, user.passwordHash, user.passwordSalt)) {
       const failures = failedLogins + 1;
       tx.update(ref, failures >= BADGE_MAX_FAILURES ? { failedLogins: 0, lockedUntil: now + BADGE_LOCK_MS } : { failedLogins: failures });
+      if (failures >= BADGE_MAX_FAILURES) recordAccessAudit(tx, { operation: 'badge.locked', actorUserId: null, targetUserId: ref.id });
       return invalid;
     }
     const expiresAt = typeof data.initialPasswordExpiresAt === 'number' ? data.initialPasswordExpiresAt : null;

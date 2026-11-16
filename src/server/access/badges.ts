@@ -3,6 +3,8 @@ import crypto from 'node:crypto';
 import { adminDb } from '@/lib/firebase-admin';
 import { PRODUCTION_ROLE } from '@/lib/permissions';
 import { DEFAULT_INITIAL_PASSWORD, hashPassword } from './passwords';
+import { recordAccessAudit } from './audit';
+import { AccessError } from './errors';
 import { storedUserFromDoc, type StoredUser } from './users';
 
 /**
@@ -62,15 +64,20 @@ export type BadgeAccounts = {
   /**
    * Cria a conta do crachá (papel Produção) com um PIN de primeiro acesso. Se já existe conta para o
    * crachá (de um teste ou de um acesso anterior), ela é reaproveitada do zero: senha, papel, bloqueio e
-   * sessões abertas voltam ao primeiro acesso, e `adopted` avisa o administrador.
+   * sessões abertas voltam ao primeiro acesso, e `adopted` avisa o administrador. Conta de administrador
+   * nunca é reaproveitada: isso rebaixaria um administrador sem aviso.
    */
-  create(name: string, badge: string): Promise<{ userId: string; pin: string; adopted: boolean }>;
-  /** Volta a conta para o primeiro acesso com um PIN novo, troca obrigatória e sessões abertas encerradas. */
-  reset(userId: string): Promise<{ pin: string }>;
+  create(name: string, badge: string, actorUserId: string): Promise<{ userId: string; pin: string; adopted: boolean }>;
+  /** Volta a conta para o primeiro acesso com um PIN novo e a reativa; as sessões abertas são encerradas. */
+  reset(userId: string, actorUserId: string): Promise<{ pin: string }>;
+  /** Desativa a conta de crachá e encerra as sessões. Devolve false quando não havia o que desativar. */
+  deactivate(userId: string, actorUserId: string): Promise<boolean>;
 };
 
+const versionOf = (data: FirebaseFirestore.DocumentData) => (Number.isSafeInteger(data.authVersion) && data.authVersion >= 0 ? data.authVersion : 0);
+
 export const firestoreBadgeAccounts: BadgeAccounts = {
-  async create(name, badge) {
+  async create(name, badge, actorUserId) {
     const ref = adminDb.collection('users').doc(badgeUserId(badge));
     const pin = generateBadgePin();
     const adopted = await adminDb.runTransaction(async tx => {
@@ -78,26 +85,41 @@ export const firestoreBadgeAccounts: BadgeAccounts = {
       const now = Date.now();
       if (current.exists) {
         const data = current.data()!;
-        if (data.badge !== badge) throw new Error('Já existe outra conta com este código de crachá.');
-        const authVersion = Number.isSafeInteger(data.authVersion) && data.authVersion >= 0 ? data.authVersion : 0;
-        tx.update(ref, { name, role: PRODUCTION_ROLE, active: true, ...firstAccess(pin, authVersion + 1, now), updatedAt: new Date(now).toISOString() });
+        if (data.badge !== badge) throw new AccessError('Já existe outra conta com este código de crachá.');
+        if (data.role === 'Administrador') {
+          throw new AccessError('O login deste crachá é de um administrador. Troque o papel em Configurações antes de criar o acesso.');
+        }
+        tx.update(ref, { name, role: PRODUCTION_ROLE, active: true, ...firstAccess(pin, versionOf(data) + 1, now), updatedAt: new Date(now).toISOString() });
+        recordAccessAudit(tx, { operation: 'badge.adopt', actorUserId, targetUserId: ref.id });
         return true;
       }
       tx.create(ref, { name, badge, role: PRODUCTION_ROLE, active: true, ...firstAccess(pin, 0, now), createdAt: new Date(now).toISOString() });
+      recordAccessAudit(tx, { operation: 'badge.create', actorUserId, targetUserId: ref.id });
       return false;
     });
     return { userId: ref.id, pin, adopted };
   },
-  async reset(userId) {
+  async reset(userId, actorUserId) {
     const ref = adminDb.collection('users').doc(userId);
     const pin = generateBadgePin();
     await adminDb.runTransaction(async tx => {
       const current = await tx.get(ref);
       const data = current.data();
-      if (!current.exists || typeof data?.badge !== 'string' || !data.badge) throw new Error('Este funcionário não entra pelo crachá.');
-      const authVersion = Number.isSafeInteger(data.authVersion) && data.authVersion >= 0 ? data.authVersion : 0;
-      tx.update(ref, { ...firstAccess(pin, authVersion + 1, Date.now()), updatedAt: new Date().toISOString() });
+      if (!current.exists || typeof data?.badge !== 'string' || !data.badge) throw new AccessError('Este funcionário não entra pelo crachá.');
+      tx.update(ref, { ...firstAccess(pin, versionOf(data) + 1, Date.now()), active: true, updatedAt: new Date().toISOString() });
+      recordAccessAudit(tx, { operation: 'badge.reset', actorUserId, targetUserId: userId });
     });
     return { pin };
+  },
+  async deactivate(userId, actorUserId) {
+    const ref = adminDb.collection('users').doc(userId);
+    return adminDb.runTransaction(async tx => {
+      const current = await tx.get(ref);
+      const data = current.data();
+      if (!current.exists || typeof data?.badge !== 'string' || !data.badge || data.active === false) return false;
+      tx.update(ref, { active: false, authVersion: versionOf(data) + 1, updatedAt: new Date().toISOString() });
+      recordAccessAudit(tx, { operation: 'badge.deactivate', actorUserId, targetUserId: userId });
+      return true;
+    });
   },
 };

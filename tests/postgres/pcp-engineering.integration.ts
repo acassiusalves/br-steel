@@ -647,3 +647,19 @@ test('crachá só no formato que o login e a bipagem leem: maiúsculas, sem espa
   await assert.rejects(insert('012'), (e: { code?: string }) => e.code === '23505');
   await pool.query(`delete from brsteel_pcp.workers where name = 'Teste crachá'`);
 });
+
+test('vínculo do login: só grava em funcionário sem login e com o mesmo crachá; formulário sem login não desfaz o vínculo', async () => {
+  const input = { name: 'Vínculo', badge: 'VINC-1', kind: 'Teste', active: true, userId: null, operationIds: [] };
+  const id = (await repo.saveWorker(null, input, actor)).data.id;
+  await assert.rejects(repo.linkWorkerUser(id, 'cracha-vinc-2', 'VINC-2', actor), /mudou/);
+  await repo.linkWorkerUser(id, 'cracha-vinc-1', 'VINC-1', actor);
+  await assert.rejects(repo.linkWorkerUser(id, 'cracha-vinc-1', 'VINC-1', actor), /mudou/);
+  const { userId: _omit, ...withoutLogin } = { ...input, kind: 'Supervisor' };
+  void _omit;
+  await repo.saveWorker(id, withoutLogin, actor);
+  const row = (await pool.query('select user_id, kind from brsteel_pcp.workers where id = $1', [id])).rows[0];
+  assert.deepEqual(row, { user_id: 'cracha-vinc-1', kind: 'Supervisor' });
+  await repo.saveWorker(id, { ...withoutLogin, userId: null }, actor);
+  assert.equal((await pool.query('select user_id from brsteel_pcp.workers where id = $1', [id])).rows[0].user_id, null);
+  assert.equal((await pool.query("select count(*)::int n from brsteel_write.audit where operation = 'pcp.linkWorkerUser' and target_id = $1", [id])).rows[0].n, 1);
+});

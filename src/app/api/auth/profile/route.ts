@@ -7,6 +7,7 @@ import { getSessionFromRequest, hashPassword, sessionCookieHeader, createSession
 import { needsPasswordChange } from '@/server/access/passwords';
 import { isKnownRole, publicUser, storedUserFromDoc } from '@/server/access/users';
 import { rejectCrossOrigin } from '@/server/access/request';
+import { recordAccessAudit } from '@/server/access/audit';
 import { BADGE_INITIAL_PASSWORD, BADGE_MIN_PASSWORD, isBadgeUser } from '@/server/access/badges';
 
 export const dynamic = 'force-dynamic';
@@ -63,6 +64,7 @@ export async function PATCH(request: Request) {
       } : {}),
     };
     transaction.update(ref, credential ? { ...update, initialPasswordExpiresAt: FieldValue.delete() } : update);
+    if (credential) recordAccessAudit(transaction, { operation: 'password.change', actorUserId: stored.id, targetUserId: stored.id });
     return { user: { ...stored, ...update } };
   });
   if ('error' in result) return NextResponse.json({ ok: false, error: result.error }, { status: result.status });
