@@ -1,13 +1,13 @@
 import 'server-only';
 import crypto from 'node:crypto';
 
-// Compatibility only for existing accounts that have not completed first access.
+// A senha padrão antiga não abre mais nenhuma conta: fica só para ser recusada como senha nova.
 export const DEFAULT_INITIAL_PASSWORD = '123456';
 export function hashPassword(password: string, salt = crypto.randomBytes(16).toString('base64url')) {
   return { hash: crypto.scryptSync(password, salt, 64).toString('base64url'), salt };
 }
 export function verifyPassword(password: string, hash?: string | null, salt?: string | null) {
-  if (!hash && !salt) return password === DEFAULT_INITIAL_PASSWORD;
+  // Conta sem senha gravada não entra com nada: o administrador gera uma senha temporária ou um PIN novo.
   if (!hash || !salt || password.length > 1024) return false;
   try {
     const stored = Buffer.from(hash, 'base64url');

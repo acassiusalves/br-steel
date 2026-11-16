@@ -2,9 +2,10 @@
 
 import * as React from 'react';
 import Image from 'next/image';
-import { ArrowRight, ChevronDown, ChevronUp, Flame, IdCard, Loader2, Pause, Play, Search, Square, Trash2 } from 'lucide-react';
+import { ArrowRight, ChevronDown, ChevronUp, Flame, IdCard, Loader2, LogOut, Pause, Play, Search, Square, Trash2 } from 'lucide-react';
 import DashboardLayout from '@/components/dashboard-layout';
 import { useToast } from '@/hooks/use-toast';
+import { useAuth } from '@/contexts/AuthContext';
 import { subscribeOperation } from '@/lib/operation-client';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -154,8 +155,37 @@ function CardView({ card, board, busy, act, openFinish, openMove, openClose }: {
   );
 }
 
+/** Terminal compartilhado da operação: sem ação neste tempo, a sessão do líder é encerrada. */
+export const BOARD_IDLE_LOGOUT_MS = 30 * 60_000;
+
+/**
+ * No terminal da fábrica, vários líderes usam a mesma tela. Encerrar a sessão recarrega a página na aba Crachá,
+ * para o próximo líder entrar com o próprio crachá e as ações saírem no nome certo.
+ */
+function useLeaderSession(enabled: boolean) {
+  const { logout } = useAuth();
+  const switchLeader = React.useCallback(async () => {
+    await logout();
+    window.location.assign('/login?modo=cracha');
+  }, [logout]);
+  React.useEffect(() => {
+    if (!enabled) return;
+    let timer = window.setTimeout(() => void switchLeader(), BOARD_IDLE_LOGOUT_MS);
+    // A atualização automática do quadro não conta: só toque, clique ou tecla de quem está no terminal.
+    const activity = () => { window.clearTimeout(timer); timer = window.setTimeout(() => void switchLeader(), BOARD_IDLE_LOGOUT_MS); };
+    const events = ['pointerdown', 'keydown', 'touchstart'] as const;
+    events.forEach(name => window.addEventListener(name, activity, { passive: true }));
+    return () => { window.clearTimeout(timer); events.forEach(name => window.removeEventListener(name, activity)); };
+  }, [enabled, switchLeader]);
+  return switchLeader;
+}
+
 export default function BoardClient() {
   const { toast } = useToast();
+  const { user } = useAuth();
+  // Quem entra pelo crachá opera o terminal compartilhado: troca de líder e saída por inatividade.
+  const leaderTerminal = Boolean(user?.badge);
+  const switchLeader = useLeaderSession(leaderTerminal);
   const [board, setBoard] = React.useState<Board | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState<string | null>(null);
@@ -212,8 +242,15 @@ export default function BoardClient() {
               {' '}O card só passa de fase quando a OS terminou, e quem passa é o líder da fase. Nas colunas de operação, o card entra com o crachá de quem executa.
             </p>
           </div>
-          <div className="relative w-64"><Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
-            <Input className="pl-8" placeholder="Buscar OP, SKU, produto ou pedido" value={search} onChange={e => setSearch(e.target.value)} /></div>
+          <div className="flex items-center gap-2">
+            <div className="relative w-64"><Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
+              <Input className="pl-8" placeholder="Buscar OP, SKU, produto ou pedido" value={search} onChange={e => setSearch(e.target.value)} /></div>
+            {leaderTerminal && (
+              <Button variant="outline" onClick={() => void switchLeader()} title="Encerra a sua sessão neste terminal. Sem uso por 30 minutos, ela também é encerrada.">
+                <LogOut className="mr-1 h-4 w-4" />Trocar líder
+              </Button>
+            )}
+          </div>
         </div>
         <div className="flex gap-3 overflow-x-auto pb-3">
           {board.columns.map(column => {

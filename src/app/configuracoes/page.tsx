@@ -6,7 +6,7 @@ import { Suspense } from 'react';
 import DashboardLayout from '@/components/dashboard-layout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { PlusCircle, Trash2, Loader2, Lock, Users, Clock } from 'lucide-react';
+import { PlusCircle, Trash2, Loader2, Lock, Users, Clock, KeyRound } from 'lucide-react';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogTrigger } from '@/components/ui/dialog';
@@ -15,7 +15,8 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useToast } from '@/hooks/use-toast';
-import { getUsers, addUser, deleteUser, updateUserRole, setUserActive } from '@/services/user-service';
+import { getUsers, addUser, deleteUser, updateUserRole, setUserActive, resetUserPassword } from '@/services/user-service';
+import type { AdminActionResult } from '@/server/access/admin-action';
 import { loadAppSettings, saveAppSettings } from '@/services/app-settings-service';
 import type { User } from '@/types/user';
 import { pagePermissions as defaultPagePermissions, availableRoles, FIXED_ACCESS_ROLES } from "@/lib/permissions";
@@ -142,6 +143,12 @@ function UsersPageContent() {
         setHasUnsavedChanges(true);
     };
 
+    /** As ações devolvem o erro como dado: em produção, a mensagem de um erro lançado não chega ao navegador. */
+    const unwrap = <T,>(result: AdminActionResult<T>): T => {
+        if (!result.ok) throw new Error(result.error);
+        return result.data;
+    };
+
     const handleSaveAll = async () => {
         if (!isAdmin) {
             toast({ variant: 'destructive', title: 'Sem Permissão', description: 'Apenas administradores podem salvar alterações.' });
@@ -150,11 +157,11 @@ function UsersPageContent() {
 
         setIsSaving(true);
         try {
-            await saveAppSettings({ permissions, inactivePages });
+            unwrap(await saveAppSettings({ permissions, inactivePages }));
             for (const user of users) {
                 const original = originalUsers.current.find(item => item.id === user.id);
-                if (original?.role !== user.role) await updateUserRole(user.id, user.role);
-                if ((original?.active !== false) !== (user.active !== false)) await setUserActive(user.id, user.active !== false);
+                if (original?.role !== user.role) unwrap(await updateUserRole(user.id, user.role));
+                if ((original?.active !== false) !== (user.active !== false)) unwrap(await setUserActive(user.id, user.active !== false));
             }
             await fetchInitialData();
             await refreshPermissions();
@@ -188,7 +195,7 @@ function UsersPageContent() {
         };
 
         try {
-            const created = await addUser(userData);
+            const created = unwrap(await addUser(userData));
             setNewCredential({ email: userData.email, password: created.temporaryPassword });
             toast({
                 title: 'Usuário Adicionado!',
@@ -210,7 +217,7 @@ function UsersPageContent() {
     const handleDeleteUser = async () => {
         if (!deletingUser) return;
         try {
-            await deleteUser(deletingUser.id);
+            unwrap(await deleteUser(deletingUser.id));
             toast({
                 title: 'Usuário Removido',
                 description: `O usuário "${deletingUser.name}" foi removido com sucesso.`
@@ -223,6 +230,17 @@ function UsersPageContent() {
                 title: 'Erro ao Remover',
                 description: error.message,
             });
+        }
+    };
+
+    // Conta de e-mail: nova senha temporária, mostrada uma vez. Conta antiga sem senha gravada só entra assim.
+    const handleResetPassword = async (user: User) => {
+        if (!window.confirm(`Gerar uma senha temporária nova para ${user.name}? As sessões abertas dele serão encerradas.`)) return;
+        try {
+            const { temporaryPassword } = unwrap(await resetUserPassword(user.id));
+            setNewCredential({ email: user.email, password: temporaryPassword });
+        } catch (error) {
+            toast({ variant: 'destructive', title: 'Erro ao gerar a senha', description: error instanceof Error ? error.message : undefined });
         }
     };
 
@@ -421,7 +439,7 @@ function UsersPageContent() {
                                                         </SelectTrigger>
                                                         <SelectContent>
                                                             {availableRoles.map(role => (
-                                                                <SelectItem key={role.key} value={role.key} disabled={role.key === 'Administrador' && currentUser?.role !== 'Administrador'}>
+                                                                <SelectItem key={role.key} value={role.key} disabled={role.key === 'Administrador' && (currentUser?.role !== 'Administrador' || !!user.badge)}>
                                                                     {role.name}
                                                                 </SelectItem>
                                                             ))}
@@ -440,11 +458,25 @@ function UsersPageContent() {
                                                     />
                                                 </TableCell>
                                                 <TableCell className="text-right">
+                                                    {!user.badge && (
+                                                        <Button
+                                                          variant="ghost"
+                                                          size="icon"
+                                                          aria-label={`Gerar senha temporária para ${user.name}`}
+                                                          title="Gerar senha temporária"
+                                                          onClick={() => handleResetPassword(user)}
+                                                          disabled={!isAdmin || isSaving || isCurrentUserFromState}
+                                                        >
+                                                            <KeyRound className="h-4 w-4" />
+                                                        </Button>
+                                                    )}
                                                     <Button
                                                       variant="ghost"
                                                       size="icon"
+                                                      aria-label={`Remover ${user.name}`}
+                                                      title={user.badge ? 'Conta de crachá não é removida: desative o acesso' : 'Remover'}
                                                       onClick={() => setDeletingUser(user)}
-                                                      disabled={!isAdmin || isSaving || isCurrentUserFromState}
+                                                      disabled={!isAdmin || isSaving || isCurrentUserFromState || !!user.badge}
                                                     >
                                                         <Trash2 className="h-4 w-4 text-destructive" />
                                                     </Button>

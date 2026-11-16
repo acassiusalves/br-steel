@@ -41,7 +41,13 @@ export type TeamInput = {
   name: string; status: WorkTeam['status']; shift: WorkTeam['shift']; leaderId: string | null; operationIds: string[]; members: TeamMemberRow[];
 };
 export type WorkerInput = {
-  name: string; badge: string; kind: string; active: boolean; userId: string | null; operationIds: string[];
+  name: string; badge: string; kind: string; active: boolean;
+  /**
+   * Login vinculado. Ausente mantém o vínculo atual: um formulário aberto antes de "Criar acesso" não desfaz o
+   * vínculo criado nesse meio-tempo. `null` desvincula de propósito.
+   */
+  userId?: string | null;
+  operationIds: string[];
 };
 
 
@@ -68,6 +74,11 @@ export interface EngineeringRepository {
   saveOperation(id: string | null, input: OperationInput, actor: WriteActor): Promise<OperationResult<{ id: string }>>;
   saveTeam(id: string | null, input: TeamInput, actor: WriteActor): Promise<OperationResult<{ id: string }>>;
   saveWorker(id: string | null, input: WorkerInput, actor: WriteActor): Promise<OperationResult<{ id: string }>>;
+  /**
+   * Vincula o login só se o funcionário ainda está sem login e com o mesmo crachá; recusa com `LINK_CONFLICT`
+   * quando algo mudou entre a leitura e a gravação. Não toca nos outros campos.
+   */
+  linkWorkerUser(workerId: string, userId: string, badge: string, actor: WriteActor): Promise<OperationResult<{ id: string }>>;
   /** Substitui o expediente inteiro. */
   replaceWorkPeriods(periods: WorkPeriodRow[], actor: WriteActor): Promise<OperationResult<null>>;
   saveHoliday(input: Holiday, actor: WriteActor): Promise<OperationResult<null>>;

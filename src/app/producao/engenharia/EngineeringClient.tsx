@@ -153,9 +153,14 @@ export default function EngineeringClient() {
       case 'team':
         return run(() => svc.saveTeam(id, { name: String(f.name), status: f.status as 'aberto', shift: f.shift as 'integral',
           leaderId: orNull(f.leaderId) as string | null, operationIds: f.operationIds as string[], members: f.members as TeamMemberRow[] }));
-      case 'worker':
+      case 'worker': {
+        // O login só vai junto quando foi trocado neste formulário: um formulário aberto antes de "Criar acesso"
+        // não desfaz o vínculo criado nesse meio-tempo.
+        const userId = orNull(f.userId) as string | null;
+        const original = (editing.value as Worker | null)?.userId ?? null;
         return run(() => svc.saveWorker(id, { name: String(f.name), badge: String(f.badge), kind: String(f.kind), active: Boolean(f.active),
-          userId: orNull(f.userId) as string | null, operationIds: f.operationIds as string[] }));
+          ...(id && userId === original ? {} : { userId }), operationIds: f.operationIds as string[] }));
+      }
     }
   };
 

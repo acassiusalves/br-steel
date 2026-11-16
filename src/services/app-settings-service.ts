@@ -6,6 +6,7 @@ import { pagePermissions } from '@/lib/permissions';
 import { requireActionPage, requireAdministrator } from '@/server/access/current-user';
 import { loadAppAccessSettings } from '@/lib/server-auth';
 import type { AccessSettings } from '@/server/access/types';
+import { adminAction, type AdminActionResult } from '@/server/access/admin-action';
 
 const pageSchema = z.string().refine(p => Object.hasOwn(pagePermissions, p), 'Página inválida');
 const settingsSchema = z.object({
@@ -16,10 +17,13 @@ export async function loadAppSettings(): Promise<AccessSettings> {
   await requireAdministrator();
   return loadAppAccessSettings();
 }
-export async function saveAppSettings(settings: Partial<AccessSettings>): Promise<void> {
-  await requireAdministrator();
-  const validated = settingsSchema.parse(settings);
-  await adminDb.collection('appSettings').doc('general').set(validated, { merge: true });
+export async function saveAppSettings(settings: Partial<AccessSettings>): Promise<AdminActionResult> {
+  return adminAction(async () => {
+    await requireAdministrator();
+    const validated = settingsSchema.parse(settings);
+    await adminDb.collection('appSettings').doc('general').set(validated, { merge: true });
+    return null;
+  });
 }
 /** Exposes only the pricing field needed by the legacy catalog reader. */
 export async function loadPricingSettings(): Promise<{ gordura_variable: number }> {

@@ -218,13 +218,15 @@ export function createPostgresEngineeringRepository(pool: Pool): EngineeringRepo
                union all select 1 from brsteel_pcp.work_team_members where leader_id = $1 limit 1`, [id]);
             if (leads.rowCount) refuse('Troque este funcionário como líder ou superior antes de inativá-lo.');
           }
+          // Sem `userId` na entrada, o vínculo atual fica como está.
           await client.query(
-            `update brsteel_pcp.workers set name = $2, badge = $3, kind = $4, active = $5, user_id = $6, updated_at = now() where id = $1`,
-            [workerId, input.name, input.badge, input.kind, input.active, input.userId]);
+            `update brsteel_pcp.workers set name = $2, badge = $3, kind = $4, active = $5,
+               user_id = case when $7::boolean then $6 else user_id end, updated_at = now() where id = $1`,
+            [workerId, input.name, input.badge, input.kind, input.active, input.userId ?? null, input.userId !== undefined]);
         } else {
           await client.query(
             'insert into brsteel_pcp.workers (id, name, badge, kind, active, user_id) values ($1, $2, $3, $4, $5, $6)',
-            [workerId, input.name, input.badge, input.kind, input.active, input.userId]);
+            [workerId, input.name, input.badge, input.kind, input.active, input.userId ?? null]);
         }
         await client.query('delete from brsteel_pcp.worker_operations where worker_id = $1', [workerId]);
         if (input.operationIds.length) {
@@ -233,6 +235,19 @@ export function createPostgresEngineeringRepository(pool: Pool): EngineeringRepo
             [workerId, input.operationIds]);
         }
         await audit(client, id ? 'pcp.updateWorker' : 'pcp.createWorker', actor, 'pcp.workers', workerId);
+        return result({ id: workerId }, 'postgres');
+      });
+    },
+
+    async linkWorkerUser(workerId: string, userId: string, badge: string, actor: WriteActor) {
+      return write(pool, async client => {
+        const linked = await client.query(
+          `update brsteel_pcp.workers set user_id = $2, updated_at = now()
+           where id = $1 and user_id is null and upper(badge) = $3 returning id`, [workerId, userId, badge]);
+        if (!linked.rowCount) {
+          throw new OperationError('LINK_CONFLICT', 'O funcionário mudou enquanto o acesso era criado (outro login vinculado ou crachá trocado). Recarregue a página e confira.', 409);
+        }
+        await audit(client, 'pcp.linkWorkerUser', actor, 'pcp.workers', workerId);
         return result({ id: workerId }, 'postgres');
       });
     },

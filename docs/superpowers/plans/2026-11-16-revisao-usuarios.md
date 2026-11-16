@@ -6,7 +6,16 @@ Revisão de 16/11/2026, feita sobre o commit `a3b118f` (`main`). Registro histó
 
 - **Fase 1** entrou pelo PR #61 (`claude/acesso-cracha-seguro`), seguindo as recomendações de P-1, P-2 e P-5: PIN inicial individual válido por 72 h, papel `Produção`, reset ao reaproveitar a conta do mesmo crachá, crachá gravado normalizado (migration `20261118120000_pcp_worker_badge_normalized.sql`), troca de crachá bloqueada com login e limite de falhas de login por IP.
 - **Complementos** (PR seguinte, branch `claude/revisao-usuarios-complementos`): bipagem com a mesma normalização do cadastro, recusando código repetido; mensagem própria quando a restrição do formato recusa o crachá; TTL dos contadores `loginRateLimits`; lista de contas com crachá só para o administrador e diretório do Kanban antigo sem crachá (U-08); login removido visível e corrigível na Engenharia (parte de U-10); importação do iApp sem trocar o crachá de quem tem login (parte de U-17).
-- P-4 (zeros à esquerda) segue aberta: os zeros continuam fazendo parte do código até o teste do leitor na Fase 0. A Fase 2 continua pendente.
+- **Fase 2** (branch `claude/revisao-usuarios-fase2`), com as recomendações de P-3 e P-5:
+  - vínculo do login gravado de forma condicional (`linkWorkerUser`), com auditoria `pcp.linkWorkerUser`; se falhar, a conta recém-criada é desativada (U-09). O formulário do funcionário só envia o login quando ele foi trocado, e o servidor mantém o vínculo quando o campo não vem;
+  - inativar ou desvincular o funcionário desativa o login pelo crachá; criar acesso e resetar exigem funcionário ativo, e o reset reativa a conta (U-10);
+  - conta de crachá não é apagada nem vira Administrador, e "Criar acesso" não reaproveita conta de administrador (U-11, U-14);
+  - auditoria das mudanças de identidade na coleção `accessAudit`, só com ids, operação e instante (U-13);
+  - actions de `/configuracoes` devolvem o erro como dado, porque o Next.js esconde em produção a mensagem de erro lançado (U-12, confirmado no código do Next);
+  - administrador não altera, desativa nem remove o próprio acesso (U-24);
+  - conta sem senha gravada não entra com nada, nem por e-mail; o administrador gera uma senha temporária nova em `/configuracoes` (U-06). O contador de falhas por conta de e-mail ficou de fora: o limite por IP já cobre a tentativa em massa, e um bloqueio por conta deixaria qualquer pessoa travar o login de um administrador;
+  - no quadro de OPs, contas de crachá têm o botão "Trocar líder" e saem sozinhas após 30 minutos sem toque, clique ou tecla; a tela de login abre na aba Crachá (U-15).
+- P-4 (zeros à esquerda) segue aberta: os zeros continuam fazendo parte do código até o teste do leitor na Fase 0.
 
 ## Objetivo e método
 

@@ -5,6 +5,7 @@ import type { EngineeringRepository } from '@/server/persistence/pcp-engineering
 import { engineeringRepository } from '@/server/persistence/pcp-engineering';
 import type { WriteActor } from '@/server/persistence/write-audit';
 import { badgeUserId, firestoreBadgeAccounts, normalizeBadge, type BadgeAccounts } from '@/server/access/badges';
+import { AccessError } from '@/server/access/errors';
 import { dateSchema, requireOperation, OperationError } from './common';
 
 export const ENGINEERING_PAGE = '/producao/engenharia';
@@ -38,7 +39,8 @@ const badgeSchema = z.string().max(60).transform((value, ctx) => {
 });
 const workerSchema = z.object({
   name, badge: badgeSchema, kind: z.string().trim().min(1).max(100), active: z.boolean(),
-  userId: z.string().trim().min(1).max(200).nullable(), operationIds,
+  // Ausente mantém o vínculo atual; null desvincula.
+  userId: z.string().trim().min(1).max(200).nullable().optional(), operationIds,
 }).strict();
 const periodsSchema = z.array(z.object({ weekday: z.number().int().min(0).max(6), startsAt: time, endsAt: time }).strict()).max(70);
 const holidaySchema = z.object({ day: dateSchema, name }).strict();
@@ -90,15 +92,24 @@ export function createEngineeringOperations(repository: EngineeringRepository, a
     async saveWorker(ctx: AccessContext, id: unknown, input: unknown) {
       const actor = write(ctx);
       const workerId = idInput.parse(id), data = workerSchema.parse(input);
-      if (workerId) {
-        // O login do crachá é a conta cracha-<código>: trocar o código deixaria o login preso ao antigo.
-        const current = await findWorker(workerId);
-        const oldBadge = normalizeBadge(current.badge);
-        if (current.userId && oldBadge && current.userId === badgeUserId(oldBadge) && data.badge !== oldBadge) {
-          throw new OperationError('BADGE_LOCKED', `Este funcionário entra no sistema pelo crachá ${oldBadge}. Para trocar o código, desvincule o login, troque o crachá e crie o acesso de novo.`, 409);
+      if (!workerId) return repository.saveWorker(workerId, data, actor);
+      const current = await findWorker(workerId);
+      const oldBadge = normalizeBadge(current.badge);
+      const badgeLogin = current.userId && oldBadge && current.userId === badgeUserId(oldBadge) ? current.userId : null;
+      const unlinks = data.userId !== undefined && data.userId !== current.userId;
+      // O login do crachá é a conta cracha-<código>: trocar o código deixaria o login preso ao antigo.
+      if (badgeLogin && data.badge !== oldBadge) {
+        throw new OperationError('BADGE_LOCKED', `Este funcionário entra no sistema pelo crachá ${oldBadge}. Para trocar o código, desvincule o login, troque o crachá e crie o acesso de novo.`, 409);
+      }
+      const saved = await repository.saveWorker(workerId, data, actor);
+      // Funcionário inativado ou desvinculado não pode continuar entrando pelo crachá.
+      if (badgeLogin && (unlinks || (current.active && !data.active))) {
+        try { await accounts.deactivate(badgeLogin, ctx.actor.userId); }
+        catch {
+          throw new OperationError('LOGIN_STILL_ACTIVE', 'O funcionário foi salvo, mas o login pelo crachá continua ativo. Desative o acesso em Configurações.', 502);
         }
       }
-      return repository.saveWorker(workerId, data, actor);
+      return saved;
     },
     async replaceWorkPeriods(ctx: AccessContext, input: unknown) {
       const actor = write(ctx); return repository.replaceWorkPeriods(periodsSchema.parse(input), actor);
@@ -123,10 +134,10 @@ export function createEngineeringOperations(repository: EngineeringRepository, a
     async saveLossReason(ctx: AccessContext, id: unknown, input: unknown) {
       const actor = write(ctx); return repository.saveLossReason(idInput.parse(id), lossReasonSchema.parse(input), actor);
     },
-    /** Cria o login do funcionário pelo crachá e já o vincula, para ele agir no Kanban de OPs. */
     /**
      * Cria o login do funcionário pelo crachá e já o vincula, para ele agir no Kanban de OPs. Devolve o PIN
      * de primeiro acesso, que só aparece esta vez. Conta de crachá que já existia volta ao primeiro acesso.
+     * O vínculo é condicional: se o funcionário mudou no meio, a conta criada é desativada e nada fica pela metade.
      */
     async createBadgeAccess(ctx: AccessContext, id: unknown) {
       const actor = write(ctx);
@@ -134,28 +145,37 @@ export function createEngineeringOperations(repository: EngineeringRepository, a
       const workers = (await repository.read()).data.workers;
       const worker = workers.find(w => w.id === workerId);
       if (!worker) throw new OperationError('NOT_FOUND', 'Funcionário não encontrado.', 404);
+      if (!worker.active) throw new OperationError('WORKER_INACTIVE', 'Reative o funcionário antes de criar o acesso.', 409);
       if (worker.userId) throw new OperationError('ALREADY_LINKED', 'Este funcionário já tem um login vinculado.', 409);
       const badge = normalizeBadge(worker.badge);
       if (!badge) throw new OperationError('NO_BADGE', 'Cadastre um código de crachá válido (letras, números ou hífen) antes de criar o acesso.');
       const other = workers.find(w => w.id !== workerId && w.userId === badgeUserId(badge));
       if (other) throw new OperationError('LINKED_ELSEWHERE', `O login deste crachá já está vinculado a ${other.name}. Desvincule antes de criar o acesso.`, 409);
       let created: { userId: string; pin: string; adopted: boolean };
-      try { created = await accounts.create(worker.name, badge); }
-      catch (error) { throw new OperationError('BADGE_TAKEN', error instanceof Error ? error.message : 'Não foi possível criar o acesso.', 409); }
-      const { id: _id, ...fields } = worker;
-      void _id;
-      await repository.saveWorker(workerId, { ...fields, badge, userId: created.userId }, actor);
+      try { created = await accounts.create(worker.name, badge, ctx.actor.userId); }
+      catch (error) {
+        throw new OperationError('BADGE_TAKEN', error instanceof AccessError ? error.message : 'Não foi possível criar o acesso.', 409);
+      }
+      try { await repository.linkWorkerUser(workerId, created.userId, badge, actor); }
+      catch (error) {
+        // O PIN nunca chegou ao administrador: a conta não pode ficar ativa sem vínculo.
+        await accounts.deactivate(created.userId, ctx.actor.userId).catch(() => undefined);
+        throw error;
+      }
       return { data: { userId: created.userId, badge, pin: created.pin, adopted: created.adopted },
         source: 'postgres' as const, asOf: new Date().toISOString(), warnings: [], nextCursor: null };
     },
-    /** Volta o login do crachá para o primeiro acesso com um PIN novo, que só aparece esta vez. */
+    /** Volta o login do crachá para o primeiro acesso com um PIN novo, que só aparece esta vez, e o reativa. */
     async resetBadgePassword(ctx: AccessContext, id: unknown) {
       write(ctx);
       const worker = await findWorker(uuid.parse(id));
       if (!worker.userId) throw new OperationError('NOT_LINKED', 'Este funcionário não tem login.', 409);
+      if (!worker.active) throw new OperationError('WORKER_INACTIVE', 'Reative o funcionário antes de resetar a senha.', 409);
       let pin: string;
-      try { ({ pin } = await accounts.reset(worker.userId)); }
-      catch (error) { throw new OperationError('NOT_BADGE', error instanceof Error ? error.message : 'Não foi possível resetar a senha.', 409); }
+      try { ({ pin } = await accounts.reset(worker.userId, ctx.actor.userId)); }
+      catch (error) {
+        throw new OperationError('NOT_BADGE', error instanceof AccessError ? error.message : 'Não foi possível resetar a senha.', 409);
+      }
       return { data: { pin }, source: 'postgres' as const, asOf: new Date().toISOString(), warnings: [], nextCursor: null };
     },
   };
