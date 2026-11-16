@@ -12,9 +12,16 @@ import { adminDb } from '@/lib/firebase-admin';
 export const LOGIN_FAILURES_PER_WINDOW = 20;
 export const LOGIN_WINDOW_MS = 15 * 60_000;
 
+/**
+ * IP de quem chama, pelo valor que a plataforma grava: na Vercel, `x-vercel-forwarded-for` e `x-real-ip`.
+ * Fora dela, o último salto de `x-forwarded-for` (o que o proxy da frente acrescentou); a primeira
+ * entrada vem do próprio cliente e não serve para limite.
+ */
 export function clientIp(request: Request): string {
-  const forwarded = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim();
-  return forwarded || request.headers.get('x-real-ip')?.trim() || 'desconhecido';
+  const platform = request.headers.get('x-vercel-forwarded-for')?.split(',')[0]?.trim() || request.headers.get('x-real-ip')?.trim();
+  if (platform) return platform;
+  const hops = request.headers.get('x-forwarded-for')?.split(',').map(part => part.trim()).filter(Boolean) ?? [];
+  return hops.at(-1) || 'desconhecido';
 }
 
 const counterRef = (ip: string, window: number) =>

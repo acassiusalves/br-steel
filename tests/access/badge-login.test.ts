@@ -139,3 +139,14 @@ describe('acesso pelo crachá sob tentativas simultâneas', () => {
     expect((await login(request('login', 'POST', { badge: '26557', password: pin }))).status).toBe(429);
   });
 });
+
+describe('IP do limite de login', () => {
+  it('usa o valor da plataforma e, sem ele, o último salto: a primeira entrada do cliente não conta', async () => {
+    const { clientIp } = await import('@/server/access/login-rate-limit');
+    const req = (headers: Record<string, string>) => new Request('http://localhost/api/auth/login', { headers });
+    expect(clientIp(req({ 'x-vercel-forwarded-for': '198.51.100.9', 'x-forwarded-for': '1.2.3.4, 198.51.100.9' }))).toBe('198.51.100.9');
+    expect(clientIp(req({ 'x-real-ip': '198.51.100.10', 'x-forwarded-for': '1.2.3.4' }))).toBe('198.51.100.10');
+    expect(clientIp(req({ 'x-forwarded-for': '1.2.3.4, 198.51.100.11' }))).toBe('198.51.100.11');
+    expect(clientIp(req({}))).toBe('desconhecido');
+  });
+});
