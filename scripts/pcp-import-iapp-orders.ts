@@ -112,9 +112,9 @@ begin
     v_phase := (select p.id from ${s}.production_phases p join ${s}.production_lines l on l.id = p.line_id
       where l.active and lower(p.name) = lower(op->>'phase') order by p.position limit 1);
     if v_order is null then
-      insert into ${s}.production_orders (iapp_id, iapp_number, kind, sku, description, sheet_id, quantity, status, phase_id, priority,
+      insert into ${s}.production_orders (origin, iapp_id, iapp_number, kind, sku, description, sheet_id, quantity, status, phase_id, priority,
           created_by, created_at, planned_start, planned_end)
-        values ((op->>'iappId')::bigint, op->>'number', op->>'kind', op->>'sku', op->>'description',
+        values ('iapp', (op->>'iappId')::bigint, op->>'number', op->>'kind', op->>'sku', op->>'description',
           (select sh.id from ${s}.product_sheets sh where sh.sku = op->>'sku'
             order by (select count(*) from ${s}.product_sheet_steps st where st.sheet_id = sh.id) desc, sh.code limit 1),
           (op->>'quantity')::numeric, op->>'status', case when op->>'status' = 'a_produzir' then null else v_phase end, op->>'priority',

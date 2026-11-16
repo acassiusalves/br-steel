@@ -1,8 +1,10 @@
 import type { OperationResult } from '@/types/operations';
 import type { OrderKind, OrderSuggestion } from '@/lib/pcp/op-generator';
+import type { PlanLine } from '@/lib/pcp/sales-order-plan';
+import type { SalesOrderHeader } from '@/server/integrations/bling-sales-orders';
 import type { WriteActor } from './write-audit';
 
-export type { OrderKind, OrderSuggestion };
+export type { OrderKind, OrderSuggestion, PlanLine };
 
 export type PreviewInput = { kind: OrderKind; from: string; to: string; factor: number };
 export type GenerationPreview = PreviewInput & { suggestions: OrderSuggestion[]; warnings: string[]; /** Quando o mín/máx foi copiado do Bling. */ catalogSyncedAt: string };
@@ -11,12 +13,30 @@ export type BatchItem = { sku: string; sheetId: string; quantity: number; descri
 export type BatchInput = PreviewInput & { items: BatchItem[] };
 
 export type OrderStatus = 'a_produzir' | 'produzindo' | 'concluido' | 'suspenso' | 'encerrado';
+/** Como a OP nasceu: fila de reposição, avulsa, pedido de venda do Bling ou carga do iApp. */
+export type OrderOrigin = 'fila' | 'avulsa' | 'pedido' | 'iapp';
 export type ProductionOrderRow = {
   id: string; number: number; kind: OrderKind; sku: string; description: string | null; sheetCode: string | null;
   quantity: number; status: OrderStatus; parentOrderId: string | null; batchId: string | null; createdAt: string; stepCount: number;
+  origin: OrderOrigin; urgent: boolean; salesOrderNumber: string | null;
 };
 export type BatchSummary = {
   id: string; kind: OrderKind; createdAt: string; createdBy: string; exportedAt: string | null; orderCount: number; childCount: number;
+  origin: Exclude<OrderOrigin, 'iapp'>; salesOrderNumber: string | null;
+};
+
+/** Produto que pode virar OP avulsa: tem ficha técnica com roteiro. */
+export type ProducibleProduct = { sku: string; name: string; sheetId: string; sheetCode: string; stepCount: number; partCount: number };
+export type ManualOrderInput = { kind: OrderKind; sku: string; sheetId: string; quantity: number; urgent: boolean; notes: string | null };
+export type SalesOrderPreview = {
+  /** O nome do cliente só aparece na tela; não é gravado. */
+  order: SalesOrderHeader; lines: PlanLine[]; warnings: string[];
+  /** OPs ainda não encerradas que já saíram deste pedido. */
+  existing: { number: number; sku: string; kind: OrderKind; status: OrderStatus; createdAt: string }[];
+};
+export type SalesOrderBatchInput = {
+  blingOrderId: number; urgent: boolean; confirmDuplicate: boolean;
+  items: (BatchItem & { parts: BatchItem[] })[];
 };
 export type IappExport = { batchId: string; kind: OrderKind; header: readonly string[]; rows: (string | number)[][] };
 
@@ -37,4 +57,15 @@ export interface ProductionOrderRepository {
   listOrders(batchId: string | null): Promise<OperationResult<ProductionOrderRow[]>>;
   /** Linhas da planilha de importação do iApp para o lote; registra o momento da exportação. */
   exportIapp(batchId: string, actor: WriteActor): Promise<OperationResult<IappExport>>;
+  /** Produtos com ficha técnica com roteiro, para a OP avulsa. */
+  listProducible(): Promise<OperationResult<ProducibleProduct[]>>;
+  /** OP avulsa: uma OP do produto escolhido (no corte, com as OPs das partes), fora da fila de reposição. */
+  createManualOrder(input: ManualOrderInput, actor: WriteActor): Promise<OperationResult<{ batchId: string; number: number; childCount: number }>>;
+  /** Lê o pedido no Bling (só GET) e desdobra em OPs pela ficha técnica. */
+  previewSalesOrder(number: string): Promise<OperationResult<SalesOrderPreview>>;
+  /**
+   * Grava as OPs do pedido: produto na produção semanal (dobra), partes no corte como OPs filhas. Relê o
+   * pedido no Bling; recusa item ou parte fora do pedido e pede confirmação se o pedido já gerou OP.
+   */
+  createFromSalesOrder(input: SalesOrderBatchInput, actor: WriteActor): Promise<OperationResult<{ batchId: string; orderCount: number; childCount: number; salesOrderNumber: string }>>;
 }

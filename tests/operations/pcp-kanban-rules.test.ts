@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  closeError, columnOf, currentQuantity, finishError, moveError, nextColumn, pauseError, startError, type KanbanOrder, type KanbanStep, type KanbanTeam,
+  closeError, columnOf, currentQuantity, finishError, moveError, nextColumn, pauseError, priorityError, queueOrder, startError, type KanbanOrder, type KanbanStep, type KanbanTeam,
 } from '@/lib/pcp/kanban-rules';
 
 // Roteiro do ralo: Check Corte → Dobrar → Check Dobra, cada operação na sua fase.
@@ -105,5 +105,19 @@ describe('excluir OP', () => {
     expect(closeError(order(), lider)).toMatch(/administrador/);
     expect(closeError(order({ status: 'produzindo', phaseId: 'F-check-corte' }), admin)).toMatch(/A produzir/);
     expect(closeError(order({}, [step('s1', 'F-check-corte', 0, 'em_execucao', 'lider'), step('s2', 'F-dobra', 1)]), admin)).toMatch(/iniciada/);
+  });
+});
+
+describe('urgência', () => {
+  it('só o administrador muda, e só em OP que ainda está no quadro', () => {
+    expect(priorityError(order(), admin)).toBeNull();
+    expect(priorityError(order({ status: 'produzindo', phaseId: 'F-dobra' }), admin)).toBeNull();
+    expect(priorityError(order(), lider)).toMatch(/administrador/);
+    expect(priorityError(order({ status: 'concluido' }), admin)).toMatch(/quadro/);
+    expect(priorityError(order({ status: 'encerrado' }), admin)).toMatch(/quadro/);
+  });
+  it('urgente mais nova passa na frente da normal mais antiga; no empate vale o número', () => {
+    const cards = [{ number: 10, urgent: false }, { number: 30, urgent: true }, { number: 5, urgent: false }, { number: 20, urgent: true }];
+    expect([...cards].sort(queueOrder).map(c => c.number)).toEqual([20, 30, 5, 10]);
   });
 });

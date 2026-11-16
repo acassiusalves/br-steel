@@ -2,7 +2,7 @@
 
 import * as React from 'react';
 import Image from 'next/image';
-import { ArrowRight, ChevronDown, ChevronUp, IdCard, Loader2, Pause, Play, Search, Square, Trash2 } from 'lucide-react';
+import { ArrowRight, ChevronDown, ChevronUp, Flame, IdCard, Loader2, Pause, Play, Search, Square, Trash2 } from 'lucide-react';
 import DashboardLayout from '@/components/dashboard-layout';
 import { useToast } from '@/hooks/use-toast';
 import { subscribeOperation } from '@/lib/operation-client';
@@ -43,11 +43,20 @@ function CardView({ card, board, busy, act, openFinish, openMove, openClose }: {
   const start = card.allowed.start;
   const lost = card.quantity - card.currentQuantity;
   return (
-    <div className="space-y-2 rounded-md border bg-card p-3 text-sm shadow-sm">
+    <div className={`space-y-2 rounded-md border bg-card p-3 text-sm shadow-sm ${card.urgent ? 'border-l-4 border-l-destructive' : ''}`}>
       <div className="flex items-center justify-between gap-2">
         <span className="font-mono text-xs font-semibold">{opLabel(card)}{card.iappNumber && <IappLogo className="ml-1.5" />}</span>
-        <Badge variant="outline" className="text-[10px]">{card.kind === 'corte' ? 'Corte' : 'Semanal'}</Badge>
+        <span className="flex items-center gap-1">
+          {card.urgent && <Badge variant="destructive" className="text-[10px]">Urgente</Badge>}
+          <Badge variant="outline" className="text-[10px]">{card.kind === 'corte' ? 'Corte' : 'Semanal'}</Badge>
+        </span>
       </div>
+      {(card.salesOrderNumber || card.parentNumber !== null) && (
+        <div className="flex flex-wrap gap-x-2 text-xs text-muted-foreground">
+          {card.salesOrderNumber && <span>Pedido {card.salesOrderNumber}</span>}
+          {card.parentNumber !== null && <span>parte da OP {String(card.parentNumber).padStart(7, '0')}</span>}
+        </div>
+      )}
       <div className="font-medium leading-snug" title={card.description ?? card.sku}>{card.description ?? card.sku}</div>
       <div className="font-mono text-xs text-muted-foreground">{card.sku}</div>
       <div className="text-xs">
@@ -98,6 +107,12 @@ function CardView({ card, board, busy, act, openFinish, openMove, openClose }: {
             : act(`move-${card.id}`, () => svc.moveCard(card.id, card.allowed.moveTo!), 'Card movido.'))}>
           {busy === `move-${card.id}` ? <Loader2 className="mr-1 h-3 w-3 animate-spin" />
             : asksBadge(card.allowed.moveTo) ? <IdCard className="mr-1 h-3 w-3" /> : <ArrowRight className="mr-1 h-3 w-3" />}Passar para {columnName(card.allowed.moveTo)}
+        </Button>
+      )}
+      {card.allowed.setUrgent && (
+        <Button size="sm" variant="ghost" className="h-7 w-full text-xs" disabled={busy !== null}
+          onClick={() => act(`urgent-${card.id}`, () => svc.setUrgent(card.id, !card.urgent), card.urgent ? 'Urgência retirada.' : 'OP marcada como urgente.')}>
+          {busy === `urgent-${card.id}` ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <Flame className="mr-1 h-3 w-3" />}{card.urgent ? 'Tirar urgência' : 'Marcar urgente'}
         </Button>
       )}
       {card.allowed.close && (
@@ -184,7 +199,7 @@ export default function BoardClient() {
   if (!board) return <DashboardLayout><div className="flex items-center gap-2 p-6"><Loader2 className="h-4 w-4 animate-spin" />Carregando...</div></DashboardLayout>;
 
   const term = search.trim().toLowerCase();
-  const cards = board.cards.filter(c => !term || [String(c.number), c.iappNumber ?? '', c.sku, c.description ?? ''].some(v => v.toLowerCase().includes(term)));
+  const cards = board.cards.filter(c => !term || [String(c.number), c.iappNumber ?? '', c.sku, c.description ?? '', c.salesOrderNumber ?? ''].some(v => v.toLowerCase().includes(term)));
 
   return (
     <DashboardLayout>
@@ -198,7 +213,7 @@ export default function BoardClient() {
             </p>
           </div>
           <div className="relative w-64"><Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
-            <Input className="pl-8" placeholder="Buscar OP, SKU ou produto" value={search} onChange={e => setSearch(e.target.value)} /></div>
+            <Input className="pl-8" placeholder="Buscar OP, SKU, produto ou pedido" value={search} onChange={e => setSearch(e.target.value)} /></div>
         </div>
         <div className="flex gap-3 overflow-x-auto pb-3">
           {board.columns.map(column => {

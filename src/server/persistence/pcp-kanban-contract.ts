@@ -23,6 +23,12 @@ export type BoardLoss = { quantity: number; reason: string; notes: string | null
 export type BoardCard = {
   id: string; number: number; /** Número da OP no iApp, quando ela veio de lá. */ iappNumber: string | null; kind: OrderKind; sku: string; description: string | null; quantity: number; currentQuantity: number;
   column: string; createdAt: string; steps: BoardStep[]; losses: BoardLoss[];
+  /** Urgente vem primeiro na coluna. */
+  urgent: boolean;
+  /** Como a OP nasceu e, se veio de pedido de venda do Bling, o número do pedido. */
+  origin: 'fila' | 'avulsa' | 'pedido' | 'iapp'; salesOrderNumber: string | null;
+  /** Número da OP mãe, quando esta é uma parte para o corte. */
+  parentNumber: number | null;
   /** Soma dos tempos úteis de execução e de espera das OS (a espera inclui as pausas). */
   totals: { runMinutes: number; waitMinutes: number };
   /** O que o usuário logado pode fazer neste card agora. */
@@ -32,6 +38,8 @@ export type BoardCard = {
     pauseStepId: string | null; resumeStepId: string | null;
     /** O administrador pode excluir (encerrar) a OP, que ainda está em "A produzir". */
     close: boolean;
+    /** O administrador pode marcar ou tirar a urgência. */
+    setUrgent: boolean;
   };
 };
 export type Board = {
@@ -54,4 +62,6 @@ export interface KanbanRepository {
   resume(orderId: string, stepId: string, actor: BoardActor): Promise<OperationResult<null>>;
   /** Exclui a OP de "A produzir": ela vira "encerrado" (com as OPs filhas) e sai do quadro e das contas. */
   close(orderId: string, actor: BoardActor): Promise<OperationResult<null>>;
+  /** Marca ou tira a urgência da OP e das OPs filhas que ainda estão no quadro. */
+  setPriority(orderId: string, urgent: boolean, actor: BoardActor): Promise<OperationResult<null>>;
 }

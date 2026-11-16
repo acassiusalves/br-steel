@@ -55,6 +55,11 @@ export function createKanbanOperations(repository: KanbanRepository) {
       const data = z.object({ orderId: uuid }).strict().parse(input);
       return repository.close(data.orderId, boardActor(ctx));
     },
+    async priority(ctx: AccessContext, input: unknown) {
+      requireOperation(ctx, 'producao:write', BOARD_PAGE);
+      const data = z.object({ orderId: uuid, urgent: z.boolean() }).strict().parse(input);
+      return repository.setPriority(data.orderId, data.urgent, boardActor(ctx));
+    },
   };
 }
 

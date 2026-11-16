@@ -112,8 +112,9 @@ export const IAPP_HEADER = ['IDENTIFICAÇÃO DA FICHA', 'QUANTIDADE', 'LOTE ANTE
 
 /**
  * Linhas da planilha de importação de OP do iApp (modelo baixado em /importador/download?planilha=op).
- * Corte vai com multinível "S", para o iApp gerar as OPs das partes; a produção semanal vai com "N".
+ * Corte vai com multinível "S", para o iApp gerar as OPs das partes; a produção semanal vai com "N",
+ * salvo a OP de pedido que tem partes no corte (`multilevel`).
  */
-export function iappImportRows(orders: readonly { sheetCode: string; quantity: number; kind: OrderKind }[]): (string | number)[][] {
-  return orders.map(order => [order.sheetCode, order.quantity, '', order.kind === 'corte' ? 'S' : 'N', 'N']);
+export function iappImportRows(orders: readonly { sheetCode: string; quantity: number; kind: OrderKind; multilevel?: boolean }[]): (string | number)[][] {
+  return orders.map(order => [order.sheetCode, order.quantity, '', order.kind === 'corte' || order.multilevel ? 'S' : 'N', 'N']);
 }
