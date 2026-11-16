@@ -640,6 +640,9 @@ test('crachá só no formato que o login e a bipagem leem: maiúsculas, sem espa
   for (const badge of ['ab-1', ' 012', '12 34', 'x'.repeat(41)]) {
     await assert.rejects(insert(badge), (e: { code?: string }) => e.code === '23514', badge);
   }
+  // Pelo repositório, a recusa da restrição chega como mensagem própria, sem o texto do driver.
+  await assert.rejects(repo.saveWorker(null, { name: 'Teste crachá', badge: 'ab-1', kind: 'Teste', active: true, userId: null, operationIds: [] }, actor),
+    /Crachá inválido/);
   await insert('012');
   await assert.rejects(insert('012'), (e: { code?: string }) => e.code === '23505');
   await pool.query(`delete from brsteel_pcp.workers where name = 'Teste crachá'`);

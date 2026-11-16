@@ -193,6 +193,12 @@
       "indexes": []
     },
     {
+      "collectionGroup": "loginRateLimits",
+      "fieldPath": "expiresAt",
+      "ttl": true,
+      "indexes": []
+    },
+    {
       "collectionGroup": "mcpRateLimits",
       "fieldPath": "expiresAt",
       "ttl": true,
