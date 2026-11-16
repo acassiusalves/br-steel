@@ -11,7 +11,7 @@ interface AuthContextType {
     isAuthenticated: boolean;
     isLoading: boolean;
     /** `badge`: entra pelo código do crachá em vez do e-mail. */
-    login: (identifier: string, password: string, kind?: 'email' | 'badge') => Promise<{ success: boolean; mustChangePassword?: boolean; error?: string }>;
+    login: (identifier: string, password: string, kind?: 'email' | 'badge') => Promise<{ success: boolean; mustChangePassword?: boolean; role?: string; error?: string }>;
     logout: () => void;
     refreshPermissions: () => Promise<void>;
     updateUser: (userData: Partial<User>) => void;
@@ -79,7 +79,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         localStorage.setItem(STORAGE_KEYS.inactivePages, JSON.stringify(inactive));
     };
 
-    const login = useCallback(async (identifier: string, password: string, kind: 'email' | 'badge' = 'email'): Promise<{ success: boolean; mustChangePassword?: boolean; error?: string }> => {
+    const login = useCallback(async (identifier: string, password: string, kind: 'email' | 'badge' = 'email'): Promise<{ success: boolean; mustChangePassword?: boolean; role?: string; error?: string }> => {
         try {
             const response = await fetch('/api/auth/login', {
                 method: 'POST',
@@ -102,7 +102,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
             return {
                 success: true,
-                mustChangePassword: data.user?.mustChangePassword
+                mustChangePassword: data.user?.mustChangePassword,
+                role: data.user?.role,
             };
         } catch (error) {
             console.error('Erro no login:', error);

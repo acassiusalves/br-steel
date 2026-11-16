@@ -120,6 +120,8 @@ export default function EngineeringClient() {
     setForm(v ? { ...v, phases: next.kind === 'line' ? (next.value as ProductionLine).phases.map(p => ({ id: p.id, name: p.name, asksBadge: p.asksBadge })) : undefined } : defaults[next.kind]);
   };
   const set = (key: string, value: unknown) => setForm(f => ({ ...f, [key]: value }));
+  /** PIN de primeiro acesso recém-gerado: aparece uma vez só, para o administrador entregar em mãos. */
+  const [pin, setPin] = React.useState<{ name: string; badge: string; pin: string; adopted: boolean } | null>(null);
   const run = async (action: () => Promise<unknown>, done = 'Salvo.') => {
     setSaving(true);
     try { await action(); toast({ title: done }); setEditing(null); }
@@ -241,15 +243,15 @@ export default function EngineeringClient() {
                       {editButton({ kind: 'worker', value: w })}
                       {isAdmin && !w.userId && w.badge && (
                         <Button size="sm" variant="outline" className="ml-2" disabled={saving}
-                          onClick={() => window.confirm(`Criar o acesso de ${w.name} pelo crachá ${w.badge}? No primeiro acesso a senha é 123456 e ele cadastra a senha pessoal.`)
-                            && void run(() => svc.createBadgeAccess(w.id).then(loadUsers), `Acesso criado. Primeiro acesso: crachá ${w.badge} e senha 123456.`)}>
+                          onClick={() => window.confirm(`Criar o acesso de ${w.name} pelo crachá ${w.badge}? O sistema vai mostrar um PIN de primeiro acesso, uma vez só, válido por 72 horas. Entregue em mãos.`)
+                            && void run(() => svc.createBadgeAccess(w.id).then(r => { setPin({ name: w.name, badge: r.badge, pin: r.pin, adopted: r.adopted }); loadUsers(); }), 'Acesso criado.')}>
                           Criar acesso pelo crachá
                         </Button>
                       )}
                       {isAdmin && w.userId && users.find(u => u.id === w.userId)?.badge && (
                         <Button size="sm" variant="outline" className="ml-2" disabled={saving}
-                          onClick={() => window.confirm(`Resetar a senha de ${w.name}? Ele volta a entrar com 123456 e cadastra uma senha nova. As sessões abertas dele serão encerradas.`)
-                            && void run(() => svc.resetBadgePassword(w.id), `Senha resetada. ${w.name} entra com o crachá e a senha 123456.`)}>
+                          onClick={() => window.confirm(`Resetar a senha de ${w.name}? O sistema vai mostrar um PIN novo de primeiro acesso, e as sessões abertas dele serão encerradas.`)
+                            && void run(() => svc.resetBadgePassword(w.id).then(r => setPin({ name: w.name, badge: w.badge, pin: r.pin, adopted: false })), 'Senha resetada.')}>
                           Resetar senha
                         </Button>
                       )}
@@ -266,6 +268,20 @@ export default function EngineeringClient() {
         </Tabs>
       </div>
 
+      <Dialog open={pin !== null} onOpenChange={o => !o && setPin(null)}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader><DialogTitle>PIN de primeiro acesso</DialogTitle></DialogHeader>
+          {pin && (
+            <div className="space-y-3 text-sm">
+              <p><strong>{pin.name}</strong> entra na aba Crachá com o código <strong className="font-mono">{pin.badge}</strong> e este PIN:</p>
+              <p className="rounded-md border bg-muted py-3 text-center font-mono text-3xl font-semibold tracking-[0.3em]" aria-label="PIN">{pin.pin}</p>
+              <p className="text-muted-foreground">Ele aparece só agora e vale por 72 horas. No primeiro acesso o sistema pede uma senha pessoal. Se perder o PIN, use "Resetar senha".</p>
+              {pin.adopted && <p className="text-amber-700 dark:text-amber-300">Já existia uma conta para este crachá: ela foi zerada (senha, papel e sessões abertas) e vinculada a este funcionário.</p>}
+            </div>
+          )}
+          <DialogFooter><Button onClick={() => setPin(null)}>Já anotei</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
       <Dialog open={editing !== null} onOpenChange={o => !o && setEditing(null)}>
         <DialogContent className="max-w-lg">
           <DialogHeader><DialogTitle>{editing?.value ? 'Editar' : 'Novo cadastro'}</DialogTitle></DialogHeader>

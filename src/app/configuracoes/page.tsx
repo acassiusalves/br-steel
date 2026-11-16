@@ -18,7 +18,7 @@ import { useToast } from '@/hooks/use-toast';
 import { getUsers, addUser, deleteUser, updateUserRole, setUserActive } from '@/services/user-service';
 import { loadAppSettings, saveAppSettings } from '@/services/app-settings-service';
 import type { User } from '@/types/user';
-import { pagePermissions as defaultPagePermissions, availableRoles } from "@/lib/permissions";
+import { pagePermissions as defaultPagePermissions, availableRoles, FIXED_ACCESS_ROLES } from "@/lib/permissions";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Switch } from '@/components/ui/switch';
 import { useAuth } from '@/contexts/AuthContext';
@@ -260,7 +260,7 @@ function UsersPageContent() {
            <Card>
                 <CardHeader>
                     <CardTitle className="flex items-center gap-2"><Lock /> Permissões por Função</CardTitle>
-                    <CardDescription>Defina o que cada função pode ver e fazer no sistema. Administradores acessam todas as páginas ativas.</CardDescription>
+                    <CardDescription>Defina o que cada função pode ver e fazer no sistema. Administradores acessam todas as páginas ativas. Produção (contas de crachá) vê só o quadro de OPs, o perfil e os próprios reportes, e não muda aqui.</CardDescription>
                 </CardHeader>
                 <CardContent>
                     <div className="rounded-md border overflow-auto">
@@ -280,13 +280,15 @@ function UsersPageContent() {
                                         <TableCell className="font-medium">{page}</TableCell>
                                         {availableRoles.map(role => {
                                             const isSuperUser = role.key === 'Administrador';
-                                            const isChecked = isSuperUser || permissions[page]?.includes(role.key);
+                                            // Produção tem acesso fixo (só o quadro de OPs, o perfil e os reportes).
+                                            const isFixed = FIXED_ACCESS_ROLES.includes(role.key);
+                                            const isChecked = isSuperUser || (isFixed ? defaultPagePermissions[page]?.includes(role.key) : permissions[page]?.includes(role.key));
                                             return (
                                                 <TableCell key={`${page}-${role.key}`} className="text-center">
                                                     <Checkbox
                                                         checked={isChecked}
                                                         onCheckedChange={(checked) => handlePermissionChange(page, role.key, !!checked)}
-                                                        disabled={isSuperUser || !isAdmin}
+                                                        disabled={isSuperUser || isFixed || !isAdmin}
                                                     />
                                                 </TableCell>
                                             );

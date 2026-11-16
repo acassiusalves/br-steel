@@ -1,6 +1,7 @@
 import { clearBridgeCookieHeader } from '@/server/oauth/cookies';
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
+import { FieldValue } from 'firebase-admin/firestore';
 import { adminDb } from '@/lib/firebase-admin';
 import { getSessionFromRequest, hashPassword, sessionCookieHeader, createSessionToken, verifyPassword } from '@/lib/server-auth';
 import { needsPasswordChange } from '@/server/access/passwords';
@@ -47,6 +48,10 @@ export async function PATCH(request: Request) {
     }
     const mustChange = needsPasswordChange(stored);
     if (mustChange && !newPassword) return { error: 'Cadastre uma nova senha para concluir o primeiro acesso.', status: 400 } as const;
+    // A senha pessoal não pode repetir o PIN de primeiro acesso, que o administrador viu.
+    if (newPassword && mustChange && stored.passwordHash && verifyPassword(newPassword, stored.passwordHash, stored.passwordSalt)) {
+      return { error: 'Escolha uma senha diferente do PIN de primeiro acesso.', status: 400 } as const;
+    }
     if (newPassword && !mustChange && !verifyPassword(currentPassword, stored.passwordHash, stored.passwordSalt)) {
       return { error: 'Senha atual inválida.', status: 401 } as const;
     }
@@ -57,7 +62,7 @@ export async function PATCH(request: Request) {
         mustChangePassword: false, authVersion: stored.authVersion + 1,
       } : {}),
     };
-    transaction.update(ref, update);
+    transaction.update(ref, credential ? { ...update, initialPasswordExpiresAt: FieldValue.delete() } : update);
     return { user: { ...stored, ...update } };
   });
   if ('error' in result) return NextResponse.json({ ok: false, error: result.error }, { status: result.status });

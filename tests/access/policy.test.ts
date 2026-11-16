@@ -24,3 +24,15 @@ it('never treats inherited object properties as pages', () => {
   expect(canAccessPage({ role: 'Administrador' }, context('Administrador'), '__proto__')).toBe(false);
   expect(canAccessPage({ role: 'Administrador' }, context('Administrador'), 'constructor')).toBe(false);
 });
+
+it('the Produção role (badge accounts) only reaches the OP board, the profile and its own reports, whatever the settings say', () => {
+  const settings = { permissions: { ...pagePermissions, '/producao/quadro': ['Administrador', 'Operador'], '/estoque': ['Produção'] }, inactivePages: [] };
+  for (const page of ['/producao/quadro', '/perfil', '/meus-reportes']) expect(canAccessPage({ role: 'Produção' }, settings, page)).toBe(true);
+  for (const page of ['/estoque', '/atendimento/chat', '/insumos', '/producao/ops', '/producao/engenharia', '/vendas', '/configuracoes']) {
+    expect(canAccessPage({ role: 'Produção' }, settings, page)).toBe(false);
+  }
+  const c = context('Produção');
+  expect(() => requireCapability(c, 'producao:write', '/producao/quadro')).not.toThrow();
+  expect(() => requireCapability(c, 'producao:write', '/producao/ops')).toThrow();
+  expect(() => requireCapability({ ...c, inactivePages: ['/producao/quadro'] }, 'producao:write', '/producao/quadro')).toThrow();
+});

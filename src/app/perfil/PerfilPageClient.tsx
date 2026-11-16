@@ -13,6 +13,7 @@ import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
 import { useAuth } from '@/contexts/AuthContext';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { safeOAuthReturnPath } from '@/lib/oauth-return-path';
+import { PRODUCTION_ROLE, homePath } from '@/lib/permissions';
 import { McpConnectionCard } from '@/components/mcp-connection-card';
 
 export default function PerfilPageClient() {
@@ -66,6 +67,8 @@ export default function PerfilPageClient() {
             if (newPassword) {
                 await refreshPermissions();
                 if (next) router.replace(next);
+                // O líder da fábrica segue direto para o quadro de OPs, a única tela dele.
+                else if (data.user?.role === PRODUCTION_ROLE) router.replace(homePath(PRODUCTION_ROLE));
             }
 
 
@@ -130,7 +133,7 @@ export default function PerfilPageClient() {
                             <CardTitle>Alterar Senha</CardTitle>
                             <CardDescription>
                                {user?.badge
-                                 ? 'Use uma senha individual com pelo menos 6 caracteres, diferente de 123456.'
+                                 ? 'Use uma senha individual com pelo menos 6 caracteres, diferente do PIN de primeiro acesso.'
                                  : 'Use uma senha individual com pelo menos 12 caracteres.'}
                             </CardDescription>
                         </CardHeader>
