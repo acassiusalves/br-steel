@@ -3,6 +3,7 @@
 
 import * as React from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
+import { homePath } from '@/lib/permissions';
 import { safeOAuthReturnPath } from '@/lib/oauth-return-path';
 import { Button } from "@/components/ui/button";
 import {
@@ -63,7 +64,7 @@ function LoginForm() {
         if (result.mustChangePassword) {
             router.push(next ? `/perfil?next=${encodeURIComponent(next)}` : '/perfil');
         } else {
-            router.push(next || '/vendas?tab=dashboard');
+            router.push(next || homePath(result.role));
         }
 
     } catch (error: any) {
@@ -88,7 +89,7 @@ function LoginForm() {
             <CardTitle className="text-2xl">Login</CardTitle>
             <CardDescription>
               {mode === 'badge'
-                ? 'Digite o código do seu crachá e a senha. No primeiro acesso, a senha é 123456.'
+                ? 'Digite o código do seu crachá e a senha. No primeiro acesso, use o PIN que o administrador entregou.'
                 : 'Digite seu e-mail e senha para acessar o painel.'}
             </CardDescription>
           </CardHeader>
@@ -104,7 +105,7 @@ function LoginForm() {
             {mode === 'badge' ? (
               <div className="space-y-2">
                 <Label htmlFor="badge">Código do crachá</Label>
-                <Input id="badge" name="badge" inputMode="numeric" autoComplete="username" placeholder="Ex.: 26557" maxLength={40} required />
+                <Input id="badge" name="badge" inputMode="numeric" autoComplete="username" placeholder="Bipe ou digite o crachá" maxLength={40} required />
               </div>
             ) : (
               <div className="space-y-2">

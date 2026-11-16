@@ -634,3 +634,13 @@ test('OP avulsa, OP de pedido do Bling e urgência no quadro', async () => {
   assert.deepEqual(events.map(p => [p.from, p.to, Boolean(p.parentOrderId)]).sort(), [['urgente', 'estoque', false], ['urgente', 'estoque', true]]);
   assert.equal((await pool.query("select count(*)::int n from brsteel_write.audit where operation = 'pcp.setOrderPriority'")).rows[0].n, 2);
 });
+
+test('crachá só no formato que o login e a bipagem leem: maiúsculas, sem espaço, zeros à esquerda mantidos', async () => {
+  const insert = (badge: string) => pool.query(`insert into brsteel_pcp.workers (name, badge, kind, active) values ('Teste crachá', $1, 'Teste', true)`, [badge]);
+  for (const badge of ['ab-1', ' 012', '12 34', 'x'.repeat(41)]) {
+    await assert.rejects(insert(badge), (e: { code?: string }) => e.code === '23514', badge);
+  }
+  await insert('012');
+  await assert.rejects(insert('012'), (e: { code?: string }) => e.code === '23505');
+  await pool.query(`delete from brsteel_pcp.workers where name = 'Teste crachá'`);
+});

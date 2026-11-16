@@ -107,7 +107,7 @@ export function buildImportSql(data: IappEngineeringExport): string {
   on conflict (line_id, name) do update set position = excluded.position, updated_at = now();`));
 
   for (const w of data.workers) {
-    out.push(`insert into ${s}.workers (iapp_id, name, badge, kind, active) values (${int(w.iappId)}, ${lit(w.name)}, ${lit(w.badge)}, ${lit(w.kind)}, ${w.active})
+    out.push(`insert into ${s}.workers (iapp_id, name, badge, kind, active) values (${int(w.iappId)}, ${lit(w.name)}, ${lit(String(w.badge).trim().toUpperCase())}, ${lit(w.kind)}, ${w.active})
   on conflict (iapp_id) do update set name = excluded.name, badge = excluded.badge, kind = excluded.kind, active = excluded.active, updated_at = now();`);
   }
 

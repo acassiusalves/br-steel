@@ -4,7 +4,7 @@ import type { AccessContext } from '@/server/access/types';
 import type { EngineeringRepository } from '@/server/persistence/pcp-engineering-contract';
 import { engineeringRepository } from '@/server/persistence/pcp-engineering';
 import type { WriteActor } from '@/server/persistence/write-audit';
-import { firestoreBadgeAccounts, normalizeBadge, type BadgeAccounts } from '@/server/access/badges';
+import { badgeUserId, firestoreBadgeAccounts, normalizeBadge, type BadgeAccounts } from '@/server/access/badges';
 import { dateSchema, requireOperation, OperationError } from './common';
 
 export const ENGINEERING_PAGE = '/producao/engenharia';
@@ -30,8 +30,14 @@ const teamSchema = z.object({
   leaderId: uuid.nullable(), operationIds,
   members: z.array(z.object({ workerId: uuid, leaderId: uuid.nullable() }).strict()).max(200),
 }).strict();
+/** O crachá é gravado já normalizado (maiúsculas, sem espaços), igual ao que o login e a bipagem usam. */
+const badgeSchema = z.string().max(60).transform((value, ctx) => {
+  const badge = normalizeBadge(value);
+  if (!badge) { ctx.addIssue({ code: 'custom', message: 'Crachá inválido: use só letras, números e hífen, até 40 caracteres.' }); return z.NEVER; }
+  return badge;
+});
 const workerSchema = z.object({
-  name, badge: z.string().trim().min(1).max(50), kind: z.string().trim().min(1).max(100), active: z.boolean(),
+  name, badge: badgeSchema, kind: z.string().trim().min(1).max(100), active: z.boolean(),
   userId: z.string().trim().min(1).max(200).nullable(), operationIds,
 }).strict();
 const periodsSchema = z.array(z.object({ weekday: z.number().int().min(0).max(6), startsAt: time, endsAt: time }).strict()).max(70);
@@ -82,7 +88,17 @@ export function createEngineeringOperations(repository: EngineeringRepository, a
       const actor = write(ctx); return repository.saveTeam(idInput.parse(id), teamSchema.parse(input), actor);
     },
     async saveWorker(ctx: AccessContext, id: unknown, input: unknown) {
-      const actor = write(ctx); return repository.saveWorker(idInput.parse(id), workerSchema.parse(input), actor);
+      const actor = write(ctx);
+      const workerId = idInput.parse(id), data = workerSchema.parse(input);
+      if (workerId) {
+        // O login do crachá é a conta cracha-<código>: trocar o código deixaria o login preso ao antigo.
+        const current = await findWorker(workerId);
+        const oldBadge = normalizeBadge(current.badge);
+        if (current.userId && oldBadge && current.userId === badgeUserId(oldBadge) && data.badge !== oldBadge) {
+          throw new OperationError('BADGE_LOCKED', `Este funcionário entra no sistema pelo crachá ${oldBadge}. Para trocar o código, desvincule o login, troque o crachá e crie o acesso de novo.`, 409);
+        }
+      }
+      return repository.saveWorker(workerId, data, actor);
     },
     async replaceWorkPeriods(ctx: AccessContext, input: unknown) {
       const actor = write(ctx); return repository.replaceWorkPeriods(periodsSchema.parse(input), actor);
@@ -108,27 +124,39 @@ export function createEngineeringOperations(repository: EngineeringRepository, a
       const actor = write(ctx); return repository.saveLossReason(idInput.parse(id), lossReasonSchema.parse(input), actor);
     },
     /** Cria o login do funcionário pelo crachá e já o vincula, para ele agir no Kanban de OPs. */
+    /**
+     * Cria o login do funcionário pelo crachá e já o vincula, para ele agir no Kanban de OPs. Devolve o PIN
+     * de primeiro acesso, que só aparece esta vez. Conta de crachá que já existia volta ao primeiro acesso.
+     */
     async createBadgeAccess(ctx: AccessContext, id: unknown) {
       const actor = write(ctx);
-      const worker = await findWorker(uuid.parse(id));
+      const workerId = uuid.parse(id);
+      const workers = (await repository.read()).data.workers;
+      const worker = workers.find(w => w.id === workerId);
+      if (!worker) throw new OperationError('NOT_FOUND', 'Funcionário não encontrado.', 404);
       if (worker.userId) throw new OperationError('ALREADY_LINKED', 'Este funcionário já tem um login vinculado.', 409);
       const badge = normalizeBadge(worker.badge);
       if (!badge) throw new OperationError('NO_BADGE', 'Cadastre um código de crachá válido (letras, números ou hífen) antes de criar o acesso.');
-      let userId: string;
-      try { ({ userId } = await accounts.create(worker.name, badge)); }
+      const other = workers.find(w => w.id !== workerId && w.userId === badgeUserId(badge));
+      if (other) throw new OperationError('LINKED_ELSEWHERE', `O login deste crachá já está vinculado a ${other.name}. Desvincule antes de criar o acesso.`, 409);
+      let created: { userId: string; pin: string; adopted: boolean };
+      try { created = await accounts.create(worker.name, badge); }
       catch (error) { throw new OperationError('BADGE_TAKEN', error instanceof Error ? error.message : 'Não foi possível criar o acesso.', 409); }
-      const { id: workerId, ...fields } = worker;
-      await repository.saveWorker(workerId, { ...fields, userId }, actor);
-      return { data: { userId, badge }, source: 'postgres' as const, asOf: new Date().toISOString(), warnings: [], nextCursor: null };
+      const { id: _id, ...fields } = worker;
+      void _id;
+      await repository.saveWorker(workerId, { ...fields, badge, userId: created.userId }, actor);
+      return { data: { userId: created.userId, badge, pin: created.pin, adopted: created.adopted },
+        source: 'postgres' as const, asOf: new Date().toISOString(), warnings: [], nextCursor: null };
     },
-    /** Volta o login do crachá para o primeiro acesso (senha 123456 e troca obrigatória). */
+    /** Volta o login do crachá para o primeiro acesso com um PIN novo, que só aparece esta vez. */
     async resetBadgePassword(ctx: AccessContext, id: unknown) {
       write(ctx);
       const worker = await findWorker(uuid.parse(id));
       if (!worker.userId) throw new OperationError('NOT_LINKED', 'Este funcionário não tem login.', 409);
-      try { await accounts.reset(worker.userId); }
+      let pin: string;
+      try { ({ pin } = await accounts.reset(worker.userId)); }
       catch (error) { throw new OperationError('NOT_BADGE', error instanceof Error ? error.message : 'Não foi possível resetar a senha.', 409); }
-      return { data: null, source: 'postgres' as const, asOf: new Date().toISOString(), warnings: [], nextCursor: null };
+      return { data: { pin }, source: 'postgres' as const, asOf: new Date().toISOString(), warnings: [], nextCursor: null };
     },
   };
 }

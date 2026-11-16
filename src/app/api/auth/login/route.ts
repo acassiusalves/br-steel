@@ -12,6 +12,7 @@ import { isKnownRole, publicUser } from '@/server/access/users';
 import { rejectCrossOrigin } from '@/server/access/request';
 import { BADGE_LOCK_MS, BADGE_MAX_FAILURES, badgeUserId, isBadgeUser, normalizeBadge } from '@/server/access/badges';
 import { storedUserFromDoc, type StoredUser } from '@/server/access/users';
+import { clientIp, loginBlockedFor, recordLoginFailure } from '@/server/access/login-rate-limit';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -27,6 +28,12 @@ export async function POST(request: Request) {
   }
 
   const password = typeof body?.password === 'string' ? body.password : '';
+  const ip = clientIp(request);
+  const retryAfter = await loginBlockedFor(ip);
+  if (retryAfter) {
+    return NextResponse.json({ ok: false, error: 'Muitas tentativas de login a partir desta rede. Aguarde alguns minutos e tente de novo.' },
+      { status: 429, headers: { 'Retry-After': String(retryAfter) } });
+  }
   let user: StoredUser | null;
   if (body?.badge !== undefined) {
     const badge = normalizeBadge(body.badge);
@@ -34,7 +41,10 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: false, error: 'Crachá e senha são obrigatórios.' }, { status: 400 });
     }
     const result = await loginWithBadge(badge, password);
-    if ('error' in result) return NextResponse.json({ ok: false, error: result.error }, { status: result.status });
+    if ('error' in result) {
+      if (result.status === 401) await recordLoginFailure(ip);
+      return NextResponse.json({ ok: false, error: result.error }, { status: result.status });
+    }
     user = result.user;
   } else {
     const email = typeof body?.email === 'string' ? body.email.trim().toLowerCase() : '';
@@ -44,6 +54,7 @@ export async function POST(request: Request) {
     user = await findUserByEmail(email);
     // Conta de crachá só entra pelo crachá, onde vale o bloqueio por tentativas.
     if (!user || isBadgeUser(user) || user.active === false || !isKnownRole(user.role) || !verifyPassword(password, user.passwordHash, user.passwordSalt)) {
+      await recordLoginFailure(ip);
       return NextResponse.json({ ok: false, error: 'Usuário ou senha inválidos.' }, { status: 401 });
     }
   }
@@ -63,8 +74,9 @@ export async function POST(request: Request) {
 }
 
 /**
- * Crachá: depois de 5 senhas erradas seguidas, o crachá fica bloqueado por 15 minutos. Compensa a senha
- * curta e a senha de primeiro acesso conhecida (123456). O contador zera no acerto.
+ * Crachá: depois de 5 senhas erradas seguidas, o crachá fica bloqueado por 15 minutos, para compensar a
+ * senha curta. O contador zera no acerto. Só entra conta com senha gravada (o PIN de primeiro acesso ou a
+ * senha pessoal): conta antiga sem senha não aceita mais 123456 e precisa de reset. O PIN vence em 72 h.
  */
 async function loginWithBadge(badge: string, password: string): Promise<{ user: StoredUser } | { error: string; status: number }> {
   const invalid = { error: 'Crachá ou senha inválidos.', status: 401 } as const;
@@ -84,10 +96,14 @@ async function loginWithBadge(badge: string, password: string): Promise<{ user: 
       const minutes = Math.ceil((lockedUntil - now) / 60_000);
       return { error: `Crachá bloqueado por excesso de tentativas. Tente de novo em ${minutes} min ou peça ao administrador para resetar a senha.`, status: 429 };
     }
-    if (!verifyPassword(password, user.passwordHash, user.passwordSalt)) {
+    if (!user.passwordHash || !user.passwordSalt || !verifyPassword(password, user.passwordHash, user.passwordSalt)) {
       const failures = failedLogins + 1;
       tx.update(ref, failures >= BADGE_MAX_FAILURES ? { failedLogins: 0, lockedUntil: now + BADGE_LOCK_MS } : { failedLogins: failures });
       return invalid;
+    }
+    const expiresAt = typeof data.initialPasswordExpiresAt === 'number' ? data.initialPasswordExpiresAt : null;
+    if (user.mustChangePassword && expiresAt !== null && expiresAt <= now) {
+      return { error: 'O PIN de primeiro acesso venceu. Peça ao administrador para gerar um novo.', status: 403 };
     }
     if (failedLogins || lockedUntil) tx.update(ref, { failedLogins: 0, lockedUntil: 0 });
     return { user };

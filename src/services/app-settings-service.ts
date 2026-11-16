@@ -9,7 +9,7 @@ import type { AccessSettings } from '@/server/access/types';
 
 const pageSchema = z.string().refine(p => Object.hasOwn(pagePermissions, p), 'Página inválida');
 const settingsSchema = z.object({
-  permissions: z.record(pageSchema, z.array(z.enum(['Administrador', 'Vendedor', 'Operador']))).optional(),
+  permissions: z.record(pageSchema, z.array(z.enum(['Administrador', 'Vendedor', 'Operador', 'Produção']))).optional(),
   inactivePages: z.array(pageSchema).refine(pages => !pages.includes('/configuracoes') && !pages.includes('/perfil'), 'Configurações e perfil devem permanecer ativos').optional(),
 }).strict();
 export async function loadAppSettings(): Promise<AccessSettings> {
