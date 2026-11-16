@@ -2,7 +2,7 @@ import 'server-only';
 import type { Pool, PoolClient } from 'pg';
 import { OperationError, result } from '@/server/operations/common';
 import {
-  DONE, TODO, closeError, columnOf, currentQuantity, finishError, moveError, nextColumn, pauseError, startError,
+  DONE, TODO, closeError, columnOf, currentQuantity, finishError, moveError, nextColumn, pauseError, priorityError, queueOrder, startError,
   type KanbanActor, type KanbanOrder, type KanbanTeam,
 } from '@/lib/pcp/kanban-rules';
 import type { OrderKind } from '@/lib/pcp/op-generator';
@@ -55,7 +55,7 @@ async function loadOrder(db: Queryable, orderId: string, lock: boolean): Promise
   };
 }
 
-async function event(client: PoolClient, row: { orderId: string; stepId?: string | null; kind: 'move' | 'start' | 'finish' | 'loss' | 'pause' | 'resume' | 'close';
+async function event(client: PoolClient, row: { orderId: string; stepId?: string | null; kind: 'move' | 'start' | 'finish' | 'loss' | 'pause' | 'resume' | 'close' | 'priority';
   from?: string | null; to?: string | null; workerId?: string | null; userId: string; payload?: object }) {
   await client.query(`insert into brsteel_pcp.production_order_events (order_id, step_id, kind, from_column, to_column, worker_id, user_id, payload)
     values ($1, $2, $3, $4, $5, $6, $7, $8)`, [row.orderId, row.stepId ?? null, row.kind, row.from ?? null, row.to ?? null,
@@ -73,10 +73,12 @@ export function createPostgresKanbanRepository(pool: Pool): KanbanRepository {
         // Quadro do dia a dia: o que está em produção e os últimos concluídos.
         const orders = (await client.query(`select * from (
             select o.id, o.number, o.iapp_number, o.kind, o.sku, o.description, o.quantity, o.status, o.phase_id, o.created_at, o.updated_at,
+              o.priority, o.origin, o.bling_order_number, (select m.number from brsteel_pcp.production_orders m where m.id = o.parent_order_id) parent_number,
               (select coalesce(sum(quantity), 0) from brsteel_pcp.production_order_losses l where l.order_id = o.id) loss_total
             from brsteel_pcp.production_orders o where o.status in ('a_produzir', 'produzindo')
             union all
             select * from (select o.id, o.number, o.iapp_number, o.kind, o.sku, o.description, o.quantity, o.status, o.phase_id, o.created_at, o.updated_at,
+              o.priority, o.origin, o.bling_order_number, (select m.number from brsteel_pcp.production_orders m where m.id = o.parent_order_id) parent_number,
               (select coalesce(sum(quantity), 0) from brsteel_pcp.production_order_losses l where l.order_id = o.id) loss_total
               from brsteel_pcp.production_orders o where o.status = 'concluido' order by o.updated_at desc limit 50) done
           ) cards order by number`)).rows as Row[];
@@ -128,7 +130,9 @@ export function createPostgresKanbanRepository(pool: Pool): KanbanRepository {
               imported: Boolean(s.imported) };
           });
           return {
-            id: String(o.id), number: Number(o.number), iappNumber: (o.iapp_number as string) ?? null, kind: o.kind as OrderKind, sku: String(o.sku), description: (o.description as string) ?? null,
+            id: String(o.id), number: Number(o.number), iappNumber: (o.iapp_number as string) ?? null,
+            urgent: o.priority === 'urgente', origin: o.origin as BoardCard['origin'], salesOrderNumber: (o.bling_order_number as string) ?? null,
+            parentNumber: o.parent_number == null ? null : Number(o.parent_number), kind: o.kind as OrderKind, sku: String(o.sku), description: (o.description as string) ?? null,
             quantity: state.quantity, currentQuantity: currentQuantity(state), column: columnOf(state), createdAt: iso(o.created_at)!,
             steps: boardSteps,
             totals: { runMinutes: boardSteps.reduce((n, t) => n + (t.runMinutes ?? 0), 0), waitMinutes: boardSteps.reduce((n, t) => n + (t.waitMinutes ?? 0) + t.pausedMinutes, 0) },
@@ -140,13 +144,14 @@ export function createPostgresKanbanRepository(pool: Pool): KanbanRepository {
               pauseStepId: running && !pauseError(state, running.id, true, people.kanbanActor, people.teams) ? running.id : null,
               resumeStepId: running && !pauseError(state, running.id, false, people.kanbanActor, people.teams) ? running.id : null,
               close: !closeError(state, people.kanbanActor),
+              setUrgent: !priorityError(state, people.kanbanActor),
             },
           };
         });
         const board: Board = {
           columns: [{ key: TODO, name: 'A produzir', asksBadge: false },
             ...phases.map(p => ({ key: String(p.id), name: String(p.name), asksBadge: Boolean(p.asks_badge) })), { key: DONE, name: 'Concluído', asksBadge: false }],
-          cards, lossReasons: reasons.map(r => ({ id: String(r.id), name: String(r.name) })),
+          cards: cards.sort(queueOrder), lossReasons: reasons.map(r => ({ id: String(r.id), name: String(r.name) })),
           actorWorker: people.me ? { id: String(people.me.id), name: String(people.me.name) } : null,
         };
         return result(board, 'postgres');
@@ -282,6 +287,25 @@ export function createPostgresKanbanRepository(pool: Pool): KanbanRepository {
           await event(client, { orderId: id, kind: 'close', from: TODO, workerId: people.kanbanActor.workerId, userId: actor.userId,
             payload: id === orderId ? {} : { parentOrderId: orderId } });
           await recordWriteAudit(client, { operation: 'pcp.closeOrder', actor, target: { collection: 'pcp.orders', id } });
+        }
+        return result(null, 'postgres');
+      });
+    },
+
+    async setPriority(orderId: string, urgent: boolean, actor: BoardActor) {
+      return withOperationalWrite(pool, async client => {
+        const order = await loadOrder(client, orderId, true);
+        const people = await loadPeople(client, actor);
+        refuse(priorityError(order, people.kanbanActor));
+        const to = urgent ? 'urgente' : 'estoque';
+        // As partes para o corte acompanham a OP mãe.
+        const targets = (await client.query(`select id, priority from brsteel_pcp.production_orders
+          where (id = $1 or parent_order_id = $1) and status in ('a_produzir', 'produzindo') order by number for update`, [orderId])).rows as Row[];
+        for (const target of targets.filter(t => t.priority !== to)) {
+          await client.query('update brsteel_pcp.production_orders set priority = $2, updated_at = now() where id = $1', [target.id, to]);
+          await event(client, { orderId: String(target.id), kind: 'priority', workerId: people.kanbanActor.workerId, userId: actor.userId,
+            payload: { from: target.priority, to, ...(target.id === orderId ? {} : { parentOrderId: orderId }) } });
+          await recordWriteAudit(client, { operation: 'pcp.setOrderPriority', actor, target: { collection: 'pcp.orders', id: String(target.id) } });
         }
         return result(null, 'postgres');
       });

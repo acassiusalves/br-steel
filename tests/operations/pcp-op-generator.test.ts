@@ -96,6 +96,9 @@ describe('planilha do iApp e quantidade das partes', () => {
     expect(iappImportRows([{ sheetCode: '00000067', quantity: 21, kind: 'semanal' }, { sheetCode: '00000137', quantity: 5, kind: 'corte' }]))
       .toEqual([['00000067', 21, '', 'N', 'N'], ['00000137', 5, '', 'S', 'N']]);
   });
+  it('a OP de pedido com partes no corte vai com multinível "S"', () => {
+    expect(iappImportRows([{ sheetCode: '00000067', quantity: 3, kind: 'semanal', multilevel: true }])).toEqual([['00000067', 3, '', 'S', 'N']]);
+  });
   it('multiplica a parte pela quantidade da OP mãe, respeitando a quantidade base', () => {
     expect(componentQuantity(21, 2, 1)).toBe(42);
     expect(componentQuantity(10, 3, 2)).toBe(15);

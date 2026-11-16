@@ -13,14 +13,26 @@ const factor = z.number().finite().min(0.1).max(10);
 const period = { from: dateSchema, to: dateSchema };
 const laterThanStart = (v: { from: string; to: string }) => v.from <= v.to;
 const previewSchema = z.object({ kind, factor, ...period }).strict().refine(laterThanStart, 'O início deve ser anterior ao fim.');
+const item = z.object({
+  sku: z.string().trim().min(1).max(100), sheetId: z.string().uuid(),
+  quantity: z.number().finite().positive().max(1_000_000), description: z.string().trim().max(300).nullable(),
+}).strict();
 const batchSchema = z.object({
   kind, factor, ...period,
-  items: z.array(z.object({
-    sku: z.string().trim().min(1).max(100), sheetId: z.string().uuid(),
-    quantity: z.number().finite().positive().max(1_000_000), description: z.string().trim().max(300).nullable(),
-  }).strict()).min(1, 'Escolha ao menos um item.').max(300)
+  items: z.array(item).min(1, 'Escolha ao menos um item.').max(300)
     .refine(items => new Set(items.map(i => i.sku)).size === items.length, 'SKU repetido no lote.'),
 }).strict().refine(laterThanStart, 'O início deve ser anterior ao fim.');
+const manualSchema = z.object({
+  kind, sku: z.string().trim().min(1).max(100), sheetId: z.string().uuid(), quantity: z.number().finite().positive().max(1_000_000),
+  urgent: z.boolean().default(false), notes: z.string().trim().max(2000).nullable().default(null).transform(v => v || null),
+}).strict();
+const salesOrderNumber = z.object({ number: z.string().trim().regex(/^[A-Za-z0-9._/-]{1,60}$/, 'Número de pedido inválido.') }).strict();
+const salesOrderBatchSchema = z.object({
+  blingOrderId: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+  urgent: z.boolean().default(false), confirmDuplicate: z.boolean().default(false),
+  items: z.array(item.extend({ parts: z.array(item).max(50) }).strict()).min(1, 'Escolha ao menos um item.').max(100)
+    .refine(items => new Set(items.map(i => i.sku)).size === items.length, 'SKU repetido no pedido.'),
+}).strict();
 
 const writeActor = (context: AccessContext): WriteActor => ({
   userId: context.actor.userId, source: context.actor.source, clientId: context.actor.clientId ?? null, idempotencyKey: null,
@@ -52,6 +64,23 @@ export function createProductionOrderOperations(repository: ProductionOrderRepos
     async exportIapp(ctx: AccessContext, batchId: unknown) {
       requireOperation(ctx, 'producao:write', ORDERS_PAGE);
       return repository.exportIapp(z.string().uuid().parse(batchId), writeActor(ctx));
+    },
+    async listProducible(ctx: AccessContext) {
+      requireOperation(ctx, 'producao:read', ORDERS_PAGE);
+      return repository.listProducible();
+    },
+    async createManualOrder(ctx: AccessContext, input: unknown) {
+      requireOperation(ctx, 'producao:write', ORDERS_PAGE);
+      return repository.createManualOrder(manualSchema.parse(input), writeActor(ctx));
+    },
+    /** Consulta o Bling: só para quem pode gerar OP. */
+    async previewSalesOrder(ctx: AccessContext, input: unknown) {
+      requireOperation(ctx, 'producao:write', ORDERS_PAGE);
+      return repository.previewSalesOrder(salesOrderNumber.parse(input).number);
+    },
+    async createFromSalesOrder(ctx: AccessContext, input: unknown) {
+      requireOperation(ctx, 'producao:write', ORDERS_PAGE);
+      return repository.createFromSalesOrder(salesOrderBatchSchema.parse(input), writeActor(ctx));
     },
   };
 }

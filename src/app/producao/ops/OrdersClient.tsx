@@ -16,12 +16,16 @@ import { Label } from '@/components/ui/label';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import * as svc from '@/services/production-orders-service';
+import ManualOrderTab from './ManualOrderTab';
+import SalesOrderTab from './SalesOrderTab';
 import type { BatchSummary, GenerationPreview, ProductionOrderRow } from '@/server/persistence/pcp-orders-contract';
 
 const KIND_LABEL: Record<OrderKind, string> = { semanal: 'Produção semanal (dobra)', corte: 'Corte' };
 const STATUS_LABEL: Record<string, string> = { a_produzir: 'A produzir', produzindo: 'Produzindo', concluido: 'Concluído', suspenso: 'Suspenso', encerrado: 'Encerrado' };
 const fmt = (n: number) => n.toLocaleString('pt-BR', { maximumFractionDigits: 2 });
 const opNumber = (n: number) => String(n).padStart(7, '0');
+const originLabel = (origin: string, salesOrderNumber: string | null) =>
+  origin === 'pedido' ? `Pedido ${salesOrderNumber ?? ''}`.trim() : origin === 'avulsa' ? 'Avulsa' : origin === 'iapp' ? 'iApp' : 'Fila';
 
 /** Planilha no modelo de importação de OP do iApp, para rodar em paralelo até o iApp sair. */
 function downloadIapp(header: readonly string[], rows: (string | number)[][], kind: OrderKind) {
@@ -151,18 +155,20 @@ export default function OrdersClient() {
       <div className="space-y-4 p-4 md:p-6">
         <div>
           <h1 className="text-2xl font-semibold">Ordens de produção</h1>
-          <p className="text-sm text-muted-foreground">Gera as OPs pela fila de produção, com o roteiro de cada ficha técnica, e a planilha para importar no iApp enquanto os dois sistemas rodam juntos.</p>
+          <p className="text-sm text-muted-foreground">Gera as OPs pela fila de produção, avulsas ou a partir de um pedido de venda do Bling, com o roteiro de cada ficha técnica, e a planilha para importar no iApp enquanto os dois sistemas rodam juntos.</p>
         </div>
         <Tabs value={tab} onValueChange={setTab}>
-          <TabsList><TabsTrigger value="gerar">Gerar</TabsTrigger><TabsTrigger value="lotes">Lotes gerados</TabsTrigger><TabsTrigger value="ops">OPs</TabsTrigger></TabsList>
+          <TabsList className="flex-wrap"><TabsTrigger value="gerar">Gerar pela fila</TabsTrigger><TabsTrigger value="avulsa">OP avulsa</TabsTrigger><TabsTrigger value="pedido">Pedido do Bling</TabsTrigger><TabsTrigger value="lotes">Lotes gerados</TabsTrigger><TabsTrigger value="ops">OPs</TabsTrigger></TabsList>
           <TabsContent value="gerar"><Generator onCreated={() => setTab('lotes')} /></TabsContent>
+          <TabsContent value="avulsa"><ManualOrderTab onCreated={() => setTab('ops')} /></TabsContent>
+          <TabsContent value="pedido"><SalesOrderTab onCreated={() => setTab('ops')} /></TabsContent>
           <TabsContent value="lotes">
             <Table>
-              <TableHeader><TableRow><TableHead>Gerado em</TableHead><TableHead>Tipo</TableHead><TableHead className="text-right">OPs</TableHead><TableHead className="text-right">OPs das partes</TableHead><TableHead>Planilha do iApp</TableHead><TableHead /></TableRow></TableHeader>
+              <TableHeader><TableRow><TableHead>Gerado em</TableHead><TableHead>Origem</TableHead><TableHead>Tipo</TableHead><TableHead className="text-right">OPs</TableHead><TableHead className="text-right">OPs das partes</TableHead><TableHead>Planilha do iApp</TableHead><TableHead /></TableRow></TableHeader>
               <TableBody>
                 {(batches ?? []).map(b => (
                   <TableRow key={b.id}>
-                    <TableCell>{new Date(b.createdAt).toLocaleString('pt-BR')}</TableCell><TableCell>{KIND_LABEL[b.kind]}</TableCell>
+                    <TableCell>{new Date(b.createdAt).toLocaleString('pt-BR')}</TableCell><TableCell>{originLabel(b.origin, b.salesOrderNumber)}</TableCell><TableCell>{KIND_LABEL[b.kind]}</TableCell>
                     <TableCell className="text-right">{b.orderCount}</TableCell><TableCell className="text-right">{b.childCount || '—'}</TableCell>
                     <TableCell className="text-sm text-muted-foreground">{b.exportedAt ? `Baixada em ${new Date(b.exportedAt).toLocaleString('pt-BR')}` : 'Ainda não baixada'}</TableCell>
                     <TableCell><Button size="sm" variant="outline" disabled={exporting === b.id} onClick={() => exportBatch(b)}>
@@ -175,11 +181,13 @@ export default function OrdersClient() {
           </TabsContent>
           <TabsContent value="ops">
             <Table>
-              <TableHeader><TableRow><TableHead>OP</TableHead><TableHead>Tipo</TableHead><TableHead>SKU</TableHead><TableHead>Produto</TableHead><TableHead>Ficha</TableHead><TableHead className="text-right">Qtde</TableHead><TableHead className="text-right">OS</TableHead><TableHead>Status</TableHead></TableRow></TableHeader>
+              <TableHeader><TableRow><TableHead>OP</TableHead><TableHead>Origem</TableHead><TableHead>Tipo</TableHead><TableHead>SKU</TableHead><TableHead>Produto</TableHead><TableHead>Ficha</TableHead><TableHead className="text-right">Qtde</TableHead><TableHead className="text-right">OS</TableHead><TableHead>Status</TableHead></TableRow></TableHeader>
               <TableBody>
                 {(orders ?? []).map(o => (
                   <TableRow key={o.id}>
-                    <TableCell className="font-mono text-xs">{opNumber(o.number)}{o.parentOrderId && <span className="ml-1 text-muted-foreground">(parte)</span>}</TableCell>
+                    <TableCell className="font-mono text-xs">{opNumber(o.number)}{o.parentOrderId && <span className="ml-1 text-muted-foreground">(parte)</span>}
+                      {o.urgent && <Badge variant="destructive" className="ml-1">Urgente</Badge>}</TableCell>
+                    <TableCell className="text-sm">{originLabel(o.origin, o.salesOrderNumber)}</TableCell>
                     <TableCell>{o.kind === 'corte' ? 'Corte' : 'Semanal'}</TableCell><TableCell className="font-mono text-xs">{o.sku}</TableCell>
                     <TableCell className="max-w-64 truncate" title={o.description ?? ''}>{o.description}</TableCell><TableCell className="font-mono text-xs">{o.sheetCode}</TableCell>
                     <TableCell className="text-right">{fmt(o.quantity)}</TableCell><TableCell className="text-right">{o.stepCount}</TableCell>

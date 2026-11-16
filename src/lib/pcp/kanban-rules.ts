@@ -134,3 +134,15 @@ export function closeError(order: KanbanOrder, actor: KanbanActor): string | nul
   if (order.steps.some(s => s.status !== 'aberto')) return 'Esta OP já tem OS iniciada e não pode ser excluída.';
   return null;
 }
+
+/** Marcar ou tirar a urgência: só o administrador, só em OP que ainda está no quadro. */
+export function priorityError(order: KanbanOrder, actor: KanbanActor): string | null {
+  if (!actor.isAdmin) return 'Só o administrador muda a urgência da OP.';
+  if (order.status !== 'a_produzir' && order.status !== 'produzindo') return 'Só dá para mudar a urgência de OP que ainda está no quadro.';
+  return null;
+}
+
+/** Ordem dos cards na coluna: urgentes primeiro, depois pelo número da OP. */
+export function queueOrder(a: { urgent: boolean; number: number }, b: { urgent: boolean; number: number }): number {
+  return Number(b.urgent) - Number(a.urgent) || a.number - b.number;
+}

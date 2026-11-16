@@ -5,8 +5,11 @@ import {
   IAPP_HEADER, componentQuantity, iappImportRows, orderStepsFromRoute, pickSheet, suggestOrders, type SheetOption,
 } from '@/lib/pcp/op-generator';
 import type {
-  BatchInput, BatchSummary, GenerationPreview, OrderKind, OrderStatus, PreviewInput, ProductionOrderRepository, ProductionOrderRow,
+  BatchInput, BatchSummary, GenerationPreview, OrderKind, OrderOrigin, OrderStatus, PreviewInput, ProducibleProduct, ProductionOrderRepository,
+  ProductionOrderRow, SalesOrderPreview,
 } from './pcp-orders-contract';
+import { planSalesOrder, type SheetDetail } from '@/lib/pcp/sales-order-plan';
+import { createBlingSalesOrderReader, type BlingSalesOrderReader, type SalesOrderHeader } from '@/server/integrations/bling-sales-orders';
 import { createPostgresSalesInvoices, INVOICE_WINDOW_DAYS, saoPauloDate, type SalesInvoices } from './postgres-sales-invoices';
 import { invoiceDemand, weeksInRange } from '@/lib/pcp/invoice-demand';
 import { OFFICIAL_LINE_SKUS } from '@/lib/pcp/official-line';
@@ -29,13 +32,19 @@ function groupBySku(rows: Row[]): Map<string, SheetOption[]> {
   return map;
 }
 
+/** Origem, prioridade e pedido do Bling de uma OP; o padrão é a OP da fila de reposição. */
+type OrderExtra = { origin: OrderOrigin; urgent: boolean; notes: string | null; salesOrder: { blingId: number; number: string } | null };
+const FROM_QUEUE: OrderExtra = { origin: 'fila', urgent: false, notes: null, salesOrder: null };
+
 /** Grava a OP e suas ordens de serviço copiadas do roteiro da ficha. */
 async function insertOrder(client: PoolClient, order: { batchId: string; parentId: string | null; kind: OrderKind; sku: string;
-  description: string | null; sheetId: string; quantity: number; createdBy: string }): Promise<string> {
+  description: string | null; sheetId: string; quantity: number; createdBy: string }, extra: OrderExtra = FROM_QUEUE): Promise<string> {
   const id = (await client.query(
-    `insert into brsteel_pcp.production_orders (batch_id, parent_order_id, kind, sku, description, sheet_id, quantity, created_by)
-     values ($1, $2, $3, $4, $5, $6, $7, $8) returning id`,
-    [order.batchId, order.parentId, order.kind, order.sku, order.description, order.sheetId, order.quantity, order.createdBy])).rows[0].id as string;
+    `insert into brsteel_pcp.production_orders (batch_id, parent_order_id, kind, sku, description, sheet_id, quantity, created_by,
+       origin, priority, notes, bling_order_id, bling_order_number)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) returning id`,
+    [order.batchId, order.parentId, order.kind, order.sku, order.description, order.sheetId, order.quantity, order.createdBy,
+      extra.origin, extra.urgent ? 'urgente' : 'estoque', extra.notes, extra.salesOrder?.blingId ?? null, extra.salesOrder?.number ?? null])).rows[0].id as string;
   const route = (await client.query(
     `select t.id, t.operation_id, p.operation_id as predecessor_operation_id
      from brsteel_pcp.product_sheet_steps t left join brsteel_pcp.product_sheet_steps p on p.id = t.predecessor_step_id
@@ -55,6 +64,37 @@ async function insertOrder(client: PoolClient, order: { batchId: string; parentI
   return id;
 }
 
+/** Partes da ficha com quantidade somada por SKU. */
+async function sheetComponents(db: Pool | PoolClient, sheetIds: readonly string[]) {
+  const rows = (await db.query(
+    `select sheet_id, component_sku, component_name, sum(quantity) as quantity from brsteel_pcp.product_sheet_components
+     where sheet_id = any($1) group by sheet_id, component_sku, component_name order by component_sku`, [sheetIds])).rows as Row[];
+  const map = new Map<string, { sku: string; name: string | null; quantity: number }[]>();
+  for (const r of rows) map.set(String(r.sheet_id), [...(map.get(String(r.sheet_id)) ?? []),
+    { sku: String(r.component_sku), name: (r.component_name as string) ?? null, quantity: Number(r.quantity) }]);
+  return map;
+}
+
+/** Multinível do corte: uma OP filha por parte da estrutura que tem ficha própria. */
+async function insertParts(client: PoolClient, input: { batchId: string; parentId: string; sheet: Row; quantity: number; bySku: Map<string, SheetOption[]>;
+  createdBy: string; extra?: OrderExtra }): Promise<number> {
+  const components = (await sheetComponents(client, [String(input.sheet.id)])).get(String(input.sheet.id)) ?? [];
+  const bySku = new Map<string, { name: string | null; quantity: number }>();
+  for (const c of components) bySku.set(c.sku, { name: bySku.get(c.sku)?.name ?? c.name, quantity: (bySku.get(c.sku)?.quantity ?? 0) + c.quantity });
+  let count = 0;
+  for (const [sku, component] of bySku) {
+    const childSheet = pickSheet(input.bySku.get(sku) ?? []);
+    if (!childSheet) continue;
+    await insertOrder(client, { batchId: input.batchId, parentId: input.parentId, kind: 'corte', sku, description: component.name, sheetId: childSheet.id,
+      quantity: componentQuantity(input.quantity, component.quantity, Number(input.sheet.base_quantity)), createdBy: input.createdBy }, input.extra);
+    count++;
+  }
+  return count;
+}
+
+/** Teto de consultas de produto no Bling por leitura de pedido (cada uma leva ~400 ms na fila do cliente). */
+const MAX_PRODUCT_READS = 30;
+
 /**
  * O mín/máx exige um GET por produto no Bling (~30 s para a linha toda). O cálculo relê o cadastro
  * quando a última leitura passou de uma hora; dentro da hora, reaproveita. O saldo é lido sempre.
@@ -69,7 +109,8 @@ const INVOICES_FRESH_MS = 3_600_000;
 const brt = (date: Date) => date.toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
 
 export function createPostgresProductionOrderRepository(pool: Pool, bling: BlingReader = createBlingReader(),
-  invoices: Pick<SalesInvoices, 'demand'> = createPostgresSalesInvoices(pool)): ProductionOrderRepository {
+  invoices: Pick<SalesInvoices, 'demand'> = createPostgresSalesInvoices(pool),
+  salesOrders: BlingSalesOrderReader = createBlingSalesOrderReader()): ProductionOrderRepository {
   // Uma releitura por vez nesta instância: cálculos simultâneos esperam a mesma leitura do Bling.
   let refreshing: Promise<unknown> | null = null;
   let lastAttempt = 0;
@@ -82,6 +123,50 @@ export function createPostgresProductionOrderRepository(pool: Pool, bling: Bling
   };
   const readCatalog = async () => (await pool.query(CATALOG_SQL, [OFFICIAL_LINE_SKUS])).rows as Row[];
   const latestSync = (rows: Row[]) => rows.reduce((latest, r) => Math.max(latest, (r.synced_at as Date).getTime()), 0);
+
+  /** Lê o pedido no Bling (só GET) e desdobra pela ficha técnica. Kits sem ficha são abertos pela estrutura do Bling. */
+  async function readSalesOrderPlan(header: Pick<SalesOrderHeader, 'blingId'>) {
+    const warnings: string[] = [];
+    const sheetRows = (await pool.query(SHEETS_SQL)).rows as Row[];
+    const sheetsBySku = groupBySku(sheetRows);
+    const kits = new Map<string, { sku: string; description: string | null; quantity: number }[]>();
+    let order;
+    try {
+      order = await salesOrders.order(header.blingId);
+      let reads = 0;
+      const known = new Map<number, { sku: string; name: string | null }>(((await pool.query('select bling_id, sku, name from brsteel_pcp.bling_products')).rows as Row[])
+        .map(r => [Number(r.bling_id), { sku: String(r.sku), name: (r.name as string) ?? null }]));
+      for (const item of order.items) {
+        if (pickSheet(sheetsBySku.get(item.sku) ?? []) || !item.productBlingId || kits.has(item.sku)) continue;
+        if (reads >= MAX_PRODUCT_READS) { warnings.push(`Pedido com muitos produtos sem ficha: ${item.sku} não foi conferido no Bling.`); continue; }
+        reads++;
+        const product = await salesOrders.product(item.productBlingId);
+        if (product?.format !== 'E' || !product.components.length) continue;
+        const components: { sku: string; description: string | null; quantity: number }[] = [];
+        for (const c of product.components) {
+          let found = known.get(c.blingId) ?? null;
+          if (!found && reads < MAX_PRODUCT_READS) {
+            reads++;
+            const read = await salesOrders.product(c.blingId);
+            if (read) { found = { sku: read.sku, name: read.name }; known.set(c.blingId, found); }
+          }
+          if (!found) { warnings.push(`Um componente do kit ${item.sku} não foi encontrado no Bling.`); continue; }
+          components.push({ sku: found.sku, description: found.name, quantity: c.quantity });
+        }
+        if (components.length) kits.set(item.sku, components);
+      }
+    } catch (error) {
+      if (error instanceof OperationError) throw error;
+      throw new OperationError('BLING_UNAVAILABLE', 'Não foi possível ler o pedido no Bling. Tente de novo em instantes.', 503);
+    }
+    const candidates = new Set([...order.items.map(i => i.sku), ...[...kits.values()].flat().map(c => c.sku)]);
+    const picked = [...candidates].map(sku => pickSheet(sheetsBySku.get(sku) ?? [])).filter((x): x is SheetOption => Boolean(x));
+    const components = await sheetComponents(pool, picked.map(p => p.id));
+    const base = new Map(sheetRows.map(r => [String(r.id), Number(r.base_quantity)]));
+    const sheetDetails = new Map<string, SheetDetail>(picked.map(p => [p.id, { baseQuantity: base.get(p.id) ?? 1, components: components.get(p.id) ?? [] }]));
+    const plan = planSalesOrder({ items: order.items, kits, sheetsBySku, sheetDetails });
+    return { order, lines: plan.lines, warnings: [...warnings, ...plan.warnings] };
+  }
   const repository: ProductionOrderRepository = {
     async preview(input: PreviewInput, actor: WriteActor | null) {
       const warnings: string[] = [];
@@ -187,19 +272,7 @@ export function createPostgresProductionOrderRepository(pool: Pool, bling: Bling
           const parentId = await insertOrder(client, { batchId, parentId: null, kind: input.kind, sku: item.sku,
             description: item.description, sheetId: item.sheetId, quantity: item.quantity, createdBy: actor.userId });
           if (input.kind !== 'corte') continue;
-          // Multinível do corte: uma OP filha por parte da estrutura que tem ficha própria.
-          const sheet = byId.get(item.sheetId)!;
-          const components = (await client.query(
-            `select component_sku, component_name, sum(quantity) as quantity from brsteel_pcp.product_sheet_components
-             where sheet_id = $1 group by component_sku, component_name order by component_sku`, [item.sheetId])).rows as Row[];
-          for (const component of components) {
-            const childSheet = pickSheet(bySku.get(String(component.component_sku)) ?? []);
-            if (!childSheet) continue;
-            await insertOrder(client, { batchId, parentId, kind: 'corte', sku: String(component.component_sku),
-              description: (component.component_name as string) ?? null, sheetId: childSheet.id,
-              quantity: componentQuantity(item.quantity, Number(component.quantity), Number(sheet.base_quantity)), createdBy: actor.userId });
-            childCount++;
-          }
+          childCount += await insertParts(client, { batchId, parentId, sheet: byId.get(item.sheetId)!, quantity: item.quantity, bySku, createdBy: actor.userId });
         }
         await recordWriteAudit(client, { operation: 'pcp.createOrderBatch', actor, target: { collection: 'pcp.orderBatches', id: batchId } });
         return result({ batchId, orderCount: input.items.length, childCount }, 'postgres');
@@ -208,25 +281,28 @@ export function createPostgresProductionOrderRepository(pool: Pool, bling: Bling
 
     async listBatches() {
       const rows = (await pool.query(
-        `select b.id, b.kind, b.created_at, b.created_by, b.exported_at,
+        `select b.id, b.kind, b.origin, b.params->>'blingOrderNumber' as sales_order_number, b.created_at, b.created_by, b.exported_at,
            (select count(*)::int from brsteel_pcp.production_orders o where o.batch_id = b.id and o.parent_order_id is null) order_count,
            (select count(*)::int from brsteel_pcp.production_orders o where o.batch_id = b.id and o.parent_order_id is not null) child_count
          from brsteel_pcp.production_order_batches b order by b.created_at desc limit 100`)).rows as Row[];
       return result(rows.map((r): BatchSummary => ({ id: String(r.id), kind: r.kind as OrderKind, createdAt: (r.created_at as Date).toISOString(),
         createdBy: String(r.created_by), exportedAt: r.exported_at ? (r.exported_at as Date).toISOString() : null,
-        orderCount: Number(r.order_count), childCount: Number(r.child_count) })), 'postgres');
+        orderCount: Number(r.order_count), childCount: Number(r.child_count),
+        origin: r.origin as BatchSummary['origin'], salesOrderNumber: (r.sales_order_number as string) ?? null })), 'postgres');
     },
 
     async listOrders(batchId: string | null) {
       const rows = (await pool.query(
         `select o.id, o.number, o.kind, o.sku, o.description, s.code as sheet_code, o.quantity, o.status, o.parent_order_id, o.batch_id,
+           o.origin, o.priority, o.bling_order_number,
            o.created_at, (select count(*)::int from brsteel_pcp.production_order_steps t where t.order_id = o.id) step_count
          from brsteel_pcp.production_orders o left join brsteel_pcp.product_sheets s on s.id = o.sheet_id
          where ($1::uuid is null or o.batch_id = $1) order by o.number desc limit 500`, [batchId])).rows as Row[];
       return result(rows.map((r): ProductionOrderRow => ({ id: String(r.id), number: Number(r.number), kind: r.kind as OrderKind, sku: String(r.sku),
         description: (r.description as string) ?? null, sheetCode: (r.sheet_code as string) ?? null, quantity: Number(r.quantity),
         status: r.status as OrderStatus, parentOrderId: (r.parent_order_id as string) ?? null, batchId: (r.batch_id as string) ?? null,
-        createdAt: (r.created_at as Date).toISOString(), stepCount: Number(r.step_count) })), 'postgres');
+        createdAt: (r.created_at as Date).toISOString(), stepCount: Number(r.step_count),
+        origin: r.origin as OrderOrigin, urgent: r.priority === 'urgente', salesOrderNumber: (r.bling_order_number as string) ?? null })), 'postgres');
     },
 
     async exportIapp(batchId: string, actor: WriteActor) {
@@ -235,12 +311,108 @@ export function createPostgresProductionOrderRepository(pool: Pool, bling: Bling
         if (!batch) throw new OperationError('NOT_FOUND', 'Lote não encontrado.', 404);
         // Só as OPs mães, sem as excluídas: no corte o iApp gera as OPs das partes a partir do multinível "S".
         const orders = (await client.query(
-          `select s.code, o.quantity, o.kind from brsteel_pcp.production_orders o join brsteel_pcp.product_sheets s on s.id = o.sheet_id
+          `select s.code, o.quantity, o.kind,
+             exists (select 1 from brsteel_pcp.production_orders c where c.parent_order_id = o.id and c.status <> 'encerrado') has_children
+           from brsteel_pcp.production_orders o join brsteel_pcp.product_sheets s on s.id = o.sheet_id
            where o.batch_id = $1 and o.parent_order_id is null and o.status <> 'encerrado' order by o.number`, [batchId])).rows as Row[];
         await client.query('update brsteel_pcp.production_order_batches set exported_at = now() where id = $1', [batchId]);
         await recordWriteAudit(client, { operation: 'pcp.exportIapp', actor, target: { collection: 'pcp.orderBatches', id: batchId } });
-        const rows = iappImportRows(orders.map(o => ({ sheetCode: String(o.code), quantity: Number(o.quantity), kind: o.kind as OrderKind })));
+        const rows = iappImportRows(orders.map(o => ({ sheetCode: String(o.code), quantity: Number(o.quantity), kind: o.kind as OrderKind,
+          multilevel: Boolean(o.has_children) })));
         return result({ batchId, kind: batch.kind as OrderKind, header: IAPP_HEADER, rows }, 'postgres');
+      });
+    },
+
+    async listProducible() {
+      const sheetRows = (await pool.query(SHEETS_SQL)).rows as Row[];
+      const bySku = groupBySku(sheetRows);
+      const picked = [...bySku.values()].map(options => pickSheet(options)).filter((x): x is SheetOption => Boolean(x));
+      const components = await sheetComponents(pool, picked.map(p => p.id));
+      const products = picked.map((sheet): ProducibleProduct => ({
+        sku: sheet.sku, name: sheet.name, sheetId: sheet.id, sheetCode: sheet.code, stepCount: sheet.stepCount,
+        partCount: new Set((components.get(sheet.id) ?? []).filter(c => pickSheet(bySku.get(c.sku) ?? [])).map(c => c.sku)).size,
+      }));
+      return result(products.sort((a, b) => a.sku.localeCompare(b.sku)), 'postgres');
+    },
+
+    async createManualOrder(input, actor) {
+      return withOperationalWrite(pool, async client => {
+        const sheetRows = (await client.query(SHEETS_SQL)).rows as Row[];
+        const sheet = sheetRows.find(r => String(r.id) === input.sheetId);
+        if (!sheet) throw new OperationError('INVALID_INPUT', `Ficha não encontrada para ${input.sku}.`);
+        if (String(sheet.sku) !== input.sku) throw new OperationError('INVALID_INPUT', `A ficha ${sheet.code} não é do SKU ${input.sku}.`);
+        if (!Number(sheet.step_count)) throw new OperationError('INVALID_INPUT', `A ficha ${sheet.code} não tem roteiro.`);
+        const batchId = (await client.query(
+          `insert into brsteel_pcp.production_order_batches (kind, origin, params, created_by) values ($1, 'avulsa', $2, $3) returning id`,
+          [input.kind, JSON.stringify({ manual: true }), actor.userId])).rows[0].id as string;
+        const extra: OrderExtra = { origin: 'avulsa', urgent: input.urgent, notes: input.notes, salesOrder: null };
+        const id = await insertOrder(client, { batchId, parentId: null, kind: input.kind, sku: input.sku, description: String(sheet.name),
+          sheetId: input.sheetId, quantity: input.quantity, createdBy: actor.userId }, extra);
+        const childCount = input.kind === 'corte'
+          ? await insertParts(client, { batchId, parentId: id, sheet, quantity: input.quantity, bySku: groupBySku(sheetRows), createdBy: actor.userId, extra: { ...extra, notes: null } })
+          : 0;
+        const number = Number((await client.query('select number from brsteel_pcp.production_orders where id = $1', [id])).rows[0].number);
+        await recordWriteAudit(client, { operation: 'pcp.createManualOrder', actor, target: { collection: 'pcp.orders', id } });
+        return result({ batchId, number, childCount }, 'postgres');
+      });
+    },
+
+    async previewSalesOrder(number) {
+      let headers: SalesOrderHeader[];
+      try { headers = await salesOrders.findByNumber(number); }
+      catch { throw new OperationError('BLING_UNAVAILABLE', 'Não foi possível buscar o pedido no Bling. Tente de novo em instantes.', 503); }
+      if (!headers.length) throw new OperationError('NOT_FOUND', 'Pedido não encontrado no Bling.', 404);
+      const plan = await readSalesOrderPlan(headers[0]);
+      if (headers.length > 1) plan.warnings.unshift(`${headers.length} pedidos têm este número no Bling; mostrando o pedido ${plan.order.number} de ${plan.order.date ?? 'data desconhecida'}.`);
+      const existing = ((await pool.query(
+        `select number, sku, kind, status, created_at from brsteel_pcp.production_orders
+         where bling_order_id = $1 and status <> 'encerrado' order by number`, [plan.order.blingId])).rows as Row[])
+        .map(r => ({ number: Number(r.number), sku: String(r.sku), kind: r.kind as OrderKind, status: r.status as OrderStatus, createdAt: (r.created_at as Date).toISOString() }));
+      const { items: _items, ...header } = plan.order;
+      void _items;
+      const preview: SalesOrderPreview = { order: header, lines: plan.lines, warnings: plan.warnings, existing };
+      return result(preview, 'postgres');
+    },
+
+    async createFromSalesOrder(input, actor) {
+      // O pedido é relido no Bling fora da transação: o número gravado e os itens válidos vêm de lá, não do cliente.
+      const plan = await readSalesOrderPlan({ blingId: input.blingOrderId });
+      const lines = new Map(plan.lines.map(line => [line.sku, line]));
+      for (const item of input.items) {
+        const line = lines.get(item.sku);
+        if (!line?.sheet) throw new OperationError('INVALID_INPUT', `${item.sku} não está no pedido ou não tem ficha com roteiro.`);
+        if (line.sheet.id !== item.sheetId) throw new OperationError('INVALID_INPUT', `A ficha de ${item.sku} mudou. Busque o pedido de novo.`);
+        if (new Set(item.parts.map(p => p.sku)).size !== item.parts.length) throw new OperationError('INVALID_INPUT', `Parte repetida em ${item.sku}.`);
+        for (const part of item.parts) {
+          const known = line.parts.find(p => p.sku === part.sku);
+          if (!known || known.sheet.id !== part.sheetId) throw new OperationError('INVALID_INPUT', `${part.sku} não é parte de ${item.sku}. Busque o pedido de novo.`);
+        }
+      }
+      const salesOrder = { blingId: plan.order.blingId, number: plan.order.number.slice(0, 30) || String(plan.order.blingId) };
+      return withOperationalWrite(pool, async client => {
+        const existing = (await client.query(
+          `select number from brsteel_pcp.production_orders where bling_order_id = $1 and status <> 'encerrado' order by number`, [salesOrder.blingId])).rows as Row[];
+        if (existing.length && !input.confirmDuplicate) {
+          throw new OperationError('DUPLICATE_SALES_ORDER',
+            `O pedido ${salesOrder.number} já gerou a(s) OP(s) ${existing.map(r => r.number).join(', ')}. Confirme para gerar de novo.`, 409);
+        }
+        const batchId = (await client.query(
+          `insert into brsteel_pcp.production_order_batches (kind, origin, params, created_by) values ('semanal', 'pedido', $1, $2) returning id`,
+          [JSON.stringify({ blingOrderId: salesOrder.blingId, blingOrderNumber: salesOrder.number }), actor.userId])).rows[0].id as string;
+        const extra: OrderExtra = { origin: 'pedido', urgent: input.urgent, notes: null, salesOrder };
+        let childCount = 0;
+        for (const item of input.items) {
+          // Produto do pedido na produção semanal (dobra); as partes no corte, como OPs filhas.
+          const parentId = await insertOrder(client, { batchId, parentId: null, kind: 'semanal', sku: item.sku, description: item.description,
+            sheetId: item.sheetId, quantity: item.quantity, createdBy: actor.userId }, extra);
+          for (const part of item.parts) {
+            await insertOrder(client, { batchId, parentId, kind: 'corte', sku: part.sku, description: part.description,
+              sheetId: part.sheetId, quantity: part.quantity, createdBy: actor.userId }, extra);
+            childCount++;
+          }
+        }
+        await recordWriteAudit(client, { operation: 'pcp.createSalesOrderBatch', actor, target: { collection: 'pcp.orderBatches', id: batchId } });
+        return result({ batchId, orderCount: input.items.length, childCount, salesOrderNumber: salesOrder.number }, 'postgres');
       });
     },
   };

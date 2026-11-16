@@ -504,3 +504,133 @@ test('vendidos das NF-e de saída: pendente conta, cancelada não, só CFOP de v
   const audit = (await pool.query("select count(*)::int as n from brsteel_write.audit where operation = 'pcp.syncSalesInvoices'")).rows[0].n;
   assert.equal(audit, 2);
 });
+
+test('OP avulsa, OP de pedido do Bling e urgência no quadro', async () => {
+  const { createPostgresProductionOrderRepository } = await import('@/server/persistence/postgres-pcp-orders');
+  const { createPostgresKanbanRepository } = await import('@/server/persistence/postgres-pcp-kanban');
+  const { createProductionOrderOperations } = await import('@/server/operations/production-orders');
+  const snapshot = (await repo.read()).data;
+  const op = (name: string) => snapshot.operations.find(o => o.name === name)!.id;
+  const step = (operationId: string) => ({ operationId, predecessorOperationId: null, plannedMinutes: null, notes: null });
+  const sheet = async (code: string, sku: string, steps: string[], components: { componentSku: string; quantity: number }[] = []) =>
+    (await repo.saveSheet(null, { code, sku, name: `Produto ${sku}`, status: 'aberto', baseQuantity: 1, lineId: null, steps: steps.map(step),
+      components: components.map(c => ({ ...c, componentName: null, operationId: null })) }, actor)).data.id;
+  // Cuba sintética: 2 partes com ficha própria (vão para o corte) e uma matéria-prima sem ficha.
+  const cuba = await sheet('PV-0001', 'CUBA-P', [op('Check Q/Q Corte'), op('Dobrar')], [{ componentSku: 'PARTE-P', quantity: 2 }, { componentSku: 'MP-P', quantity: 1 }]);
+  const parte = await sheet('PV-0002', 'PARTE-P', [op('Cortar')]);
+
+  // Pedido sintético no formato do leitor do Bling: a cuba direto, um kit com mais 2 cubas e um item de revenda.
+  let offline = false;
+  const salesOrders = {
+    async findByNumber(number: string) {
+      if (offline) throw new Error('timeout');
+      return number === '900' ? [{ blingId: 42, number: '900', storeNumber: 'LOJA-1', date: '2026-11-15', customerName: 'Cliente Teste' }] : [];
+    },
+    async order(blingId: number) {
+      if (offline) throw new Error('timeout');
+      return { blingId, number: '900', storeNumber: 'LOJA-1', date: '2026-11-15', customerName: 'Cliente Teste', items: [
+        { sku: 'CUBA-P', description: 'Cuba', quantity: 3, productBlingId: 6 },
+        { sku: 'KIT-P', description: 'Kit', quantity: 1, productBlingId: 7 },
+        { sku: 'REVENDA-P', description: 'Revenda', quantity: 1, productBlingId: 9 }] };
+    },
+    async product(blingId: number) {
+      if (blingId === 7) return { blingId, sku: 'KIT-P', name: 'Kit', format: 'E', components: [{ blingId: 8, quantity: 2 }] };
+      if (blingId === 8) return { blingId, sku: 'CUBA-P', name: 'Cuba', format: 'S', components: [] };
+      if (blingId === 9) return { blingId, sku: 'REVENDA-P', name: 'Revenda', format: 'S', components: [] };
+      return null;
+    },
+  };
+  const orders = createPostgresProductionOrderRepository(writerPool, undefined, undefined, salesOrders);
+
+  // OP avulsa: na produção semanal, sem partes; no corte, com as partes.
+  const products = (await orders.listProducible()).data;
+  assert.deepEqual(products.find(p => p.sku === 'CUBA-P'), { sku: 'CUBA-P', name: 'Produto CUBA-P', sheetId: cuba, sheetCode: 'PV-0001', stepCount: 2, partCount: 1 });
+  const manual = (await orders.createManualOrder({ kind: 'semanal', sku: 'CUBA-P', sheetId: cuba, quantity: 4, urgent: true, notes: 'Reposição de vitrine' }, actor)).data;
+  assert.equal(manual.childCount, 0);
+  const manualRow = (await pool.query('select origin, priority, notes, bling_order_id from brsteel_pcp.production_orders where number = $1', [manual.number])).rows[0];
+  assert.deepEqual(manualRow, { origin: 'avulsa', priority: 'urgente', notes: 'Reposição de vitrine', bling_order_id: null });
+  const manualCut = (await orders.createManualOrder({ kind: 'corte', sku: 'CUBA-P', sheetId: cuba, quantity: 3, urgent: false, notes: null }, actor)).data;
+  assert.equal(manualCut.childCount, 1);
+  assert.deepEqual((await orders.listOrders(manualCut.batchId)).data.map(o => [o.sku, o.kind, o.quantity, o.origin]).sort(),
+    [['CUBA-P', 'corte', 3, 'avulsa'], ['PARTE-P', 'corte', 6, 'avulsa']]);
+  await assert.rejects(orders.createManualOrder({ kind: 'semanal', sku: 'OUTRO', sheetId: cuba, quantity: 1, urgent: false, notes: null }, actor), /não é do SKU/);
+  assert.equal((await pool.query("select count(*)::int n from brsteel_write.audit where operation = 'pcp.createManualOrder'")).rows[0].n, 2);
+
+  // Prévia do pedido: a cuba soma o item e o kit; a revenda não tem ficha.
+  const preview = (await orders.previewSalesOrder('900')).data;
+  assert.equal(preview.order.number, '900');
+  assert.deepEqual(preview.lines.map(l => [l.sku, l.quantity, l.sheet?.id ?? null]), [['CUBA-P', 5, cuba], ['REVENDA-P', 1, null]]);
+  assert.deepEqual(preview.lines[0].parts.map(p => [p.sku, p.quantity, p.sheet.id]), [['PARTE-P', 10, parte]]);
+  assert.deepEqual(preview.lines[0].materials, ['MP-P']);
+  assert.match(preview.warnings.join(' '), /REVENDA-P/);
+  assert.deepEqual(preview.existing, []);
+  await assert.rejects(orders.previewSalesOrder('901'), (e: { code?: string }) => e.code === 'NOT_FOUND');
+
+  const input = { blingOrderId: 42, urgent: true, confirmDuplicate: false,
+    items: [{ sku: 'CUBA-P', sheetId: cuba, quantity: 5, description: 'Cuba', parts: [{ sku: 'PARTE-P', sheetId: parte, quantity: 10, description: null }] }] };
+  // Item fora do pedido ou parte que não é da ficha: recusado.
+  await assert.rejects(orders.createFromSalesOrder({ ...input, items: [{ ...input.items[0], sku: 'REVENDA-P' }] }, actor), (e: { code?: string }) => e.code === 'INVALID_INPUT');
+  await assert.rejects(orders.createFromSalesOrder({ ...input, items: [{ ...input.items[0], parts: [{ sku: 'MP-P', sheetId: parte, quantity: 1, description: null }] }] }, actor),
+    (e: { code?: string }) => e.code === 'INVALID_INPUT');
+
+  const fromOrder = (await orders.createFromSalesOrder(input, actor)).data;
+  assert.deepEqual({ ...fromOrder, batchId: undefined }, { batchId: undefined, orderCount: 1, childCount: 1, salesOrderNumber: '900' });
+  const rows = (await pool.query(`select o.sku, o.kind, o.quantity::float8 quantity, o.origin, o.priority, o.bling_order_id::text bling_id, o.bling_order_number,
+      (select m.sku from brsteel_pcp.production_orders m where m.id = o.parent_order_id) parent
+    from brsteel_pcp.production_orders o where o.batch_id = $1 order by o.number`, [fromOrder.batchId])).rows;
+  assert.deepEqual(rows, [
+    { sku: 'CUBA-P', kind: 'semanal', quantity: 5, origin: 'pedido', priority: 'urgente', bling_id: '42', bling_order_number: '900', parent: null },
+    { sku: 'PARTE-P', kind: 'corte', quantity: 10, origin: 'pedido', priority: 'urgente', bling_id: '42', bling_order_number: '900', parent: 'CUBA-P' },
+  ]);
+  const batch = (await orders.listBatches()).data.find(b => b.id === fromOrder.batchId)!;
+  assert.deepEqual({ origin: batch.origin, number: batch.salesOrderNumber, kind: batch.kind }, { origin: 'pedido', number: '900', kind: 'semanal' });
+  // Na planilha do iApp, a OP do pedido com partes vai com multinível "S".
+  assert.deepEqual((await orders.exportIapp(fromOrder.batchId, actor)).data.rows, [['PV-0001', 5, '', 'S', 'N']]);
+
+  // O mesmo pedido de novo pede confirmação.
+  assert.deepEqual((await orders.previewSalesOrder('900')).data.existing.map(e => e.sku), ['CUBA-P', 'PARTE-P']);
+  await assert.rejects(orders.createFromSalesOrder(input, actor), (e: { code?: string }) => e.code === 'DUPLICATE_SALES_ORDER');
+  const again = (await orders.createFromSalesOrder({ ...input, urgent: false, confirmDuplicate: true, items: [{ ...input.items[0], parts: [] }] }, actor)).data;
+  assert.equal(again.childCount, 0);
+
+  // Bling fora do ar: nada é gravado.
+  const before = (await pool.query('select count(*)::int n from brsteel_pcp.production_orders')).rows[0].n;
+  offline = true;
+  await assert.rejects(orders.previewSalesOrder('900'), (e: { code?: string }) => e.code === 'BLING_UNAVAILABLE');
+  await assert.rejects(orders.createFromSalesOrder({ ...input, confirmDuplicate: true }, actor), (e: { code?: string }) => e.code === 'BLING_UNAVAILABLE');
+  assert.equal((await pool.query('select count(*)::int n from brsteel_pcp.production_orders')).rows[0].n, before);
+  offline = false;
+
+  // Pedido sem número do Bling não passa pela constraint.
+  await assert.rejects(pool.query(`insert into brsteel_pcp.production_orders (kind, sku, quantity, created_by, origin) values ('semanal', 'X', 1, 'teste', 'pedido')`),
+    (e: { code?: string }) => e.code === '23514');
+
+  // Sem permissão de gravação: não gera nem consulta o Bling.
+  const ops = createProductionOrderOperations(orders);
+  const readOnly: AccessContext = { ...ctx('Operador'), capabilities: ['producao:read'] };
+  await assert.rejects(ops.createManualOrder(readOnly, { kind: 'semanal', sku: 'CUBA-P', sheetId: cuba, quantity: 1 }), /Sem permissão/);
+  await assert.rejects(ops.previewSalesOrder(readOnly, { number: '900' }), /Sem permissão/);
+  await assert.rejects(ops.previewSalesOrder(ctx('Operador'), { number: '900; drop' }), /inválido/);
+
+  // Quadro: os urgentes vêm primeiro; o card mostra o pedido e a OP mãe.
+  const kanban = createPostgresKanbanRepository(writerPool);
+  const asAdmin = { userId: 'admin', source: 'web' as const, clientId: null, idempotencyKey: null, isAdmin: true };
+  const asLider = { ...asAdmin, userId: 'u-lider', isAdmin: false };
+  let board = (await kanban.board(asAdmin)).data;
+  const todo = board.cards.filter(c => c.column === 'a_produzir');
+  const firstNormal = todo.findIndex(c => !c.urgent);
+  assert.ok(firstNormal > 0 && todo.slice(firstNormal).every(c => !c.urgent), 'urgentes no topo da coluna');
+  const mother = board.cards.find(c => c.salesOrderNumber === '900' && c.sku === 'CUBA-P' && c.urgent)!;
+  const part = board.cards.find(c => c.sku === 'PARTE-P' && c.salesOrderNumber === '900')!;
+  assert.deepEqual({ origin: mother.origin, parent: part.parentNumber, setUrgent: mother.allowed.setUrgent }, { origin: 'pedido', parent: mother.number, setUrgent: true });
+
+  // Só o administrador muda a urgência; a parte acompanha a OP mãe.
+  await assert.rejects(kanban.setPriority(mother.id, false, asLider), /administrador/);
+  await kanban.setPriority(mother.id, false, asAdmin);
+  board = (await kanban.board(asAdmin)).data;
+  assert.deepEqual([mother.id, part.id].map(id => board.cards.find(c => c.id === id)!.urgent), [false, false]);
+  const events = (await pool.query(`select payload from brsteel_pcp.production_order_events where kind = 'priority' and order_id = any($1) order by created_at`,
+    [[mother.id, part.id]])).rows.map(r => r.payload);
+  assert.deepEqual(events.map(p => [p.from, p.to, Boolean(p.parentOrderId)]).sort(), [['urgente', 'estoque', false], ['urgente', 'estoque', true]]);
+  assert.equal((await pool.query("select count(*)::int n from brsteel_write.audit where operation = 'pcp.setOrderPriority'")).rows[0].n, 2);
+});
