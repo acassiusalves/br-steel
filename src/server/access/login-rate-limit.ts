@@ -17,8 +17,11 @@ export const LOGIN_WINDOW_MS = 15 * 60_000;
  * Fora dela, o último salto de `x-forwarded-for` (o que o proxy da frente acrescentou); a primeira
  * entrada vem do próprio cliente e não serve para limite.
  */
-export function clientIp(request: Request): string {
-  const platform = request.headers.get('x-vercel-forwarded-for')?.split(',')[0]?.trim() || request.headers.get('x-real-ip')?.trim();
+export function clientIp(request: Request, onVercel = Boolean(process.env.VERCEL)): string {
+  // Os cabeçalhos da plataforma só valem quando a Vercel os grava; fora dela, qualquer cliente os envia.
+  const platform = onVercel
+    ? request.headers.get('x-vercel-forwarded-for')?.split(',')[0]?.trim() || request.headers.get('x-real-ip')?.trim()
+    : null;
   if (platform) return platform;
   const hops = request.headers.get('x-forwarded-for')?.split(',').map(part => part.trim()).filter(Boolean) ?? [];
   return hops.at(-1) || 'desconhecido';
