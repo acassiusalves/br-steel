@@ -1,12 +1,13 @@
 import { clearBridgeCookieHeader } from '@/server/oauth/cookies';
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
+import { FieldValue } from 'firebase-admin/firestore';
 import { adminDb } from '@/lib/firebase-admin';
 import { getSessionFromRequest, hashPassword, sessionCookieHeader, createSessionToken, verifyPassword } from '@/lib/server-auth';
 import { needsPasswordChange } from '@/server/access/passwords';
 import { isKnownRole, publicUser, storedUserFromDoc } from '@/server/access/users';
 import { rejectCrossOrigin } from '@/server/access/request';
-import { BADGE_INITIAL_PASSWORD, BADGE_MIN_PASSWORD, isBadgeUser } from '@/server/access/badges';
+import { BADGE_INITIAL_PASSWORD, BADGE_MIN_PASSWORD, isBadgeUser, isTrivialPin } from '@/server/access/badges';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -45,8 +46,15 @@ export async function PATCH(request: Request) {
     if (newPassword && newPassword === BADGE_INITIAL_PASSWORD) {
       return { error: 'Escolha uma senha diferente de 123456.', status: 400 } as const;
     }
+    if (newPassword && isBadgeUser(stored) && isTrivialPin(newPassword)) {
+      return { error: 'Escolha uma senha menos óbvia: evite o mesmo caractere repetido ou números em sequência.', status: 400 } as const;
+    }
     const mustChange = needsPasswordChange(stored);
     if (mustChange && !newPassword) return { error: 'Cadastre uma nova senha para concluir o primeiro acesso.', status: 400 } as const;
+    // O PIN inicial foi visto pelo administrador: não pode virar a senha pessoal.
+    if (newPassword && mustChange && verifyPassword(newPassword, stored.passwordHash, stored.passwordSalt)) {
+      return { error: 'Escolha uma senha diferente da senha inicial.', status: 400 } as const;
+    }
     if (newPassword && !mustChange && !verifyPassword(currentPassword, stored.passwordHash, stored.passwordSalt)) {
       return { error: 'Senha atual inválida.', status: 401 } as const;
     }
@@ -57,7 +65,7 @@ export async function PATCH(request: Request) {
         mustChangePassword: false, authVersion: stored.authVersion + 1,
       } : {}),
     };
-    transaction.update(ref, update);
+    transaction.update(ref, credential ? { ...update, initialPasswordExpiresAt: FieldValue.delete() } : update);
     return { user: { ...stored, ...update } };
   });
   if ('error' in result) return NextResponse.json({ ok: false, error: result.error }, { status: result.status });

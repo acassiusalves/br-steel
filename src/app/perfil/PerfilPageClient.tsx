@@ -66,6 +66,7 @@ export default function PerfilPageClient() {
             if (newPassword) {
                 await refreshPermissions();
                 if (next) router.replace(next);
+                else if (user?.badge) router.replace('/producao/quadro');
             }
 
 

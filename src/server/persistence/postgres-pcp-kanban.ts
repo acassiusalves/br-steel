@@ -175,7 +175,10 @@ export function createPostgresKanbanRepository(pool: Pool): KanbanRepository {
         if (asksBadge) {
           if (!badge?.trim()) refuse('Bipe ou digite o crachá de quem vai executar.');
           const code = normalizeBadge(badge);
-          const worker = code ? people.workers.find(w => String(w.badge).toUpperCase() === code) : undefined;
+          // Mesma normalização do cadastro e do login. Dois cadastros com o mesmo código não escolhem por acaso.
+          const matches = code ? people.workers.filter(w => normalizeBadge(String(w.badge)) === code) : [];
+          if (matches.length > 1) refuse('Este crachá está repetido no cadastro de funcionários. Corrija na Engenharia antes de bipar.');
+          const worker = matches[0];
           if (!worker) refuse('Crachá não encontrado.');
           const moved: KanbanOrder = { ...order, status: 'produzindo', phaseId: target };
           const step = moved.steps.find(s => s.phaseId === target && s.status === 'aberto');

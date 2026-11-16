@@ -10,8 +10,11 @@ import {
 import { adminDb } from '@/lib/firebase-admin';
 import { isKnownRole, publicUser } from '@/server/access/users';
 import { rejectCrossOrigin } from '@/server/access/request';
-import { BADGE_LOCK_MS, BADGE_MAX_FAILURES, badgeUserId, isBadgeUser, normalizeBadge } from '@/server/access/badges';
+import {
+  BADGE_INITIAL_PASSWORD_EXPIRED, BADGE_LOCK_MS, BADGE_MAX_FAILURES, badgeUserId, isBadgeUser, normalizeBadge,
+} from '@/server/access/badges';
 import { storedUserFromDoc, type StoredUser } from '@/server/access/users';
+import { consumeLoginAttempt } from '@/server/access/login-rate-limit';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -19,6 +22,12 @@ export const runtime = 'nodejs';
 export async function POST(request: Request) {
   const originError = rejectCrossOrigin(request);
   if (originError) return originError;
+  // Limite por endereço antes de qualquer leitura: impede testar a mesma senha em todos os crachás.
+  const retryAfter = await consumeLoginAttempt(request);
+  if (retryAfter) {
+    return NextResponse.json({ ok: false, error: 'Muitas tentativas de login deste endereço. Aguarde e tente novamente.' },
+      { status: 429, headers: { 'Retry-After': String(retryAfter), 'Cache-Control': 'no-store' } });
+  }
   let body: any;
   try {
     body = await request.json();
@@ -63,8 +72,9 @@ export async function POST(request: Request) {
 }
 
 /**
- * Crachá: depois de 5 senhas erradas seguidas, o crachá fica bloqueado por 15 minutos. Compensa a senha
- * curta e a senha de primeiro acesso conhecida (123456). O contador zera no acerto.
+ * Crachá: depois de 5 senhas erradas seguidas, o crachá fica bloqueado por 15 minutos. O contador zera no
+ * acerto. A conta só entra com senha gravada: o PIN inicial (válido por 72 h) ou a senha pessoal. Conta antiga
+ * sem senha gravada não entra mais com 123456; o administrador reseta e entrega um PIN novo.
  */
 async function loginWithBadge(badge: string, password: string): Promise<{ user: StoredUser } | { error: string; status: number }> {
   const invalid = { error: 'Crachá ou senha inválidos.', status: 401 } as const;
@@ -84,12 +94,15 @@ async function loginWithBadge(badge: string, password: string): Promise<{ user: 
       const minutes = Math.ceil((lockedUntil - now) / 60_000);
       return { error: `Crachá bloqueado por excesso de tentativas. Tente de novo em ${minutes} min ou peça ao administrador para resetar a senha.`, status: 429 };
     }
-    if (!verifyPassword(password, user.passwordHash, user.passwordSalt)) {
+    const hasPassword = !!user.passwordHash && !!user.passwordSalt;
+    if (!hasPassword || !verifyPassword(password, user.passwordHash, user.passwordSalt)) {
       const failures = failedLogins + 1;
       tx.update(ref, failures >= BADGE_MAX_FAILURES ? { failedLogins: 0, lockedUntil: now + BADGE_LOCK_MS } : { failedLogins: failures });
       return invalid;
     }
     if (failedLogins || lockedUntil) tx.update(ref, { failedLogins: 0, lockedUntil: 0 });
+    const expiresAt = typeof data.initialPasswordExpiresAt === 'number' ? data.initialPasswordExpiresAt : null;
+    if (user.mustChangePassword && expiresAt !== null && expiresAt <= now) return { error: BADGE_INITIAL_PASSWORD_EXPIRED, status: 401 };
     return { user };
   });
 }

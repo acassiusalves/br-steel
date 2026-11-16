@@ -62,6 +62,9 @@ test('linha, operações com predecessora, equipe com líder e hierarquia de fun
   const membro = (await repo.saveWorker(null, worker('Membro', '010'), actor)).data.id;
   const outro = (await repo.saveWorker(null, worker('Outro', '011'), actor)).data.id;
   await assert.rejects(repo.saveWorker(null, worker('Duplicado', '009'), actor), /crachá/);
+  // O crachá é gravado normalizado: a restrição recusa minúsculas, espaços e acentos vindos de fora do app.
+  await assert.rejects(repo.saveWorker(null, worker('Minúsculo', 'ab-1'), actor), /Crachá inválido/);
+  await assert.rejects(repo.saveWorker(null, worker('Espaço', '12 34'), actor), /Crachá inválido/);
 
   const teamInput = (members: { workerId: string; leaderId: string | null }[], leaderId: string | null) =>
     ({ name: 'Dobra', status: 'aberto' as const, shift: 'integral' as const, leaderId, operationIds: [dobrar], members });

@@ -31,5 +31,8 @@ export async function getSheet(id: string): Promise<ProductSheet> {
   return (await fetchOperation<ProductSheet>(`${path}?view=sheet&id=${encodeURIComponent(id)}`)).data;
 }
 export const saveSheet = (id: string | null, data: SheetInput) => mutate<{ id: string }>('saveSheet', data, id);
-export const createBadgeAccess = (workerId: string) => mutate<{ userId: string; badge: string }>('createBadgeAccess', undefined, workerId);
-export const resetBadgePassword = (workerId: string) => mutate<null>('resetBadgePassword', undefined, workerId);
+/** PIN inicial devolvido uma única vez pelo servidor, com o instante em que deixa de valer (ms). */
+export type BadgeInitialPassword = { initialPassword: string; expiresAt: number };
+export const createBadgeAccess = (workerId: string) =>
+  mutate<{ userId: string; badge: string } & BadgeInitialPassword>('createBadgeAccess', undefined, workerId);
+export const resetBadgePassword = (workerId: string) => mutate<BadgeInitialPassword>('resetBadgePassword', undefined, workerId);

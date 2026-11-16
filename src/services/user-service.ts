@@ -8,7 +8,7 @@ import { hashPassword } from '@/server/access/passwords';
 import { normalizeUserEmail, publicUser, storedUserFromDoc, validDocumentId } from '@/server/access/users';
 import type { User } from '@/types/user';
 
-const roleSchema = z.enum(['Administrador', 'Vendedor', 'Operador']);
+const roleSchema = z.enum(['Administrador', 'Vendedor', 'Operador', 'Produção']);
 const newUserSchema = z.object({
   name: z.string().trim().min(1).max(120),
   email: z.string().trim().toLowerCase().email().max(254),
@@ -21,13 +21,25 @@ export async function getUsers(): Promise<User[]> {
   return snapshot.docs.map(d => publicUser(storedUserFromDoc(d.id, d.data())))
     .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
 }
-/** Minimal directory for the Kanban, separate from user administration. */
-export async function getAssignableUsers(): Promise<Array<Pick<User, 'id' | 'name' | 'role' | 'badge'>>> {
+/**
+ * Minimal directory for the legacy Kanban, separate from user administration. It never returns the badge code:
+ * the badge is a login identifier and this list reaches every operator.
+ */
+export async function getAssignableUsers(): Promise<Array<Pick<User, 'id' | 'name' | 'role'>>> {
   await requireActionPage('/producao/kanban');
   const snapshot = await adminDb.collection('users').get();
   return snapshot.docs.map(d => storedUserFromDoc(d.id, d.data()))
     .filter(u => u.active !== false && ['Administrador', 'Operador'].includes(u.role))
-    .map(({ id, name, role, badge }) => ({ id, name, role, ...(badge ? { badge } : {}) }))
+    .map(({ id, name, role }) => ({ id, name, role }))
+    .sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'));
+}
+/** Accounts the administrator can link to a PCP worker, including inactive ones so a stale link stays visible. */
+export async function getLinkableAccounts(): Promise<Array<Pick<User, 'id' | 'name' | 'role' | 'badge'> & { active: boolean }>> {
+  await requireAdministrator();
+  const snapshot = await adminDb.collection('users').get();
+  return snapshot.docs.map(d => storedUserFromDoc(d.id, d.data()))
+    .filter(u => ['Administrador', 'Operador', 'Produção'].includes(u.role))
+    .map(({ id, name, role, badge, active }) => ({ id, name, role, active: active !== false, ...(badge ? { badge } : {}) }))
     .sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'));
 }
 export async function addUser(input: Pick<User, 'name' | 'email' | 'role'>): Promise<{ id: string; temporaryPassword: string }> {

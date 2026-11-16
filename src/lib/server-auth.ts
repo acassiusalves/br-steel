@@ -21,6 +21,8 @@ function getSecret() {
   return 'brsteel-dev-session-secret';
 }
 function sign(value: string) { return crypto.createHmac('sha256', getSecret()).update(value).digest('base64url'); }
+/** Identificador estável e não reversível sem o segredo, para chaves de contadores (ex.: endereço de rede). */
+export function keyedDigest(value: string) { return crypto.createHmac('sha256', getSecret()).update(`digest:${value}`).digest('hex'); }
 export function createSessionToken(user: SessionUser, authVersion = 0) {
   const payload = Buffer.from(JSON.stringify({
     user: { id: user.id, name: user.name, email: user.email, role: user.role },

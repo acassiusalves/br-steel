@@ -1,5 +1,5 @@
 import { beforeEach, expect, it } from 'vitest';
-import { addUser, deleteUser, getUsers, updateUserRole, getAssignableUsers, setUserActive } from '@/services/user-service';
+import { addUser, deleteUser, getUsers, updateUserRole, getAssignableUsers, getLinkableAccounts, setUserActive } from '@/services/user-service';
 import { loadAppSettings, saveAppSettings } from '@/services/app-settings-service';
 import { createSessionToken, hashPassword, verifyPassword, getSessionFromToken } from '@/lib/server-auth';
 import { adminDb, cookieJar, resetDatabase, seedUser } from '../helpers/firestore';
@@ -90,6 +90,18 @@ it('provides the operator a minimal active directory without user-administration
   expect(directory.map(user => user.id).sort()).toEqual(['admin', 'operator']);
   expect(directory.every(user => Object.keys(user).sort().join(',') === 'id,name,role')).toBe(true);
   await expect(getUsers()).rejects.toThrow();
+});
+it('lists linkable accounts with badge and status only to the administrator', async () => {
+  await seedUser('cracha-26557', { role: 'Produção', badge: '26557', active: false });
+  const { hash, salt } = hashPassword('lider-unique-password');
+  await seedUser('cracha-30001', { role: 'Produção', badge: '30001', passwordHash: hash, passwordSalt: salt });
+  await seedUser('seller', { role: 'Vendedor' });
+  cookieJar.value = createSessionToken({ id: 'cracha-30001', name: 'Líder', email: 'cracha-30001', role: 'Produção' });
+  await expect(getLinkableAccounts()).rejects.toThrow(/Sem permissão/);
+  signIn();
+  const accounts = await getLinkableAccounts();
+  expect(accounts.map(a => a.id).sort()).toEqual(['admin', 'cracha-26557', 'cracha-30001']);
+  expect(accounts.find(a => a.id === 'cracha-26557')).toEqual({ id: 'cracha-26557', name: 'cracha-26557', role: 'Produção', badge: '26557', active: false });
 });
 it('keeps an active administrator under concurrent demotions', async () => {
   signIn();

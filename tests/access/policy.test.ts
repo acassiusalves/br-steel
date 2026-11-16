@@ -24,3 +24,10 @@ it('never treats inherited object properties as pages', () => {
   expect(canAccessPage({ role: 'Administrador' }, context('Administrador'), '__proto__')).toBe(false);
   expect(canAccessPage({ role: 'Administrador' }, context('Administrador'), 'constructor')).toBe(false);
 });
+
+it('limits the badge production role to the OP board, the profile and its own reports', () => {
+  const allowed = Object.keys(pagePermissions).filter(page => canAccessPage({ role: 'Produção' }, context('Produção'), page));
+  expect(allowed.sort()).toEqual(['/meus-reportes', '/perfil', '/producao/quadro']);
+  expect(() => requireCapability({ ...context('Produção'), capabilities: ['producao:write'] }, 'producao:write', '/producao/quadro')).not.toThrow();
+  expect(() => requireCapability({ ...context('Produção'), capabilities: ['producao:write'] }, 'producao:write', '/producao/kanban')).toThrow();
+});

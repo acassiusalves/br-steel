@@ -16,7 +16,7 @@ import { Switch } from '@/components/ui/switch';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import * as svc from '@/services/engineering-service';
-import { getAssignableUsers } from '@/services/user-service';
+import { getLinkableAccounts } from '@/services/user-service';
 import { SheetsTab } from './SheetsTab';
 import type {
   EngineeringSnapshot, ProductionLine, ProductionOperation, TeamMemberRow, WorkTeam, Worker, WorkPeriodRow,
@@ -86,11 +86,13 @@ export default function EngineeringClient() {
   const [editing, setEditing] = React.useState<Editing>(null);
   const [form, setForm] = React.useState<Record<string, unknown>>({});
   const [saving, setSaving] = React.useState(false);
-  const [users, setUsers] = React.useState<{ id: string; name: string; role: string; badge?: string }[]>([]);
+  const [users, setUsers] = React.useState<{ id: string; name: string; role: string; active: boolean; badge?: string }[]>([]);
+  // PIN inicial devolvido pelo servidor uma única vez, ao criar o acesso ou resetar a senha.
+  const [credential, setCredential] = React.useState<{ name: string; badge: string; pin: string; expiresAt: number } | null>(null);
   const isAdmin = user?.role === 'Administrador';
 
   // Usuários de login, para vincular ao funcionário: é por esse vínculo que ele age no Kanban de OPs.
-  const loadUsers = React.useCallback(() => { if (isAdmin) void getAssignableUsers().then(setUsers).catch(() => setUsers([])); }, [isAdmin]);
+  const loadUsers = React.useCallback(() => { if (isAdmin) void getLinkableAccounts().then(setUsers).catch(() => setUsers([])); }, [isAdmin]);
   React.useEffect(loadUsers, [loadUsers]);
 
   React.useEffect(() => subscribeOperation(svc.getEngineering,
@@ -106,6 +108,13 @@ export default function EngineeringClient() {
     return map;
   }, [data]);
   const name = (id: string | null) => (id ? names.get(id) ?? '—' : '—');
+  const loginLabel = (userId: string | null) => {
+    if (!userId) return '—';
+    if (!isAdmin) return 'Vinculado';
+    const account = users.find(u => u.id === userId);
+    if (!account) return 'Login removido';
+    return `${account.badge ? 'Crachá' : account.name}${account.active ? '' : ' · inativo'}`;
+  };
 
   const open = (next: Editing) => {
     setEditing(next);
@@ -236,20 +245,27 @@ export default function EngineeringClient() {
                 {data.workers.map(w => (
                   <TableRow key={w.id}>
                     <TableCell className="font-mono text-xs">{w.badge}</TableCell><TableCell>{w.name}</TableCell><TableCell>{w.kind}</TableCell>
-                    <TableCell className="text-xs">{data.teams.filter(t => t.members.some(m => m.workerId === w.id)).map(t => t.name).join(', ') || '—'}</TableCell><TableCell className="text-xs">{w.userId ? (users.find(u => u.id === w.userId)?.badge ? 'Crachá' : users.find(u => u.id === w.userId)?.name ?? 'Vinculado') : '—'}</TableCell><TableCell>{status(w.active)}</TableCell>
+                    <TableCell className="text-xs">{data.teams.filter(t => t.members.some(m => m.workerId === w.id)).map(t => t.name).join(', ') || '—'}</TableCell><TableCell className="text-xs">{loginLabel(w.userId)}</TableCell><TableCell>{status(w.active)}</TableCell>
                     <TableCell className="whitespace-nowrap">
                       {editButton({ kind: 'worker', value: w })}
                       {isAdmin && !w.userId && w.badge && (
                         <Button size="sm" variant="outline" className="ml-2" disabled={saving}
-                          onClick={() => window.confirm(`Criar o acesso de ${w.name} pelo crachá ${w.badge}? No primeiro acesso a senha é 123456 e ele cadastra a senha pessoal.`)
-                            && void run(() => svc.createBadgeAccess(w.id).then(loadUsers), `Acesso criado. Primeiro acesso: crachá ${w.badge} e senha 123456.`)}>
+                          onClick={() => window.confirm(`Criar o acesso de ${w.name} pelo crachá ${w.badge}? O sistema mostra um PIN de primeiro acesso uma única vez, válido por 72 horas.`)
+                            && void run(async () => {
+                              const created = await svc.createBadgeAccess(w.id);
+                              setCredential({ name: w.name, badge: created.badge, pin: created.initialPassword, expiresAt: created.expiresAt });
+                              loadUsers();
+                            }, 'Acesso criado.')}>
                           Criar acesso pelo crachá
                         </Button>
                       )}
                       {isAdmin && w.userId && users.find(u => u.id === w.userId)?.badge && (
                         <Button size="sm" variant="outline" className="ml-2" disabled={saving}
-                          onClick={() => window.confirm(`Resetar a senha de ${w.name}? Ele volta a entrar com 123456 e cadastra uma senha nova. As sessões abertas dele serão encerradas.`)
-                            && void run(() => svc.resetBadgePassword(w.id), `Senha resetada. ${w.name} entra com o crachá e a senha 123456.`)}>
+                          onClick={() => window.confirm(`Resetar a senha de ${w.name}? O sistema mostra um PIN novo uma única vez, e as sessões abertas dele serão encerradas.`)
+                            && void run(async () => {
+                              const reset = await svc.resetBadgePassword(w.id);
+                              setCredential({ name: w.name, badge: w.badge, pin: reset.initialPassword, expiresAt: reset.expiresAt });
+                            }, 'Senha resetada.')}>
                           Resetar senha
                         </Button>
                       )}
@@ -325,7 +341,9 @@ export default function EngineeringClient() {
                 <Field label="Tipo (ex.: Dobrador)"><Input value={String(form.kind ?? '')} onChange={e => set('kind', e.target.value)} /></Field>
               </div>
               <Field label="Usuário de login (para agir no Kanban de OPs)"><select className={selectClass} value={String(form.userId ?? '')} onChange={e => set('userId', e.target.value || null)}>
-                <option value="">Sem usuário</option>{users.map(u => <option key={u.id} value={u.id}>{u.name} · {u.role}</option>)}</select></Field>
+                <option value="">Sem usuário</option>
+                {typeof form.userId === 'string' && !users.some(u => u.id === form.userId) && <option value={String(form.userId)}>Login não encontrado (removido)</option>}
+                {users.map(u => <option key={u.id} value={u.id}>{u.name} · {u.role}{u.active ? '' : ' · inativo'}</option>)}</select></Field>
               <Field label="Operações que pode iniciar"><OperationPicker operations={data.operations} value={form.operationIds as string[] ?? []} onChange={ids => set('operationIds', ids)} /></Field>
             </>}
             {editing && editing.kind !== 'team' && (
@@ -336,6 +354,23 @@ export default function EngineeringClient() {
             <Button variant="outline" onClick={() => setEditing(null)}>Cancelar</Button>
             <Button onClick={save} disabled={saving}>{saving && <Loader2 className="mr-1 h-4 w-4 animate-spin" />}Salvar</Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={credential !== null} onOpenChange={o => !o && setCredential(null)}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader><DialogTitle>PIN de primeiro acesso</DialogTitle></DialogHeader>
+          {credential && (
+            <div className="space-y-3 text-sm">
+              <p>Entregue em mãos para <strong>{credential.name}</strong>. Este PIN não aparece de novo.</p>
+              <div className="rounded-md border p-3">
+                <div>Crachá: <span className="font-mono">{credential.badge}</span></div>
+                <div>PIN: <span className="font-mono text-lg font-semibold tracking-widest">{credential.pin}</span></div>
+              </div>
+              <p className="text-muted-foreground">Vale até {new Date(credential.expiresAt).toLocaleString('pt-BR')}. No primeiro acesso, ele cadastra uma senha pessoal. Depois disso, peça um reset.</p>
+            </div>
+          )}
+          <DialogFooter><Button onClick={() => setCredential(null)}>Já entreguei</Button></DialogFooter>
         </DialogContent>
       </Dialog>
     </DashboardLayout>

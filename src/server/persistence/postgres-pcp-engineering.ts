@@ -24,6 +24,9 @@ function mapConstraint(error: unknown): never {
       : constraint?.includes('user_id') ? 'usuário' : 'nome';
     throw new OperationError('DUPLICATE', `Já existe um cadastro com este ${field}.`, 409);
   }
+  if (code === '23514' && constraint === 'workers_badge_normalized') {
+    throw new OperationError('INVALID_BADGE', 'Crachá inválido: use só letras maiúsculas, números e hífen (até 40).');
+  }
   if (code === '23503') throw new OperationError('IN_USE', 'O cadastro está em uso ou referencia um registro inexistente.', 409);
   throw error;
 }

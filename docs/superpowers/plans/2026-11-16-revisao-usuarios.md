@@ -2,6 +2,11 @@
 
 Revisão de 16/11/2026, feita sobre o commit `a3b118f` (`main`). Registro histórico: o comportamento atual é o do código.
 
+## Andamento
+
+- **16/11/2026, Fase 1 implementada** na branch `claude/revisao-usuarios-beebf5`, seguindo as recomendações de P-1, P-2 e P-5. PIN inicial individual de 6 dígitos, válido por 72 h e mostrado uma vez ao administrador; conta antiga sem senha gravada não entra mais pelo crachá. Papel `Produção` (quadro de OPs, perfil e próprios reportes) para as contas de crachá. "Criar acesso" adota a conta existente do mesmo crachá com reset, recusa conta de administrador e recusa quando outro funcionário já está vinculado ao login. Crachá validado e gravado normalizado (migration `20261118120000_pcp_worker_badge_normalized.sql`, a aplicar com destino explícito). Troca de crachá bloqueada com login vinculado. Bipagem com a mesma normalização, recusando código repetido. Limite de login por endereço (coleção `loginRateLimits`, com TTL a publicar em `firestore.indexes.json`). Também entraram partes pequenas de U-08 (lista de contas só para administrador), U-10 (opção visível para login removido), U-17 (importação do iApp não troca crachá de quem tem login) e U-18 (líder cai no quadro).
+- P-4 (zeros à esquerda) segue aberta: a normalização mantém os zeros até o teste do leitor na Fase 0.
+
 ## Objetivo e método
 
 O administrador vai começar os cadastros reais do PCP: funcionários, acessos pelo crachá, líderes e o operador do piloto. Hoje nenhum dos 23 funcionários ativos de `brsteel_pcp.workers` tem `user_id`, e os 5 líderes das 6 equipes abertas também estão sem acesso. Esta revisão segue o caminho real do código de login, sessão, contas, permissões e vínculo com o Kanban, e lista o que precisa ser corrigido antes e depois desses cadastros.

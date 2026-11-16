@@ -30,6 +30,11 @@ service cloud.firestore {
     }
 
     // OAuth identities, intents and grants are accessible only through authenticated backend services.
+    // Contadores do limite de login por endereço: somente Admin SDK.
+    match /loginRateLimits/{document=**} {
+      allow read, write: if false;
+    }
+
     match /mcpIdentities/{document=**} {
       allow read, write: if false;
     }
