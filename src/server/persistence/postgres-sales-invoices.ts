@@ -9,7 +9,7 @@ import { withOperationalWrite } from './postgres-write';
 
 type Row = Record<string, unknown>;
 const DAY_MS = 86_400_000;
-/** Janela copiada do Bling: cobre os 84 dias do gerador com folga. */
+/** Janela copiada do Bling: cobre os 90 dias padrão do gerador com folga. */
 export const INVOICE_WINDOW_DAYS = 120;
 /** Nota fora das listagens por mais que isso foi excluída no Bling (evita apagar por uma página que mudou no meio da leitura). */
 const VANISHED = '2 hours';

@@ -142,7 +142,20 @@ export function priorityError(order: KanbanOrder, actor: KanbanActor): string | 
   return null;
 }
 
-/** Ordem dos cards na coluna: urgentes primeiro, depois pelo número da OP. */
-export function queueOrder(a: { urgent: boolean; number: number }, b: { urgent: boolean; number: number }): number {
-  return Number(b.urgent) - Number(a.urgent) || a.number - b.number;
+type QueueCard = { urgent: boolean; number: number; iappNumber?: string | null };
+/** Número que aparece no card: o do iApp, quando a OP veio de lá; senão, o do BR Steel. */
+const shownNumber = (card: QueueCard) => {
+  const iapp = card.iappNumber ? Number(card.iappNumber) : NaN;
+  return Number.isFinite(iapp) ? iapp : card.number;
+};
+/**
+ * Ordem dos cards na coluna (chamado nº 2, de 17/11/2026): a de menor número no topo, em ordem crescente
+ * do número mostrado no card. As OPs do iApp, mais antigas, vêm antes das geradas no BR Steel, que têm
+ * numeração própria. Urgente fura a fila (reunião de 13/11/2026).
+ */
+export function queueOrder(a: QueueCard, b: QueueCard): number {
+  return Number(b.urgent) - Number(a.urgent)
+    || Number(!a.iappNumber) - Number(!b.iappNumber)
+    || shownNumber(a) - shownNumber(b)
+    || a.number - b.number;
 }
