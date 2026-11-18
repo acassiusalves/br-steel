@@ -120,4 +120,12 @@ describe('urgência', () => {
     const cards = [{ number: 10, urgent: false }, { number: 30, urgent: true }, { number: 5, urgent: false }, { number: 20, urgent: true }];
     expect([...cards].sort(queueOrder).map(c => c.number)).toEqual([20, 30, 5, 10]);
   });
+  it('ordem crescente pelo número mostrado no card: OPs do iApp (importadas de trás para frente) antes das do BR Steel (chamado nº 2)', () => {
+    const cards = [
+      { number: 3, iappNumber: '0009658', urgent: false }, { number: 1, iappNumber: '0009660', urgent: false },
+      { number: 2, iappNumber: '0009659', urgent: false }, { number: 54, iappNumber: null, urgent: false },
+      { number: 55, iappNumber: null, urgent: false }, { number: 60, iappNumber: null, urgent: true },
+    ];
+    expect([...cards].sort(queueOrder).map(c => c.iappNumber ?? String(c.number))).toEqual(['60', '0009658', '0009659', '0009660', '54', '55']);
+  });
 });

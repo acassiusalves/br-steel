@@ -347,8 +347,12 @@ test('Kanban de OPs: líder move, membro executa, perda reduz a quantidade e o c
   assert.equal((await createPostgresProductionOrderRepository(writerPool).exportIapp(extra.batchId, actor)).data.rows.length, 0);
 });
 
-test('gerador mín/máx: cadastro copiado do Bling, saldo do depósito Estoque e OP aberta descontada', async () => {
+test('gerador de OP: cadastro copiado do Bling, saldo do depósito Estoque, faixa da fila e média semanal com margem', async () => {
   const { createPostgresProductionOrderRepository } = await import('@/server/persistence/postgres-pcp-orders');
+  const { weeksInRange } = await import('@/lib/pcp/invoice-demand');
+  // Vendas das NF-e no período: a calha vende o dobro da porta-utensílios.
+  const invoices = { async demand() { return { items: [{ sku: 'PTU200200150', cfop: '5102', quantity: 120 }, { sku: 'CNUL440205140IN', cfop: '5102', quantity: 240 }],
+    kits: new Map(), pendingInvoices: 0, listedAt: new Date() }; } };
   // Bling falso: só a linha oficial interessa; o saldo é o do depósito Estoque (não o total).
   const calls: string[] = [];
   const bling = {
@@ -364,8 +368,9 @@ test('gerador mín/máx: cadastro copiado do Bling, saldo do depósito Estoque e
     },
     async estoqueBalances(ids: readonly number[]) { calls.push(`balances:${ids.length}`); return new Map([[101, 0], [102, 0], [103, 31], [104, 23]]); },
   };
-  const orders = createPostgresProductionOrderRepository(writerPool, bling);
+  const orders = createPostgresProductionOrderRepository(writerPool, bling, invoices);
   const range = { from: '2026-08-19', to: '2026-11-10' };
+  const weeks = weeksInRange(range.from, range.to);
   const synced = (await orders.syncBlingCatalog(actor)).data;
   assert.equal(synced.synced, 5);
   assert.equal(synced.missing.length, 66);
@@ -379,13 +384,13 @@ test('gerador mín/máx: cadastro copiado do Bling, saldo do depósito Estoque e
     lineId: null, steps: [step(op('Dobrar'))], components: [] }, actor)).data.id;
   const cnulSheet = (await repo.saveSheet(null, { code: 'MM-0002', sku: 'CNUL440205140IN', name: 'Calha 440', status: 'aberto', baseQuantity: 1,
     lineId: null, steps: [step(op('Dobrar'))], components: [] }, actor)).data.id;
-  // Já há 20 calhas em OP semanal aberta: o mín/máx desconta para não duplicar.
+  // Já há 20 calhas em OP semanal aberta: entram na posição (saldo + em OP), que ainda fica abaixo do mínimo.
   await orders.createBatch({ kind: 'semanal', factor: 1, ...range, items: [{ sku: 'CNUL440205140IN', sheetId: cnulSheet, quantity: 20, description: null }] }, actor);
 
   const semanal = (await orders.preview({ kind: 'semanal', factor: 1, ...range }, actor)).data;
-  // Os dois estão zerados e sem venda no teste: o empate segue a ordem da linha oficial.
-  assert.deepEqual(semanal.suggestions.map(s => [s.sku, s.minMaxQuantity, s.quantity, s.openQuantity]),
-    [['CNUL440205140IN', 60, 60, 20], ['PTU200200150', 64, 64, 0]]);
+  // Os dois estão zerados: o mais vendido vem primeiro, e a quantidade é a média semanal.
+  assert.deepEqual(semanal.suggestions.map(s => [s.sku, s.tier, s.quantity, s.openQuantity]),
+    [['CNUL440205140IN', 'zerado', Math.ceil(240 / weeks), 20], ['PTU200200150', 'zerado', Math.ceil(120 / weeks), 0]]);
   assert.equal(semanal.suggestions.find(s => s.sku === 'PTU200200150')?.sheet?.id, ptuSheet);
   assert.ok(semanal.warnings.some(w => w.includes('sem estoque mínimo e máximo') && w.includes('TMPCLH440230')));
   assert.ok(semanal.warnings.some(w => w.includes('Kits fora da fila') && w.includes('KIT50OSSOME')));
@@ -393,9 +398,10 @@ test('gerador mín/máx: cadastro copiado do Bling, saldo do depósito Estoque e
   assert.deepEqual(calls.filter(c => c.startsWith('balances')), ['balances:5']);
   assert.deepEqual(calls.filter(c => c.startsWith('products')), ['products:71', 'products:71']);
 
-  // No corte, a margem do pulmão vale sobre o Q do mín/máx (a OP semanal aberta não conta para o corte).
+  // No corte, a margem do pulmão vale sobre a média semanal (a OP semanal aberta não conta para o corte).
   const corte = (await orders.preview({ kind: 'corte', factor: 1.47, ...range }, actor)).data;
-  assert.deepEqual(corte.suggestions.map(s => [s.sku, s.minMaxQuantity, s.quantity]), [['CNUL440205140IN', 80, 118], ['PTU200200150', 64, 95]]);
+  assert.deepEqual(corte.suggestions.map(s => [s.sku, s.quantity]),
+    [['CNUL440205140IN', Math.ceil(240 / weeks * 1.47 - 1e-9)], ['PTU200200150', Math.ceil(120 / weeks * 1.47 - 1e-9)]]);
 
   // Quem só consulta não relê o cadastro: usa a última leitura, com aviso.
   await pool.query("update brsteel_pcp.bling_products set synced_at = now() - interval '2 hours'");

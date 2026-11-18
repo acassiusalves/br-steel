@@ -2,7 +2,7 @@ import 'server-only';
 import type { Pool, PoolClient } from 'pg';
 import { OperationError, result } from '@/server/operations/common';
 import {
-  IAPP_HEADER, componentQuantity, iappImportRows, orderStepsFromRoute, pickSheet, suggestOrders, type SheetOption,
+  IAPP_HEADER, componentQuantity, iappImportRows, orderStepsFromRoute, pickSheet, productionQueue, suggestOrders, suggestedQuantity, type SheetOption,
 } from '@/lib/pcp/op-generator';
 import type {
   BatchInput, BatchSummary, GenerationPreview, OrderKind, OrderOrigin, OrderStatus, PreviewInput, ProducibleProduct, ProductionOrderRepository,
@@ -228,6 +228,8 @@ export function createPostgresProductionOrderRepository(pool: Pool, bling: Bling
       if (invoiceRead.pendingInvoices) warnings.push(`${invoiceRead.pendingInvoices} nota(s) do período ainda sem itens copiados do Bling: os vendidos podem estar abaixo do real.`);
       if (input.from < saoPauloDate(Date.now() - INVOICE_WINDOW_DAYS * 86_400_000)) warnings.push(`Só as notas dos últimos ${INVOICE_WINDOW_DAYS} dias são copiadas do Bling: o começo do período fica sem vendas.`);
       if (missingCfop.size) warnings.push(`Itens sem CFOP nas notas ficaram fora dos vendidos: ${[...missingCfop.keys()].join(', ')}.`);
+      const noSales = productionQueue(rows).filter(r => !suggestedQuantity(r, input.factor)).map(r => r.sku);
+      if (noSales.length) warnings.push(`Sem venda no período, fora da fila: ${noSales.join(', ')}.`);
       const missing = suggestions.filter(s => !s.sheet).length;
       if (missing) warnings.push(`${missing} item(ns) da fila não têm ficha técnica com roteiro e não podem virar OP.`);
       const preview: GenerationPreview = { ...input, suggestions, warnings, catalogSyncedAt: new Date(syncedAt).toISOString() };

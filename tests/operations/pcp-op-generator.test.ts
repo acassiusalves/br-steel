@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  componentQuantity, DEFAULT_FACTORS, iappImportRows, minMaxQuantity, orderStepsFromRoute, pickSheet, productionQueue, suggestedQuantity, suggestOrders,
+  componentQuantity, DEFAULT_FACTORS, iappImportRows, minMaxQuantity, orderStepsFromRoute, pickSheet, productionQueue, queueTier, suggestedQuantity, suggestOrders,
 } from '@/lib/pcp/op-generator';
 import { OFFICIAL_LINE_SKUS } from '@/lib/pcp/official-line';
 
@@ -28,27 +28,42 @@ describe('política mín/máx do script de OP da fábrica', () => {
     expect(minMaxQuantity(row('A', null, 30, 64))).toBeNull();
     expect(minMaxQuantity(row('TMPCLH440230', 23, null, null))).toBeNull();
   });
-  it('a margem do corte vem dos fatores da fábrica (2,2 ÷ 1,5) e arredonda para cima', () => {
+  it('a quantidade da OP é a média semanal vezes a margem, arredondada para cima (chamado nº 1)', () => {
     expect(DEFAULT_FACTORS).toEqual({ semanal: 1, corte: 1.47 });
-    expect(suggestedQuantity(row('PTU200200150', 0, 30, 64), DEFAULT_FACTORS.semanal)).toBe(64);
-    expect(suggestedQuantity(row('PTU200200150', 0, 30, 64), DEFAULT_FACTORS.corte)).toBe(95);
-    expect(suggestedQuantity(row('A', 31, 30, 64), DEFAULT_FACTORS.corte)).toBe(0);
+    // 120 vendidos em 12 semanas = média 10 por semana.
+    expect(suggestedQuantity(row('PTU200200150', 0, 30, 64, 120), DEFAULT_FACTORS.semanal)).toBe(10);
+    expect(suggestedQuantity(row('PTU200200150', 0, 30, 64, 120), DEFAULT_FACTORS.corte)).toBe(15);
+    expect(suggestedQuantity(row('B', 0, 30, 64, 1), 1)).toBe(1);
+    expect(suggestedQuantity(row('A', 0, 30, 64, 0), DEFAULT_FACTORS.corte)).toBe(0);
   });
 });
 
-describe('productionQueue', () => {
-  it('ordena como a fila da reunião: zerados por venda, depois déficit, depois venda', () => {
-    const rows = [
-      row('ABAIXO-GRANDE', 2, 20, 50, 300), // déficit 18
-      row('ZERADO-POUCO', 0, 5, 10, 10),
-      row('ZERADO-MUITO', 0, 5, 10, 90),
-      row('ABAIXO-PEQUENO', 8, 10, 50, 500), // déficit 2
-      row('OK', 30, 10, 50, 999),
-      row('SEM-SALDO', null, 10, 50, 999),
-      row('SEM-LIMITES', 0, null, null, 999),
-      row('COBERTO-POR-OP', 0, 10, 50, 999, 60),
-    ];
-    expect(productionQueue(rows).map(r => r.sku)).toEqual(['ZERADO-MUITO', 'ZERADO-POUCO', 'ABAIXO-GRANDE', 'ABAIXO-PEQUENO']);
+describe('productionQueue (chamado nº 1)', () => {
+  const rows = [
+    row('ABAIXO-POUCO', 2, 20, 50, 300),
+    row('ZERADO-POUCO', 0, 5, 10, 10),
+    row('ZERADO-MUITO', 0, 5, 10, 90),
+    row('ABAIXO-MUITO', 8, 10, 50, 500),
+    row('ENTRE-MUITO', 30, 10, 50, 999),
+    row('ENTRE-POUCO', 20, 10, 50, 50),
+    row('NO-MAXIMO', 50, 10, 50, 999),
+    row('SEM-SALDO', null, 10, 50, 999),
+    row('SEM-LIMITES', 0, null, null, 999),
+    row('COBERTO-POR-OP', 0, 10, 50, 999, 60),
+  ];
+  it('com zerados: zerados do mais vendido para o menos, depois os do mínimo para baixo, também por venda; nada entre mín e máx', () => {
+    expect(productionQueue(rows).map(r => r.sku)).toEqual(['ZERADO-MUITO', 'ZERADO-POUCO', 'ABAIXO-MUITO', 'ABAIXO-POUCO']);
+  });
+  it('sem zerados: entram os acima do mínimo e abaixo do máximo, depois dos do mínimo para baixo, por venda', () => {
+    const noZero = rows.filter(r => !r.sku.startsWith('ZERADO'));
+    expect(productionQueue(noZero).map(r => [r.sku, r.tier])).toEqual([
+      ['ABAIXO-MUITO', 'abaixo_minimo'], ['ABAIXO-POUCO', 'abaixo_minimo'], ['ENTRE-MUITO', 'entre_min_max'], ['ENTRE-POUCO', 'entre_min_max']]);
+  });
+  it('a posição soma o que já está em OP: no mínimo exato entra, no máximo não', () => {
+    expect(queueTier(row('A', 30, 30, 64))).toBe('abaixo_minimo');
+    expect(queueTier(row('A', 0, 30, 64, 0, 40))).toBe('entre_min_max');
+    expect(queueTier(row('A', 0, 30, 64, 0, 64))).toBeNull();
+    expect(queueTier(row('A', 0, 30, 64))).toBe('zerado');
   });
 });
 
@@ -70,11 +85,12 @@ describe('pickSheet e sugestões', () => {
     expect(pickSheet(sheets)?.id).toBe('b');
     expect(pickSheet([sheets[0]])).toBeNull();
   });
-  it('monta sugestões com ficha, Q do mín/máx e quantidade com margem', () => {
+  it('monta sugestões com ficha, faixa e quantidade pela média semanal com margem; sem venda não vira OP', () => {
     const sheets = new Map([['ZERADO', [{ id: 's1', code: '00000067', sku: 'ZERADO', name: 'Cuba', stepCount: 10 }]]]);
-    const [first, second] = suggestOrders([row('ZERADO', 0, 4, 10, 24), row('SEM-FICHA', 1, 4, 10, 6, 2)], sheets, 1.5);
-    expect(first).toMatchObject({ sku: 'ZERADO', minMaxQuantity: 10, quantity: 15, openQuantity: 0, sheet: { code: '00000067' } });
-    expect(second).toMatchObject({ sku: 'SEM-FICHA', sheet: null, minMaxQuantity: 7, quantity: 11, openQuantity: 2 });
+    const list = suggestOrders([row('ZERADO', 0, 4, 10, 24), row('SEM-FICHA', 1, 4, 10, 6, 2), row('SEM-VENDA', 0, 4, 10, 0)], sheets, 1.5);
+    expect(list.map(s => s.sku)).toEqual(['ZERADO', 'SEM-FICHA']);
+    expect(list[0]).toMatchObject({ sku: 'ZERADO', tier: 'zerado', minMaxQuantity: 10, quantity: 3, openQuantity: 0, sheet: { code: '00000067' } });
+    expect(list[1]).toMatchObject({ sku: 'SEM-FICHA', tier: 'abaixo_minimo', sheet: null, quantity: 1, openQuantity: 2 });
   });
 });
 

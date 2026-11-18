@@ -23,6 +23,7 @@ import type { BatchSummary, GenerationPreview, ProductionOrderRow } from '@/serv
 const KIND_LABEL: Record<OrderKind, string> = { semanal: 'Produção semanal (dobra)', corte: 'Corte' };
 const STATUS_LABEL: Record<string, string> = { a_produzir: 'A produzir', produzindo: 'Produzindo', concluido: 'Concluído', suspenso: 'Suspenso', encerrado: 'Encerrado' };
 const fmt = (n: number) => n.toLocaleString('pt-BR', { maximumFractionDigits: 2 });
+const TIER_LABEL: Record<string, string> = { zerado: 'Zerado', abaixo_minimo: 'No mínimo ou abaixo', entre_min_max: 'Entre mín. e máx.' };
 const opNumber = (n: number) => String(n).padStart(7, '0');
 const originLabel = (origin: string, salesOrderNumber: string | null) =>
   origin === 'pedido' ? `Pedido ${salesOrderNumber ?? ''}`.trim() : origin === 'avulsa' ? 'Avulsa' : origin === 'iapp' ? 'iApp' : 'Fila';
@@ -41,7 +42,7 @@ function Generator({ onCreated }: { onCreated: () => void }) {
   const { toast } = useToast();
   const [kind, setKind] = React.useState<OrderKind>('semanal');
   const [factor, setFactor] = React.useState(DEFAULT_FACTORS.semanal);
-  const [from, setFrom] = React.useState(format(subDays(new Date(), 84), 'yyyy-MM-dd'));
+  const [from, setFrom] = React.useState(format(subDays(new Date(), 90), 'yyyy-MM-dd'));
   const [to, setTo] = React.useState(format(new Date(), 'yyyy-MM-dd'));
   const [preview, setPreview] = React.useState<GenerationPreview | null>(null);
   const [selected, setSelected] = React.useState<Record<string, number | null>>({});
@@ -91,16 +92,16 @@ function Generator({ onCreated }: { onCreated: () => void }) {
           <Button onClick={calculate} disabled={busy !== null}>{busy === 'preview' ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <Sparkles className="mr-1 h-4 w-4" />}{busy === 'preview' ? 'Lendo o Bling…' : 'Calcular sugestão'}</Button>
         </div>
         <p className="text-xs text-muted-foreground">
-          Política mín/máx: entram os 71 SKUs da linha oficial cujo saldo no depósito Estoque do Bling, somado ao que já está em OP aberta, está no mínimo ou abaixo.
-          A OP leva até o máximo (máximo − saldo − em OP) vezes a margem: 1 na produção semanal; no corte, o pulmão de peças cortadas sobre a dobra.
-          Ordem da fila: zerados primeiro, depois o maior déficit, depois os mais vendidos. O cálculo lê do Bling o saldo e o mínimo/máximo; a leitura do mínimo/máximo é reaproveitada por uma hora e pode levar cerca de 30 segundos. Vendidos e média vêm das notas fiscais de saída (pendentes contam, canceladas não; só CFOP de venda), copiadas do Bling a cada 15 minutos.
+          Fila dos 71 SKUs da linha oficial, pela posição (saldo no depósito Estoque do Bling + o que já está em OP aberta): primeiro os zerados, depois os que estão no mínimo ou abaixo, sempre do mais vendido para o menos vendido.
+          Quando não há nenhum zerado, entram também os que estão acima do mínimo e abaixo do máximo, na mesma ordem. A quantidade da OP é a média de venda semanal vezes a margem: 1 na produção semanal; no corte, o pulmão de peças cortadas sobre a dobra.
+          O cálculo lê do Bling o saldo e o mínimo/máximo; a leitura do mínimo/máximo é reaproveitada por uma hora e pode levar cerca de 30 segundos. Vendidos e média vêm das notas fiscais de saída do período, padrão 90 dias (pendentes contam, canceladas não; só CFOP de venda), copiadas do Bling a cada 15 minutos.
         </p>
 
         {preview && <>
           {preview.warnings.map(w => <p key={w} className="text-sm text-amber-600">{w}</p>)}
           <p className="text-xs text-muted-foreground">Mínimo e máximo lidos do Bling em {format(new Date(preview.catalogSyncedAt), 'dd/MM/yyyy HH:mm')}. Saldo do depósito Estoque lido agora.</p>
           <Table>
-            <TableHeader><TableRow><TableHead className="w-8" /><TableHead>#</TableHead><TableHead>SKU</TableHead><TableHead>Produto</TableHead><TableHead className="text-right">Estoque</TableHead><TableHead className="text-right">Mín./Máx.</TableHead><TableHead className="text-right">Em OP</TableHead><TableHead className="text-right">Vendidos</TableHead><TableHead className="text-right">Média/sem.</TableHead><TableHead className="text-right">Q mín/máx</TableHead><TableHead>Ficha</TableHead><TableHead className="w-28">Quantidade</TableHead></TableRow></TableHeader>
+            <TableHeader><TableRow><TableHead className="w-8" /><TableHead>#</TableHead><TableHead>SKU</TableHead><TableHead>Produto</TableHead><TableHead className="text-right">Estoque</TableHead><TableHead className="text-right">Mín./Máx.</TableHead><TableHead className="text-right">Em OP</TableHead><TableHead className="text-right">Vendidos</TableHead><TableHead className="text-right">Média/sem.</TableHead><TableHead>Faixa</TableHead><TableHead>Ficha</TableHead><TableHead className="w-28">Quantidade</TableHead></TableRow></TableHeader>
             <TableBody>
               {preview.suggestions.map((s, i) => (
                 <TableRow key={s.sku} className={s.sheet ? '' : 'opacity-60'}>
@@ -110,7 +111,7 @@ function Generator({ onCreated }: { onCreated: () => void }) {
                   <TableCell className="font-mono text-xs">{s.sku}</TableCell><TableCell className="max-w-64 truncate" title={s.description}>{s.description}</TableCell>
                   <TableCell className={`text-right ${s.stock === 0 ? 'font-semibold text-destructive' : ''}`}>{fmt(s.stock)}</TableCell>
                   <TableCell className="text-right">{fmt(s.min)}/{fmt(s.max)}</TableCell><TableCell className="text-right">{s.openQuantity ? fmt(s.openQuantity) : '—'}</TableCell>
-                  <TableCell className="text-right">{fmt(s.sold)}</TableCell><TableCell className="text-right">{fmt(s.weeklyAverage)}</TableCell><TableCell className="text-right">{fmt(s.minMaxQuantity)}</TableCell>
+                  <TableCell className="text-right">{fmt(s.sold)}</TableCell><TableCell className="text-right">{fmt(s.weeklyAverage)}</TableCell><TableCell className="whitespace-nowrap text-xs">{TIER_LABEL[s.tier]}</TableCell>
                   <TableCell className="font-mono text-xs">{s.sheet ? s.sheet.code : <Badge variant="outline">Sem ficha</Badge>}</TableCell>
                   <TableCell><Input className="h-8" type="number" min={1} aria-label={`Quantidade de ${s.sku}`} disabled={selected[s.sku] == null}
                     value={selected[s.sku] ?? s.quantity} onChange={e => setSelected(cur => ({ ...cur, [s.sku]: Number(e.target.value) }))} /></TableCell>
@@ -118,7 +119,7 @@ function Generator({ onCreated }: { onCreated: () => void }) {
               ))}
             </TableBody>
           </Table>
-          {!preview.suggestions.length && <p className="text-sm text-muted-foreground">Nenhum SKU da linha oficial está no mínimo ou abaixo.</p>}
+          {!preview.suggestions.length && <p className="text-sm text-muted-foreground">Nenhum SKU da linha oficial precisa de produção agora.</p>}
           <div className="flex items-center justify-end gap-3">
             <span className="text-sm text-muted-foreground">{chosen.length} item(ns) selecionado(s)</span>
             <Button onClick={create} disabled={!chosen.length || busy !== null}>{busy === 'create' && <Loader2 className="mr-1 h-4 w-4 animate-spin" />}Gerar {chosen.length} OP(s)</Button>

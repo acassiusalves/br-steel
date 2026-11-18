@@ -1,10 +1,13 @@
 /**
  * Regras do gerador de ordens de produção (OP), sem acesso a banco.
  *
- * Política mín/máx do script de OP da fábrica (padrão decidido em 25/09/2026): entra na fila o SKU da
- * linha oficial cujo saldo no depósito Estoque, somado ao que já está em OP aberta, está no mínimo ou
- * abaixo dele; a OP leva a posição até o máximo (Q = máx − saldo − em OP). Ordem da fila: primeiro os
- * zerados (por quantidade vendida), depois o maior déficit, depois os mais vendidos.
+ * Regra da fila da fábrica (chamado nº 1, de 16/11/2026), sobre os SKUs da linha oficial. A posição é o
+ * saldo do depósito Estoque somado ao que já está em OP aberta:
+ * 1. zerados (saldo ≤ 0, posição no mínimo ou abaixo), do mais vendido para o menos vendido;
+ * 2. abaixo do mínimo (posição no mínimo ou abaixo), do mais vendido para o menos vendido;
+ * 3. só quando não há nenhum zerado: acima do mínimo e abaixo do máximo, do mais vendido para o menos.
+ * A quantidade da OP é a média de venda semanal (NF-e de saída do período, padrão 90 dias) vezes o fator
+ * de margem do tipo de OP, arredondada para cima.
  */
 
 export type OrderKind = 'semanal' | 'corte';
@@ -23,8 +26,10 @@ export type SheetOption = { id: string; code: string; sku: string; name: string;
 export type OrderSuggestion = {
   sku: string; description: string; stock: number; min: number; max: number; sold: number; weeklyAverage: number;
   openQuantity: number;
-  /** Quantidade da política mín/máx, antes da margem do tipo de OP. */
+  /** Quantidade da política mín/máx antiga (máx − saldo − em OP), só como referência. */
   minMaxQuantity: number;
+  /** Faixa da fila: zerado, abaixo do mínimo ou entre o mínimo e o máximo. */
+  tier: QueueTier;
   sheet: SheetOption | null; quantity: number;
 };
 
@@ -39,19 +44,24 @@ export function minMaxQuantity(row: PlanningRow): number | null {
   return Math.max(0, Math.ceil(row.stockMax - position - 1e-9));
 }
 
-/** Itens que precisam de produção, na ordem de prioridade da fila. */
-export function productionQueue<T extends PlanningRow>(rows: readonly T[]): T[] {
-  return rows
-    .filter(row => (minMaxQuantity(row) ?? 0) > 0)
-    .sort((a, b) => {
-      const aStock = a.stockLevel ?? 0, bStock = b.stockLevel ?? 0;
-      const aZero = aStock <= 0, bZero = bStock <= 0;
-      if (aZero && bZero) return b.totalQuantitySold - a.totalQuantitySold;
-      if (aZero !== bZero) return aZero ? -1 : 1;
-      const aDeficit = (a.stockMin ?? 0) - aStock, bDeficit = (b.stockMin ?? 0) - bStock;
-      if (aDeficit !== bDeficit) return bDeficit - aDeficit;
-      return b.totalQuantitySold - a.totalQuantitySold;
-    });
+export type QueueTier = 'zerado' | 'abaixo_minimo' | 'entre_min_max';
+const TIER_ORDER: Record<QueueTier, number> = { zerado: 0, abaixo_minimo: 1, entre_min_max: 2 };
+
+/** Faixa do SKU na fila, pela posição (saldo + em OP); null quando está no máximo ou acima, ou sem dados. */
+export function queueTier(row: PlanningRow): QueueTier | null {
+  if (row.stockLevel === null || row.stockMin === null || row.stockMax === null) return null;
+  const position = row.stockLevel + row.openQuantity;
+  if (position > row.stockMin) return position < row.stockMax ? 'entre_min_max' : null;
+  return row.stockLevel <= 0 ? 'zerado' : 'abaixo_minimo';
+}
+
+/** Itens que entram na fila, na ordem de prioridade: faixa, depois do mais vendido para o menos vendido. */
+export function productionQueue<T extends PlanningRow>(rows: readonly T[]): (T & { tier: QueueTier })[] {
+  const tiered = rows.flatMap(row => { const tier = queueTier(row); return tier ? [{ ...row, tier }] : []; });
+  // Os itens entre o mínimo e o máximo só entram quando não há nenhum zerado.
+  const hasZero = tiered.some(row => row.tier === 'zerado');
+  return tiered.filter(row => row.tier !== 'entre_min_max' || !hasZero)
+    .sort((a, b) => TIER_ORDER[a.tier] - TIER_ORDER[b.tier] || b.totalQuantitySold - a.totalQuantitySold || a.sku.localeCompare(b.sku));
 }
 
 /**
@@ -65,12 +75,13 @@ export function pickSheet(options: readonly SheetOption[]): SheetOption | null {
 }
 
 /**
- * Quantidade da OP: o Q do mín/máx vezes a margem do tipo, arredondado para cima. Na produção semanal a
- * margem é 1 (Q puro); no corte é o pulmão de peças cortadas que a fábrica mantém sobre a dobra.
+ * Quantidade da OP: a média de venda semanal vezes a margem do tipo, arredondada para cima. Na produção
+ * semanal a margem é 1; no corte é o pulmão de peças cortadas que a fábrica mantém sobre a dobra. Sem
+ * venda no período, a quantidade é 0 e o item não vira OP.
  */
 export function suggestedQuantity(row: PlanningRow, factor: number): number {
-  const q = minMaxQuantity(row) ?? 0;
-  return q > 0 ? Math.max(1, Math.ceil(q * factor - 1e-9)) : 0;
+  const q = row.weeklyAverage * factor;
+  return q > 0 ? Math.max(1, Math.ceil(q - 1e-9)) : 0;
 }
 
 /**
@@ -81,11 +92,14 @@ export const DEFAULT_FACTORS: Record<OrderKind, number> = { semanal: 1, corte: 1
 
 export function suggestOrders(rows: readonly PlanningRow[], sheetsBySku: ReadonlyMap<string, readonly SheetOption[]>,
   factor: number): OrderSuggestion[] {
-  return productionQueue(rows).map(row => ({
-    sku: row.sku, description: row.description ?? row.sku, stock: row.stockLevel ?? 0, min: row.stockMin ?? 0,
-    max: row.stockMax ?? 0, sold: row.totalQuantitySold, weeklyAverage: row.weeklyAverage, openQuantity: row.openQuantity,
-    minMaxQuantity: minMaxQuantity(row) ?? 0, sheet: pickSheet(sheetsBySku.get(row.sku) ?? []), quantity: suggestedQuantity(row, factor),
-  }));
+  return productionQueue(rows).flatMap(row => {
+    const quantity = suggestedQuantity(row, factor);
+    return quantity > 0 ? [{
+      sku: row.sku, description: row.description ?? row.sku, stock: row.stockLevel ?? 0, min: row.stockMin ?? 0,
+      max: row.stockMax ?? 0, sold: row.totalQuantitySold, weeklyAverage: row.weeklyAverage, openQuantity: row.openQuantity,
+      minMaxQuantity: minMaxQuantity(row) ?? 0, tier: row.tier, sheet: pickSheet(sheetsBySku.get(row.sku) ?? []), quantity,
+    }] : [];
+  });
 }
 
 export type SheetStepRef = { id: string; operationId: string; predecessorOperationId: string | null };
