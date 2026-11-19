@@ -15,7 +15,12 @@ export function verifyPassword(password: string, hash?: string | null, salt?: st
     return stored.length === candidate.length && crypto.timingSafeEqual(candidate, stored);
   } catch { return false; }
 }
+/**
+ * Roda em toda requisição autenticada, então não refaz scrypt: quem ainda usa a senha padrão antiga é marcado
+ * com `mustChangePassword` no próprio login.
+ */
 export function needsPasswordChange(user: { mustChangePassword?: boolean; passwordHash?: string | null; passwordSalt?: string | null }) {
-  return !!user.mustChangePassword || !user.passwordHash || !user.passwordSalt
-    || verifyPassword(DEFAULT_INITIAL_PASSWORD, user.passwordHash, user.passwordSalt);
+  return !!user.mustChangePassword || !user.passwordHash || !user.passwordSalt;
 }
+/** Credencial descartável para comparar quando o e-mail não existe, com o mesmo custo de uma conta real. */
+export const UNKNOWN_USER_CREDENTIAL = hashPassword(crypto.randomBytes(16).toString('base64url'));

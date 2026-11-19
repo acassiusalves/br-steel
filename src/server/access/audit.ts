@@ -4,6 +4,7 @@ import { adminDb } from '@/lib/firebase-admin';
 export type AccessAuditOperation =
   | 'user.create' | 'user.role' | 'user.activate' | 'user.deactivate' | 'user.delete'
   | 'badge.create' | 'badge.adopt' | 'badge.reset' | 'badge.deactivate' | 'badge.locked'
+  | 'badge.move' | 'badge.moveUndo' | 'user.rename'
   | 'password.change';
 
 export type AccessAuditEntry = {

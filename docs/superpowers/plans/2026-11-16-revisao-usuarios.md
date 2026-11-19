@@ -15,7 +15,16 @@ Revisão de 16/11/2026, feita sobre o commit `a3b118f` (`main`). Registro histó
   - administrador não altera, desativa nem remove o próprio acesso (U-24);
   - conta sem senha gravada não entra com nada, nem por e-mail; o administrador gera uma senha temporária nova em `/configuracoes` (U-06). O contador de falhas por conta de e-mail ficou de fora: o limite por IP já cobre a tentativa em massa, e um bloqueio por conta deixaria qualquer pessoa travar o login de um administrador;
   - no quadro de OPs, contas de crachá têm o botão "Trocar líder" e saem sozinhas após 30 minutos sem toque, clique ou tecla; a tela de login abre na aba Crachá (U-15).
-- P-4 (zeros à esquerda) segue aberta: os zeros continuam fazendo parte do código até o teste do leitor na Fase 0.
+- **Fase 0** (16/11/2026, leitura em produção): 6 contas no Firestore (4 Administradores, 2 Vendedores), nenhuma de crachá e todas com senha gravada; 23 funcionários ativos, sem login, crachás no formato e sem repetidos; a migration do formato já estava aplicada; `APP_ORIGIN` é o domínio de produção. O TTL de `loginRateLimits` foi publicado e está ativo. O teste do leitor de crachá foi dispensado pelo dono em 18/11/2026.
+- **Fase 3** (branch `claude/revisao-usuarios-fase3`), com o teste do leitor dispensado:
+  - "Trocar crachá" na Engenharia leva o login para o código novo com a mesma senha e o mesmo papel; a conta antiga fica desativada com `movedTo` e avisa no login que o crachá foi trocado. Se o cadastro não acompanha, a troca é desfeita (U-03 completo). Corrigir um código que o leitor emita diferente deixa de exigir refazer o acesso;
+  - a sessão não refaz scrypt a cada requisição; quem ainda usa 123456 é marcado para trocar no próprio login (U-16);
+  - conta desativada ou sem função recebe o motivo só depois da senha certa (U-19);
+  - vínculo escolhido à mão só aceita login existente, ativo, com função que age no Kanban e, se for de crachá, do mesmo crachá (U-20);
+  - login por e-mail sem varredura da coleção (todas as contas de produção têm `normalizedEmail`), com scrypt também para e-mail inexistente (U-21);
+  - nome da conta de crachá acompanha o cadastro do funcionário; o perfil não muda esse nome (U-22);
+  - a importação do iApp não muda o status de funcionário que já existe (U-17 completo).
+- P-4 (zeros à esquerda) segue aberta: os zeros continuam fazendo parte do código. Se o leitor emitir outro formato, use "Trocar crachá".
 
 ## Objetivo e método
 

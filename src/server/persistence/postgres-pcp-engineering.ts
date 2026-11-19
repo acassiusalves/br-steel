@@ -252,6 +252,19 @@ export function createPostgresEngineeringRepository(pool: Pool): EngineeringRepo
       });
     },
 
+    async changeWorkerBadge(workerId: string, fromUserId: string, toUserId: string, badge: string, actor: WriteActor) {
+      return write(pool, async client => {
+        const changed = await client.query(
+          `update brsteel_pcp.workers set badge = $4, user_id = $3, updated_at = now()
+           where id = $1 and user_id = $2 returning id`, [workerId, fromUserId, toUserId, badge]);
+        if (!changed.rowCount) {
+          throw new OperationError('LINK_CONFLICT', 'O funcionário mudou enquanto o crachá era trocado. Recarregue a página e confira.', 409);
+        }
+        await audit(client, 'pcp.changeWorkerBadge', actor, 'pcp.workers', workerId);
+        return result({ id: workerId }, 'postgres');
+      });
+    },
+
     async replaceWorkPeriods(periods: WorkPeriodRow[], actor: WriteActor) {
       refuse(workPeriodsError(periods));
       return write(pool, async client => {

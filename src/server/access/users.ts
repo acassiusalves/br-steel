@@ -56,12 +56,17 @@ export async function findUserByEmail(email: string): Promise<StoredUser | null>
     const user = storedUserFromDoc(direct.id, direct.data()!);
     if (user.email === normalized) return user;
   }
+  // Toda conta grava `normalizedEmail` (conferido em produção em 18/11/2026). Sem varredura da coleção inteira
+  // a cada tentativa: um e-mail inexistente custa duas consultas indexadas, não a leitura de todas as contas.
   for (const field of ['normalizedEmail', 'email']) {
     const matches = await users.where(field, '==', normalized).limit(1).get();
     if (!matches.empty) return storedUserFromDoc(matches.docs[0].id, matches.docs[0].data());
   }
-  // Legacy mixed-case emails with random document IDs still work.
-  const all = await users.get();
-  const match = all.docs.find(doc => normalizeUserEmail(String(doc.data().email || doc.data().normalizedEmail || doc.id)) === normalized);
-  return match ? storedUserFromDoc(match.id, match.data()) : null;
+  return null;
+}
+/** Motivo para recusar quem acertou a senha: conta desativada ou sem função válida. */
+export function accountBlocked(user: Pick<StoredUser, 'active' | 'role'>): string | null {
+  if (user.active === false) return 'Acesso desativado. Fale com o administrador.';
+  if (!isKnownRole(user.role)) return 'Seu acesso está sem uma função válida. Fale com o administrador.';
+  return null;
 }

@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { POST as login } from '@/app/api/auth/login/route';
 import { PATCH as profile } from '@/app/api/auth/profile/route';
-import { createSessionToken, hashPassword } from '@/lib/server-auth';
+import { createSessionToken, getSessionFromToken, hashPassword } from '@/lib/server-auth';
 import { firestoreBadgeAccounts, generateBadgePin, normalizeBadge } from '@/server/access/badges';
 import { LOGIN_FAILURES_PER_WINDOW } from '@/server/access/login-rate-limit';
 import { adminDb, resetDatabase, seedUser } from '../helpers/firestore';
@@ -171,5 +171,64 @@ describe('IP do limite de login', () => {
     expect(clientIp(req({ 'x-vercel-forwarded-for': '1.2.3.4', 'x-real-ip': '1.2.3.5', 'x-forwarded-for': '1.2.3.6, 198.51.100.12' }), false)).toBe('198.51.100.12');
     expect(clientIp(req({ 'x-forwarded-for': '1.2.3.4, 198.51.100.11' }), false)).toBe('198.51.100.11');
     expect(clientIp(req({}), false)).toBe('desconhecido');
+  });
+});
+
+describe('troca do crachá, conta desativada e nome', () => {
+  let pin = '';
+  beforeEach(async () => {
+    await resetDatabase();
+    ip = `203.0.113.${++ipCounter}`;
+    ({ pin } = await firestoreBadgeAccounts.create('Líder de teste', '26557', 'admin'));
+  });
+
+  it('trocar o crachá leva a mesma senha para o código novo, encerra as sessões e o código antigo avisa da troca', async () => {
+    const first = await login(request('login', 'POST', { badge: '26557', password: pin }));
+    const token = tokenOf(first);
+    await profile(request('profile', 'PATCH', { name: 'Líder de teste', newPassword: '842913' }, token));
+    const session = tokenOf(await login(request('login', 'POST', { badge: '26557', password: '842913' })));
+    const { userId } = await firestoreBadgeAccounts.moveBadge('cracha-26557', '0000026557', 'admin');
+    expect(userId).toBe('cracha-0000026557');
+    expect(await getSessionFromToken(session)).toBeNull();
+    const moved = (await adminDb.collection('users').doc(userId).get()).data()!;
+    expect(moved).toMatchObject({ badge: '0000026557', role: 'Produção', active: true, mustChangePassword: false, movedFrom: 'cracha-26557' });
+    expect((await doc().get()).data()).toMatchObject({ active: false, movedTo: userId });
+    expect((await login(request('login', 'POST', { badge: '0000026557', password: '842913' }))).status).toBe(200);
+    const old = await login(request('login', 'POST', { badge: '26557', password: '842913' }));
+    expect(old.status).toBe(403);
+    expect((await old.json()).error).toContain('trocado');
+    await expect(firestoreBadgeAccounts.moveBadge('cracha-0000026557', '0000026557', 'admin')).rejects.toThrow(/igual/);
+  });
+
+  it('não troca para um código que já tem login, e desfazer a troca devolve o login ao código antigo', async () => {
+    await firestoreBadgeAccounts.create('Outro', '30001', 'admin');
+    await expect(firestoreBadgeAccounts.moveBadge('cracha-26557', '30001', 'admin')).rejects.toThrow(/Já existe um login/);
+    const { userId } = await firestoreBadgeAccounts.moveBadge('cracha-26557', '40001', 'admin');
+    await firestoreBadgeAccounts.undoMove(userId, 'cracha-26557', 'admin');
+    expect((await adminDb.collection('users').doc(userId).get()).exists).toBe(false);
+    expect((await doc().get()).data()).toMatchObject({ active: true });
+    expect((await doc().get()).data()).not.toHaveProperty('movedTo');
+    expect((await login(request('login', 'POST', { badge: '26557', password: pin }))).status).toBe(200);
+    const operations = (await adminDb.collection('accessAudit').get()).docs.map(d => d.data().operation);
+    expect(operations).toEqual(expect.arrayContaining(['badge.move', 'badge.deactivate', 'badge.moveUndo']));
+  });
+
+  it('conta desativada diz o motivo só para quem acertou a senha', async () => {
+    await firestoreBadgeAccounts.deactivate('cracha-26557', 'admin');
+    const right = await login(request('login', 'POST', { badge: '26557', password: pin }));
+    expect(right.status).toBe(403);
+    expect((await right.json()).error).toContain('desativado');
+    const wrong = await login(request('login', 'POST', { badge: '26557', password: 'errada' }));
+    expect(wrong.status).toBe(401);
+  });
+
+  it('descreve o login para o vínculo e acompanha o nome; o perfil não muda o nome de quem entra pelo crachá', async () => {
+    expect(await firestoreBadgeAccounts.describe('cracha-26557')).toEqual({ role: 'Produção', active: true, badge: '26557' });
+    expect(await firestoreBadgeAccounts.describe('nao-existe')).toBeNull();
+    expect(await firestoreBadgeAccounts.rename('cracha-26557', 'Líder Renomeado', 'admin')).toBe(true);
+    expect(await firestoreBadgeAccounts.rename('cracha-26557', 'Líder Renomeado', 'admin')).toBe(false);
+    const token = tokenOf(await login(request('login', 'POST', { badge: '26557', password: pin })));
+    await profile(request('profile', 'PATCH', { name: 'Outro Nome', newPassword: '842913' }, token));
+    expect((await doc().get()).data()?.name).toBe('Líder Renomeado');
   });
 });
