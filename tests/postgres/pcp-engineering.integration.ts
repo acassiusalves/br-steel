@@ -405,6 +405,9 @@ test('gerador de OP: cadastro copiado do Bling, saldo do depósito Estoque, faix
   assert.ok(semanal.warnings.some(w => w.includes('sem estoque mínimo e máximo') && w.includes('TMPCLH440230')));
   assert.ok(semanal.warnings.some(w => w.includes('Kits fora da fila') && w.includes('KIT50OSSOME')));
   assert.ok(semanal.warnings.some(w => w.includes('66 SKU(s) da linha oficial')));
+  // Sem venda é informação, não aviso: vai para as notas, que a tela mostra só nos detalhes.
+  assert.ok(Array.isArray(semanal.notes));
+  assert.ok(!semanal.warnings.some(w => w.startsWith('Sem venda')));
   assert.deepEqual(calls.filter(c => c.startsWith('balances')), ['balances:5']);
   assert.deepEqual(calls.filter(c => c.startsWith('products')), ['products:71', 'products:71']);
 

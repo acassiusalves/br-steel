@@ -229,10 +229,10 @@ export function createPostgresProductionOrderRepository(pool: Pool, bling: Bling
       if (input.from < saoPauloDate(Date.now() - INVOICE_WINDOW_DAYS * 86_400_000)) warnings.push(`Só as notas dos últimos ${INVOICE_WINDOW_DAYS} dias são copiadas do Bling: o começo do período fica sem vendas.`);
       if (missingCfop.size) warnings.push(`Itens sem CFOP nas notas ficaram fora dos vendidos: ${[...missingCfop.keys()].join(', ')}.`);
       const noSales = productionQueue(rows).filter(r => !suggestedQuantity(r, input.factor)).map(r => r.sku);
-      if (noSales.length) warnings.push(`Sem venda no período, fora da fila: ${noSales.join(', ')}.`);
-      const missing = suggestions.filter(s => !s.sheet).length;
-      if (missing) warnings.push(`${missing} item(ns) da fila não têm ficha técnica com roteiro e não podem virar OP.`);
-      const preview: GenerationPreview = { ...input, suggestions, warnings, catalogSyncedAt: new Date(syncedAt).toISOString() };
+      const notes = noSales.length ? [`Sem venda no período, fora da fila: ${noSales.join(', ')}.`] : [];
+      const missing = suggestions.filter(s => !s.sheet).map(s => s.sku);
+      if (missing.length) warnings.push(`Sem ficha técnica com roteiro, não pode virar OP: ${missing.join(', ')}.`);
+      const preview: GenerationPreview = { ...input, suggestions, warnings, notes, catalogSyncedAt: new Date(syncedAt).toISOString() };
       return result(preview, 'postgres', [], null, (invoiceRead.listedAt ?? new Date()).toISOString());
     },
 

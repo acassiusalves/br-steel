@@ -92,14 +92,25 @@ function Generator({ onCreated }: { onCreated: () => void }) {
           <Button onClick={calculate} disabled={busy !== null}>{busy === 'preview' ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <Sparkles className="mr-1 h-4 w-4" />}{busy === 'preview' ? 'Lendo o Bling…' : 'Calcular sugestão'}</Button>
         </div>
         <p className="text-xs text-muted-foreground">
-          Fila dos 71 SKUs da linha oficial, pela posição (saldo no depósito Estoque do Bling + o que já está em OP aberta): primeiro os zerados, depois os que estão no mínimo ou abaixo, sempre do mais vendido para o menos vendido.
-          Quando não há nenhum zerado, entram também os que estão acima do mínimo e abaixo do máximo, na mesma ordem. A quantidade da OP é a média de venda semanal vezes a margem: 1 na produção semanal; no corte, o pulmão de peças cortadas sobre a dobra.
-          O cálculo lê do Bling o saldo e o mínimo/máximo; a leitura do mínimo/máximo é reaproveitada por uma hora e pode levar cerca de 30 segundos. Vendidos e média vêm das notas fiscais de saída do período, padrão 90 dias (pendentes contam, canceladas não; só CFOP de venda), copiadas do Bling a cada 15 minutos.
+          Zerados primeiro, depois os abaixo do mínimo, do mais vendido para o menos vendido. Quantidade = média semanal × margem.
         </p>
 
+        {preview && preview.warnings.map(w => <p key={w} className="text-sm text-amber-600">{w}</p>)}
+
+        <details className="text-xs text-muted-foreground">
+          <summary className="cursor-pointer select-none">Como a fila é calculada</summary>
+          <div className="mt-2 space-y-1">
+            <p>Fila dos 71 SKUs da linha oficial, pela posição: saldo no depósito Estoque do Bling mais o que já está em OP aberta. Quando não há nenhum zerado, entram também os que estão entre o mínimo e o máximo.</p>
+            <p>Margem: 1 na produção semanal; no corte, o pulmão de peças cortadas sobre a dobra.</p>
+            <p>Vendidos e média vêm das notas fiscais de saída do período (padrão 90 dias; pendentes contam, canceladas não; só CFOP de venda), copiadas do Bling a cada 15 minutos. O mínimo e o máximo são relidos do Bling a cada hora.</p>
+            {preview && <>
+              {preview.notes.map(n => <p key={n}>{n}</p>)}
+              <p>Mínimo e máximo lidos do Bling em {format(new Date(preview.catalogSyncedAt), 'dd/MM/yyyy HH:mm')}. Saldo do depósito Estoque lido agora.</p>
+            </>}
+          </div>
+        </details>
+
         {preview && <>
-          {preview.warnings.map(w => <p key={w} className="text-sm text-amber-600">{w}</p>)}
-          <p className="text-xs text-muted-foreground">Mínimo e máximo lidos do Bling em {format(new Date(preview.catalogSyncedAt), 'dd/MM/yyyy HH:mm')}. Saldo do depósito Estoque lido agora.</p>
           <Table>
             <TableHeader><TableRow><TableHead className="w-8" /><TableHead>#</TableHead><TableHead>SKU</TableHead><TableHead>Produto</TableHead><TableHead className="text-right">Estoque</TableHead><TableHead className="text-right">Mín./Máx.</TableHead><TableHead className="text-right">Em OP</TableHead><TableHead className="text-right">Vendidos</TableHead><TableHead className="text-right">Média/sem.</TableHead><TableHead>Faixa</TableHead><TableHead>Ficha</TableHead><TableHead className="w-28">Quantidade</TableHead></TableRow></TableHeader>
             <TableBody>

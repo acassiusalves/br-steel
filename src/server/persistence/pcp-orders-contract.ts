@@ -7,7 +7,15 @@ import type { WriteActor } from './write-audit';
 export type { OrderKind, OrderSuggestion, PlanLine };
 
 export type PreviewInput = { kind: OrderKind; from: string; to: string; factor: number };
-export type GenerationPreview = PreviewInput & { suggestions: OrderSuggestion[]; warnings: string[]; /** Quando o mín/máx foi copiado do Bling. */ catalogSyncedAt: string };
+export type GenerationPreview = PreviewInput & {
+  suggestions: OrderSuggestion[];
+  /** Avisos que pedem atenção ou ação (dados atrasados, cadastro incompleto). */
+  warnings: string[];
+  /** Informações sem ação, mostradas só nos detalhes da tela (por exemplo, SKUs sem venda no período). */
+  notes: string[];
+  /** Quando o mín/máx foi copiado do Bling. */
+  catalogSyncedAt: string;
+};
 
 export type BatchItem = { sku: string; sheetId: string; quantity: number; description: string | null };
 export type BatchInput = PreviewInput & { items: BatchItem[] };
