@@ -6,12 +6,12 @@ import { Suspense } from 'react';
 import DashboardLayout from '@/components/dashboard-layout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Loader2, Copy, Save, CheckCircle, XCircle, Plug, Sheet, Database, Trash2, KeyRound, FileText } from 'lucide-react';
+import { Loader2, CheckCircle, XCircle, Plug, Sheet, Database, Trash2, KeyRound, FileText } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useToast } from '@/hooks/use-toast';
-import { getBlingCredentials, saveBlingCredentials, startBlingOAuth, disconnectBling, countImportedOrders, smartSyncOrders, fullSyncOrders, deleteAllSalesOrders, getMercadoLivreCredentials, saveMercadoLivreCredentials, disconnectMercadoLivre, pingMlConnection, startMlOAuth, listMlAccounts, setPrimaryMlAccount, deleteMlAccount, getMlAppConfigStatus, getGeminiCredentials, saveGeminiCredentials, type SyncProgress, type MlAccountSummary, type OrderSyncOptions } from '@/app/actions';
+import { getBlingCredentials, getBlingAppConfigStatus, startBlingOAuth, disconnectBling, countImportedOrders, smartSyncOrders, fullSyncOrders, deleteAllSalesOrders, getMercadoLivreCredentials, saveMercadoLivreCredentials, disconnectMercadoLivre, pingMlConnection, startMlOAuth, listMlAccounts, setPrimaryMlAccount, deleteMlAccount, getMlAppConfigStatus, getGeminiCredentials, saveGeminiCredentials, type SyncProgress, type MlAccountSummary, type OrderSyncOptions } from '@/app/actions';
 import { format, startOfMonth, endOfMonth, subDays } from 'date-fns';
 import { Calendar as CalendarIcon } from 'lucide-react';
 import type { DateRange } from 'react-day-picker';
@@ -40,12 +40,11 @@ const ApiStatusBadge = ({ status }: { status: ApiStatus }) => {
 };
 
 function ApiSettingsContent() {
-  const [credentials, setCredentials] = React.useState({ clientId: '', clientSecret: '' });
+  const [blingApp, setBlingApp] = React.useState<{ configured: boolean; source: string; clientIdMasked?: string } | null>(null);
   const [isLoading, setIsLoading] = React.useState(true);
   const [isSaving, setIsSaving] = React.useState(false);
   const [isGenerating, setIsGenerating] = React.useState(false);
   const [callbackUrl, setCallbackUrl] = React.useState('');
-  const [authUrl, setAuthUrl] = React.useState('');
   const [isImporting, setIsImporting] = React.useState(false);
   const [isDeleting, setIsDeleting] = React.useState(false);
   const [apiResponse, setApiResponse] = React.useState<any>(null);
@@ -94,17 +93,18 @@ function ApiSettingsContent() {
   const loadInitialData = React.useCallback(async () => {
     setIsLoading(true);
     try {
-        const [savedCreds, count, mlCreds, accounts, appCfg, geminiCreds] = await Promise.all([
+        const [savedCreds, count, mlCreds, accounts, appCfg, geminiCreds, blingAppCfg] = await Promise.all([
             getBlingCredentials(),
             countImportedOrders(),
             getMercadoLivreCredentials(),
             listMlAccounts(),
             getMlAppConfigStatus(),
             getGeminiCredentials(),
+            getBlingAppConfigStatus(),
         ]);
         setMlAccounts(accounts);
         setMlAppConfig(appCfg);
-        setCredentials(prev => ({ ...prev, clientId: savedCreds.clientId || '', clientSecret: savedCreds.clientSecret || '' }));
+        setBlingApp(blingAppCfg);
         setImportedCount(count);
         setApiStatus(savedCreds.connected ? 'valid' : 'unchecked');
 
@@ -161,41 +161,14 @@ function ApiSettingsContent() {
   }, [loadInitialData]);
 
 
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const { id, value } = e.target;
-    setCredentials(prev => ({ ...prev, [id]: value }));
-  };
-  
-  const handleSaveCredentials = async () => {
-    setIsSaving(true);
-    try {
-        await saveBlingCredentials({
-            clientId: credentials.clientId,
-            clientSecret: credentials.clientSecret,
-        });
-        toast({
-            title: "Credenciais Salvas!",
-            description: "Suas credenciais do Bling foram salvas com sucesso.",
-        });
-        const savedCreds = await getBlingCredentials();
-        setCredentials(prev => ({...prev, ...savedCreds}));
-
-    } catch (error) {
-        toast({
-            variant: "destructive",
-            title: "Erro ao Salvar",
-            description: "Não foi possível salvar as credenciais.",
-        });
-    } finally {
-        setIsSaving(false);
-    }
-  };
-
+  // Um clique: o servidor monta o link com o app das variáveis de ambiente e o navegador vai direto para o Bling.
   const handleConnect = async () => {
     setIsGenerating(true);
-    try { setAuthUrl(await startBlingOAuth()); }
-    catch (error) { toast({ variant: "destructive", title: "Erro ao conectar", description: error instanceof Error ? error.message : "Não foi possível iniciar a conexão." }); }
-    finally { setIsGenerating(false); }
+    try { window.location.href = await startBlingOAuth(); }
+    catch (error) {
+        setIsGenerating(false);
+        toast({ variant: "destructive", title: "Erro ao conectar", description: error instanceof Error ? error.message : "Não foi possível iniciar a conexão." });
+    }
   };
 
   const handleDisconnect = async () => {
@@ -203,7 +176,6 @@ function ApiSettingsContent() {
     try {
         await disconnectBling();
         localStorage.removeItem('bling_oauth_state');
-        setAuthUrl('');
         await loadInitialData(); // Recarrega estado real (desconectado)
         toast({ title: 'Desconectado!', description: 'A integração com o Bling foi removida.' });
     } catch (error: any) {
@@ -212,23 +184,6 @@ function ApiSettingsContent() {
         setIsSaving(false);
     }
   };
-
-  const handleCopy = async (text: string) => {
-    if (!text) return;
-    try {
-      await navigator.clipboard.writeText(text);
-      toast({
-        title: "Copiado!",
-        description: "O texto foi copiado para sua área de transferência.",
-      });
-    } catch {
-      toast({
-        variant: 'destructive',
-        title: 'Não foi possível copiar',
-        description: 'O navegador bloqueou o acesso à área de transferência. Selecione e copie manualmente.',
-      });
-    }
-  }
 
   const runSync = async (syncFunction: typeof smartSyncOrders | typeof fullSyncOrders) => {
       setIsImporting(true);
@@ -909,93 +864,42 @@ function ApiSettingsContent() {
     return (
         <div className="space-y-6">
           <div className="flex flex-col items-start gap-6 max-w-lg">
-            <div className="w-full space-y-2">
-            <Label htmlFor="clientId">Client ID</Label>
-            <Input 
-                id="clientId" 
-                type="text"
-                placeholder="Cole seu Client ID aqui" 
-                value={credentials.clientId}
-                onChange={handleInputChange}
-            />
-            </div>
-            <div className="w-full space-y-2">
-            <Label htmlFor="clientSecret">Client Secret</Label>
-            <Input 
-                id="clientSecret" 
-                type="password"
-                placeholder={credentials.clientSecret === '********' ? '********' : 'Cole seu Client Secret aqui'}
-                onChange={handleInputChange}
-            />
-            </div>
-            <div className="flex flex-wrap gap-2">
-            <Button onClick={handleSaveCredentials} disabled={isSaving}>
-                {isSaving ? (
-                    <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Salvando...
-                    </>
-                ) : (
-                    <>
-                    <Save className="mr-2 h-4 w-4" />
-                    Salvar Credenciais
-                    </>
-                )}
-            </Button>
-            <Button onClick={handleConnect} disabled={isGenerating || !credentials.clientId}>
-                {isGenerating ? (
-                <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Gerando...
-                </>
-                ) : (
-                <>
-                    <Plug className="mr-2 h-4 w-4" />
-                    Gerar Link de Conexão
-                </>
-                )}
-            </Button>
+            <div>
+              <Label className="text-base">Conectar conta do Bling</Label>
+              <p className="text-sm text-muted-foreground mt-1">
+                Você será levado ao Bling para confirmar o acesso do app. Depois de confirmar, volta automaticamente para esta página.
+              </p>
             </div>
 
-            {authUrl && (
-            <div className="w-full space-y-2">
-                <Label htmlFor="auth-url">1. Link de Autorização</Label>
-                <div className="flex items-center gap-2">
-                <Input 
-                    id="auth-url" 
-                    type="text"
-                    readOnly
-                    value={authUrl}
-                    className="bg-muted"
-                />
-                <Button variant="outline" size="icon" onClick={() => handleCopy(authUrl)}>
-                    <Copy className="h-4 w-4" />
-                </Button>
-                </div>
-                <p className="text-sm text-muted-foreground">
-                Copie o link acima e cole em um navegador onde você está logado no Bling para autorizar o acesso.
+            {blingApp && !blingApp.configured ? (
+              <div className="w-full rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm">
+                <p className="font-semibold text-destructive">App não configurado</p>
+                <p className="text-muted-foreground mt-1">
+                  Defina <code>BLING_CLIENT_ID</code> e <code>BLING_CLIENT_SECRET</code> nas variáveis de ambiente da Vercel para habilitar a conexão.
                 </p>
-            </div>
+              </div>
+            ) : (
+              <Button size="lg" onClick={handleConnect} disabled={isGenerating || !blingApp}>
+                {isGenerating ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Redirecionando para o Bling...
+                  </>
+                ) : (
+                  <>
+                    <Plug className="mr-2 h-4 w-4" />
+                    Conectar com o Bling
+                  </>
+                )}
+              </Button>
             )}
 
-            <div className="w-full space-y-2">
-            <Label htmlFor="callback-url">2. URL de Callback</Label>
-                <div className="flex items-center gap-2">
-                    <Input 
-                    id="callback-url" 
-                    type="text"
-                    readOnly
-                    value={callbackUrl || 'Carregando...'}
-                    className="bg-muted"
-                    />
-                    <Button variant="outline" size="icon" onClick={() => handleCopy(callbackUrl)}>
-                    <Copy className="h-4 w-4" />
-                    </Button>
-                </div>
-                <p className="text-sm text-muted-foreground">
-                Certifique-se de que a URL de callback no seu app do Bling está configurada para o valor acima.
-                </p>
-            </div>
+            {blingApp?.configured && blingApp.clientIdMasked && (
+              <p className="text-xs text-muted-foreground">
+                App configurado: <code>{blingApp.clientIdMasked}</code> (origem: {blingApp.source === 'env' ? 'variáveis de ambiente' : 'Firestore (legado)'}).
+                O link de redirecionamento do app no Bling deve ser <code>{callbackUrl || '…/api/callback/bling'}</code>.
+              </p>
+            )}
           </div>
           {apiResponse && (
               <Card>
