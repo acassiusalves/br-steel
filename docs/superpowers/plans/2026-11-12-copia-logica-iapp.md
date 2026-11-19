@@ -278,6 +278,17 @@ Telas em `/producao/engenharia/*` e operações em `src/server/operations/engine
 >   - Registro na auditoria: `pcp.configureTeamChecks`.
 >   - **Atenção:** a carga do iApp (`scripts/pcp-import-iapp.ts`) regrava as operações de equipes e funcionários com o que vem do iApp. Rodá-la de novo desfaz essa configuração, que então precisa ser refeita.
 > - **Falta para o uso real:** vincular cada líder ao seu usuário de login, em Engenharia → Funcionários. Os líderes também precisam ter login no BR Steel.
+> - **13/11/2026, feriados e motivos de perda em produção.** O iApp não tinha nenhum dos dois: a lista de feriados está vazia, e o único "Motivo" cadastrado é "Atender pedido", que não é motivo de perda. Com a aprovação do usuário, foram cadastrados em `mmewkphsrnttkzvpyddv`:
+>   - 20 feriados nacionais de 2026 e 2027. Carnaval e Corpus Christi ficaram de fora, porque são ponto facultativo. Os municipais dependem da cidade da fábrica e ainda não entraram;
+>   - 8 motivos de perda: Erro de corte, Erro de dobra, Defeito de solda, Erro de medida, Chapa/material com defeito, Risco ou amassado, Erro de polimento ou acabamento e Outro;
+>   - registros na auditoria: `pcp.seedHolidays` e `pcp.seedLossReasons`. Os dois cadastros podem ser editados em Engenharia, nas abas Expediente e Motivos de perda.
+> - **Campos extras da ficha:** no iApp, só 18 dos 1.286 passos têm tempo previsto, e esses já vieram na carga. Máquinas, checklist, imagens e perda por componente estão vazios lá.
+> - **13/11/2026, cards do iApp no Kanban de OPs (PR #53).** Migration `20261113160000_pcp_iapp_orders.sql` aplicada em `mmewkphsrnttkzvpyddv` antes do deploy, e carga feita com `scripts/pcp-import-iapp-orders.ts` depois dele:
+>   - recorte: cards abertos com início a partir de setembro/2026, lidos do Kanban do iApp às 14:07. Os cards antigos parados (2024 até agosto/2026) ficaram só no iApp;
+>   - resultado conferido no banco: 125 OPs (99 produzindo e 26 a produzir), todas com fase e ficha, e 943 OS, das quais 187 executadas e 99 em execução. As 286 OS já iniciadas no iApp entraram sem funcionário e sem horário, porque o iApp não informa quem as iniciou;
+>   - as 79 OPs de corte geradas no BR Steel em 13/11 não foram tocadas;
+>   - registro na auditoria: `pcp.importIappOrders`.
+>   - **Para atualizar** enquanto os dois sistemas rodam juntos, basta repetir a leitura e a carga. OPs já mexidas no BR Steel não são alteradas.
 > - **Fora desta fase:** arrastar e soltar (o card se move por botão, sempre para a próxima fase válida), coluna Suspenso e tempos em horas de expediente (Fase 5).
 
 
