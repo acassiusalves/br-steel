@@ -147,6 +147,16 @@ test('a carga do iApp é idempotente e respeita o organograma', async () => {
     (select count(*)::int from brsteel_pcp.worker_operations wo join brsteel_pcp.workers w on w.id = wo.worker_id where w.iapp_id = 11) b_ops,
     (select count(*)::int from brsteel_pcp.work_team_members m join brsteel_pcp.work_teams t on t.id = m.team_id where t.iapp_id = 50 and m.leader_id is not null) subordinates`)).rows[0];
   assert.deepEqual(counts, { workers: 3, linked: 2, b_ops: 1, subordinates: 1 });
+  // Depois da primeira carga, status e crachá de quem tem login ficam com o BR Steel.
+  await pool.query(`update brsteel_pcp.workers set active = false where iapp_id = 10`);
+  await pool.query(`update brsteel_pcp.workers set user_id = 'cracha-s-002' where iapp_id = 11`);
+  await pool.query(buildImportSql({ ...data, workers: data.workers.map(w => ({ ...w, badge: `${w.badge}-N` })) }));
+  const kept = (await pool.query(`select iapp_id, badge, active from brsteel_pcp.workers where iapp_id in (10, 11, 12) order by iapp_id`)).rows;
+  assert.deepEqual(kept, [
+    { iapp_id: '10', badge: 'S-001-N', active: false },
+    { iapp_id: '11', badge: 'S-002', active: true },
+    { iapp_id: '12', badge: 'S-003-N', active: true },
+  ]);
   const sheet = (await pool.query(`select (select count(*)::int from brsteel_pcp.product_sheet_steps t where t.sheet_id = s.id) steps,
       (select count(*)::int from brsteel_pcp.product_sheet_steps t where t.sheet_id = s.id and t.predecessor_step_id is not null) linked,
       (select count(*)::int from brsteel_pcp.product_sheet_components c where c.sheet_id = s.id and c.step_id is not null) components

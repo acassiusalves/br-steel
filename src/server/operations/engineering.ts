@@ -9,6 +9,8 @@ import { AccessError } from '@/server/access/errors';
 import { dateSchema, requireOperation, OperationError } from './common';
 
 export const ENGINEERING_PAGE = '/producao/engenharia';
+/** Funções que agem no Kanban de OPs pelo funcionário vinculado. */
+const KANBAN_ROLES = ['Administrador', 'Operador', 'Produção'];
 
 const uuid = z.string().uuid();
 const name = z.string().trim().min(1).max(200);
@@ -70,6 +72,15 @@ export function createEngineeringOperations(repository: EngineeringRepository, a
     if (ctx.actor.role !== 'Administrador') throw new OperationError('FORBIDDEN', 'Só administradores alteram os cadastros de engenharia.', 403);
     return writeActor(ctx);
   };
+  const checkLinkable = async (userId: string, badge: string) => {
+    const account = await accounts.describe(userId);
+    if (!account) throw new OperationError('LOGIN_NOT_FOUND', 'Login não encontrado. Recarregue a página e escolha de novo.', 404);
+    if (!account.active) throw new OperationError('LOGIN_INACTIVE', 'Este login está desativado. Reative em Configurações antes de vincular.', 409);
+    if (!KANBAN_ROLES.includes(account.role)) throw new OperationError('LOGIN_ROLE', `Um login com a função ${account.role || 'sem função'} não age no Kanban de OPs.`, 409);
+    if (account.badge && account.badge !== badge) {
+      throw new OperationError('LOGIN_OTHER_BADGE', `Este login é do crachá ${account.badge} e só pode ser vinculado ao funcionário com esse crachá.`, 409);
+    }
+  };
   const findWorker = async (id: string) => {
     const worker = (await repository.read()).data.workers.find(w => w.id === id);
     if (!worker) throw new OperationError('NOT_FOUND', 'Funcionário não encontrado.', 404);
@@ -92,14 +103,16 @@ export function createEngineeringOperations(repository: EngineeringRepository, a
     async saveWorker(ctx: AccessContext, id: unknown, input: unknown) {
       const actor = write(ctx);
       const workerId = idInput.parse(id), data = workerSchema.parse(input);
-      if (!workerId) return repository.saveWorker(workerId, data, actor);
-      const current = await findWorker(workerId);
+      const current = workerId ? await findWorker(workerId) : null;
+      // Vínculo escolhido à mão: só um login que existe, pode agir no Kanban e, se for de crachá, é deste crachá.
+      if (typeof data.userId === 'string' && data.userId !== current?.userId) await checkLinkable(data.userId, data.badge);
+      if (!workerId || !current) return repository.saveWorker(workerId, data, actor);
       const oldBadge = normalizeBadge(current.badge);
       const badgeLogin = current.userId && oldBadge && current.userId === badgeUserId(oldBadge) ? current.userId : null;
       const unlinks = data.userId !== undefined && data.userId !== current.userId;
-      // O login do crachá é a conta cracha-<código>: trocar o código deixaria o login preso ao antigo.
+      // O login do crachá é a conta cracha-<código>: trocar o código aqui deixaria o login preso ao antigo.
       if (badgeLogin && data.badge !== oldBadge) {
-        throw new OperationError('BADGE_LOCKED', `Este funcionário entra no sistema pelo crachá ${oldBadge}. Para trocar o código, desvincule o login, troque o crachá e crie o acesso de novo.`, 409);
+        throw new OperationError('BADGE_LOCKED', `Este funcionário entra no sistema pelo crachá ${oldBadge}. Use "Trocar crachá" na lista de funcionários: o login vai junto, com a mesma senha.`, 409);
       }
       const saved = await repository.saveWorker(workerId, data, actor);
       // Funcionário inativado ou desvinculado não pode continuar entrando pelo crachá.
@@ -108,6 +121,9 @@ export function createEngineeringOperations(repository: EngineeringRepository, a
         catch {
           throw new OperationError('LOGIN_STILL_ACTIVE', 'O funcionário foi salvo, mas o login pelo crachá continua ativo. Desative o acesso em Configurações.', 502);
         }
+      } else if (badgeLogin && data.name !== current.name) {
+        // O nome do login acompanha o cadastro; se falhar, o cadastro já está salvo e o nome se acerta na próxima edição.
+        await accounts.rename(badgeLogin, data.name, ctx.actor.userId).catch(() => false);
       }
       return saved;
     },
@@ -177,6 +193,37 @@ export function createEngineeringOperations(repository: EngineeringRepository, a
         throw new OperationError('NOT_BADGE', error instanceof AccessError ? error.message : 'Não foi possível resetar a senha.', 409);
       }
       return { data: { pin }, source: 'postgres' as const, asOf: new Date().toISOString(), warnings: [], nextCursor: null };
+    },
+    /**
+     * Troca o código do crachá de quem já tem login, levando o login junto com a mesma senha e o mesmo papel.
+     * Serve para corrigir um código que o leitor emite diferente do cadastro sem refazer o acesso.
+     */
+    async changeBadgeLogin(ctx: AccessContext, id: unknown, input: unknown) {
+      const actor = write(ctx);
+      const workerId = uuid.parse(id);
+      const { badge } = z.object({ badge: badgeSchema }).strict().parse(input);
+      const workers = (await repository.read()).data.workers;
+      const worker = workers.find(w => w.id === workerId);
+      if (!worker) throw new OperationError('NOT_FOUND', 'Funcionário não encontrado.', 404);
+      const oldBadge = normalizeBadge(worker.badge);
+      if (!worker.userId || !oldBadge || worker.userId !== badgeUserId(oldBadge)) {
+        throw new OperationError('NOT_BADGE', 'Este funcionário não entra pelo crachá. Troque o código direto no cadastro.', 409);
+      }
+      if (badge === oldBadge) throw new OperationError('SAME_BADGE', 'O crachá novo é igual ao atual.');
+      const other = workers.find(w => w.id !== workerId && normalizeBadge(w.badge) === badge);
+      if (other) throw new OperationError('DUPLICATE', `O crachá ${badge} já é de ${other.name}.`, 409);
+      let moved: { userId: string };
+      try { moved = await accounts.moveBadge(worker.userId, badge, ctx.actor.userId); }
+      catch (error) {
+        throw new OperationError('BADGE_TAKEN', error instanceof AccessError ? error.message : 'Não foi possível trocar o crachá.', 409);
+      }
+      try { await repository.changeWorkerBadge(workerId, worker.userId, moved.userId, badge, actor); }
+      catch (error) {
+        // O cadastro não acompanhou: o login volta para o crachá antigo, como estava.
+        await accounts.undoMove(moved.userId, worker.userId, ctx.actor.userId).catch(() => undefined);
+        throw error;
+      }
+      return { data: { userId: moved.userId, badge }, source: 'postgres' as const, asOf: new Date().toISOString(), warnings: [], nextCursor: null };
     },
   };
 }

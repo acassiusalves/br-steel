@@ -79,6 +79,11 @@ export interface EngineeringRepository {
    * quando algo mudou entre a leitura e a gravação. Não toca nos outros campos.
    */
   linkWorkerUser(workerId: string, userId: string, badge: string, actor: WriteActor): Promise<OperationResult<{ id: string }>>;
+  /**
+   * Troca o crachá e o login juntos, só se o funcionário ainda está com o login `fromUserId`; recusa com
+   * `LINK_CONFLICT` quando algo mudou. Usado para levar o login a um código novo sem perder a senha.
+   */
+  changeWorkerBadge(workerId: string, fromUserId: string, toUserId: string, badge: string, actor: WriteActor): Promise<OperationResult<{ id: string }>>;
   /** Substitui o expediente inteiro. */
   replaceWorkPeriods(periods: WorkPeriodRow[], actor: WriteActor): Promise<OperationResult<null>>;
   saveHoliday(input: Holiday, actor: WriteActor): Promise<OperationResult<null>>;

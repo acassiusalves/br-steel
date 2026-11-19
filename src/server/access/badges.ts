@@ -1,5 +1,6 @@
 import 'server-only';
 import crypto from 'node:crypto';
+import { FieldValue } from 'firebase-admin/firestore';
 import { adminDb } from '@/lib/firebase-admin';
 import { PRODUCTION_ROLE } from '@/lib/permissions';
 import { DEFAULT_INITIAL_PASSWORD, hashPassword } from './passwords';
@@ -72,6 +73,18 @@ export type BadgeAccounts = {
   reset(userId: string, actorUserId: string): Promise<{ pin: string }>;
   /** Desativa a conta de crachá e encerra as sessões. Devolve false quando não havia o que desativar. */
   deactivate(userId: string, actorUserId: string): Promise<boolean>;
+  /** O que a Engenharia precisa saber de um login para vinculá-lo: papel, se está ativo e o crachá, se houver. */
+  describe(userId: string): Promise<{ role: string; active: boolean; badge: string | null } | null>;
+  /** Acompanha o nome do funcionário na conta de crachá. Devolve false quando não havia o que mudar. */
+  rename(userId: string, name: string, actorUserId: string): Promise<boolean>;
+  /**
+   * Leva o login para outro código de crachá sem perder a senha: cria a conta `cracha-<novo>` com a mesma
+   * credencial e o mesmo papel, desativa a antiga (que guarda `movedTo`) e encerra as sessões das duas.
+   * Recusa se o código novo já tem conta.
+   */
+  moveBadge(fromUserId: string, badge: string, actorUserId: string): Promise<{ userId: string }>;
+  /** Desfaz `moveBadge` quando o cadastro do funcionário não pôde acompanhar: apaga a nova e reativa a antiga. */
+  undoMove(toUserId: string, fromUserId: string, actorUserId: string): Promise<void>;
 };
 
 const versionOf = (data: FirebaseFirestore.DocumentData) => (Number.isSafeInteger(data.authVersion) && data.authVersion >= 0 ? data.authVersion : 0);
@@ -120,6 +133,55 @@ export const firestoreBadgeAccounts: BadgeAccounts = {
       tx.update(ref, { active: false, authVersion: versionOf(data) + 1, updatedAt: new Date().toISOString() });
       recordAccessAudit(tx, { operation: 'badge.deactivate', actorUserId, targetUserId: userId });
       return true;
+    });
+  },
+  async describe(userId) {
+    const snapshot = await adminDb.collection('users').doc(userId).get();
+    if (!snapshot.exists) return null;
+    const user = storedUserFromDoc(snapshot.id, snapshot.data()!);
+    return { role: user.role, active: user.active !== false, badge: user.badge ?? null };
+  },
+  async rename(userId, name, actorUserId) {
+    const ref = adminDb.collection('users').doc(userId);
+    return adminDb.runTransaction(async tx => {
+      const current = await tx.get(ref);
+      const data = current.data();
+      if (!current.exists || typeof data?.badge !== 'string' || !data.badge || data.name === name) return false;
+      tx.update(ref, { name, updatedAt: new Date().toISOString() });
+      recordAccessAudit(tx, { operation: 'user.rename', actorUserId, targetUserId: userId });
+      return true;
+    });
+  },
+  async moveBadge(fromUserId, badge, actorUserId) {
+    const users = adminDb.collection('users');
+    const fromRef = users.doc(fromUserId), toRef = users.doc(badgeUserId(badge));
+    await adminDb.runTransaction(async tx => {
+      const [from, to] = await Promise.all([tx.get(fromRef), tx.get(toRef)]);
+      const data = from.data();
+      if (!from.exists || typeof data?.badge !== 'string' || !data.badge) throw new AccessError('Este funcionário não entra pelo crachá.');
+      if (data.badge === badge) throw new AccessError('O crachá novo é igual ao atual.');
+      if (to.exists) throw new AccessError(`Já existe um login para o crachá ${badge}. Confira em Configurações antes de trocar.`);
+      const now = new Date().toISOString();
+      const { movedTo: _movedTo, createdAt: _createdAt, ...kept } = data;
+      void _movedTo; void _createdAt;
+      // Mesma senha, mesmo papel e mesmo estado de primeiro acesso; sessões abertas (no código antigo) encerradas.
+      tx.create(toRef, { ...kept, badge, authVersion: versionOf(data) + 1, failedLogins: 0, lockedUntil: 0,
+        movedFrom: fromUserId, movedFromActive: data.active !== false, createdAt: now, updatedAt: now });
+      tx.update(fromRef, { active: false, authVersion: versionOf(data) + 1, movedTo: toRef.id, updatedAt: now });
+      recordAccessAudit(tx, { operation: 'badge.move', actorUserId, targetUserId: toRef.id });
+      recordAccessAudit(tx, { operation: 'badge.deactivate', actorUserId, targetUserId: fromUserId });
+    });
+    return { userId: toRef.id };
+  },
+  async undoMove(toUserId, fromUserId, actorUserId) {
+    const users = adminDb.collection('users');
+    const fromRef = users.doc(fromUserId), toRef = users.doc(toUserId);
+    await adminDb.runTransaction(async tx => {
+      const [from, to] = await Promise.all([tx.get(fromRef), tx.get(toRef)]);
+      if (!to.exists || to.data()?.movedFrom !== fromUserId || !from.exists) return;
+      tx.delete(toRef);
+      tx.update(fromRef, { active: to.data()!.movedFromActive !== false, authVersion: versionOf(from.data()!) + 1, movedTo: FieldValue.delete(), updatedAt: new Date().toISOString() });
+      recordAccessAudit(tx, { operation: 'badge.moveUndo', actorUserId, targetUserId: fromUserId });
     });
   },
 };

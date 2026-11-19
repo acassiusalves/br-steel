@@ -33,3 +33,5 @@ export async function getSheet(id: string): Promise<ProductSheet> {
 export const saveSheet = (id: string | null, data: SheetInput) => mutate<{ id: string }>('saveSheet', data, id);
 export const createBadgeAccess = (workerId: string) => mutate<{ userId: string; badge: string; pin: string; adopted: boolean }>('createBadgeAccess', undefined, workerId);
 export const resetBadgePassword = (workerId: string) => mutate<{ pin: string }>('resetBadgePassword', undefined, workerId);
+/** Troca o código do crachá de quem já tem login; o login vai junto, com a mesma senha. */
+export const changeBadgeLogin = (workerId: string, badge: string) => mutate<{ userId: string; badge: string }>('changeBadgeLogin', { badge }, workerId);

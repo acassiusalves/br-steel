@@ -57,7 +57,8 @@ export async function PATCH(request: Request) {
       return { error: 'Senha atual inválida.', status: 401 } as const;
     }
     const update = {
-      name, updatedAt: new Date().toISOString(),
+      // O nome de quem entra pelo crachá segue o cadastro do funcionário na Engenharia.
+      name: isBadgeUser(stored) ? stored.name : name, updatedAt: new Date().toISOString(),
       ...(credential ? {
         passwordHash: credential.hash, passwordSalt: credential.salt,
         mustChangePassword: false, authVersion: stored.authVersion + 1,

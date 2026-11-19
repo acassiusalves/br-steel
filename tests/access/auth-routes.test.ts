@@ -29,9 +29,29 @@ it.each(['Administrador', 'Vendedor', 'Operador'])('logs in and loads the curren
   expect(data.user.role).toBe(role);
   expect(data.user).not.toHaveProperty('passwordHash');
 });
-it('rejects login for inactive accounts', async () => {
+it('rejects login for inactive accounts, saying why only after the right password', async () => {
   await adminDb.collection('users').doc(actor.id).update({ active: false });
-  expect((await login(request('login', 'POST', { email: actor.email, password }))).status).toBe(401);
+  const right = await login(request('login', 'POST', { email: actor.email, password }));
+  expect(right.status).toBe(403);
+  expect((await right.json()).error).toContain('desativado');
+  expect(right.headers.get('set-cookie')).toBeNull();
+  const wrong = await login(request('login', 'POST', { email: actor.email, password: 'wrong-password-123' }));
+  expect(wrong.status).toBe(401);
+  expect((await wrong.json()).error).toBe('Usuário ou senha inválidos.');
+});
+it('forces a password change at login for an account whose password is still 123456', async () => {
+  const { hash, salt } = hashPassword('123456');
+  await seedUser('old-default', { role: 'Vendedor', passwordHash: hash, passwordSalt: salt, mustChangePassword: false });
+  const response = await login(request('login', 'POST', { email: 'old-default@example.test', password: '123456' }));
+  expect(response.status).toBe(200);
+  expect((await response.json()).user.mustChangePassword).toBe(true);
+  expect((await adminDb.collection('users').doc('old-default').get()).data()?.mustChangePassword).toBe(true);
+});
+it('finds accounts by the normalized e-mail without reading the whole collection', async () => {
+  await seedUser('mixed', { email: 'Mixed.Case@Example.test', normalizedEmail: 'mixed.case@example.test' });
+  const { findUserByEmail } = await import('@/server/access/users');
+  expect((await findUserByEmail('MIXED.case@example.TEST'))?.id).toBe('mixed');
+  expect(await findUserByEmail('nobody@example.test')).toBeNull();
 });
 it('rejects cross-origin login and profile mutations', async () => {
   expect((await login(request('login', 'POST', { email: actor.email, password }, undefined, 'https://attacker.test'))).status).toBe(403);

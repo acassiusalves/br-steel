@@ -108,11 +108,12 @@ export function buildImportSql(data: IappEngineeringExport): string {
 
   for (const w of data.workers) {
     // Funcionário com login vinculado mantém o crachá do BR Steel: o login é a conta `cracha-<código>`, e trocar
-    // o código pela carga deixaria o login no crachá antigo.
+    // o código pela carga deixaria o login no crachá antigo. O status também fica com o BR Steel: quem foi
+    // inativado aqui (e teve o login desativado junto) não volta a ficar ativo por uma carga nova do iApp.
     out.push(`insert into ${s}.workers (iapp_id, name, badge, kind, active) values (${int(w.iappId)}, ${lit(w.name)}, ${lit(String(w.badge).trim().toUpperCase())}, ${lit(w.kind)}, ${w.active})
   on conflict (iapp_id) do update set name = excluded.name,
     badge = case when ${s}.workers.user_id is null then excluded.badge else ${s}.workers.badge end,
-    kind = excluded.kind, active = excluded.active, updated_at = now();`);
+    kind = excluded.kind, updated_at = now();`);
   }
 
   // Primeiro as operações sem predecessora; depois as ligações (a exportação já foi validada contra ciclos).

@@ -8,8 +8,13 @@ import { context } from './fixtures';
 const ID = '00000000-0000-4000-8000-000000000001';
 const OTHER = '00000000-0000-4000-8000-000000000002';
 
-function setup(worker: Partial<Worker> = {}, others: Worker[] = [], options: { linkFails?: boolean; deactivateFails?: boolean } = {}) {
-  const calls: { saved?: unknown; linked?: unknown; created?: [string, string, string]; reset?: [string, string]; deactivated: string[] } = { deactivated: [] };
+type Account = { role: string; active: boolean; badge: string | null };
+type Options = { linkFails?: boolean; deactivateFails?: boolean; changeFails?: boolean; accounts?: Record<string, Account> };
+function setup(worker: Partial<Worker> = {}, others: Worker[] = [], options: Options = {}) {
+  const calls: {
+    saved?: unknown; linked?: unknown; created?: [string, string, string]; reset?: [string, string]; deactivated: string[];
+    renamed: [string, string][]; moved?: [string, string]; undone?: [string, string]; changed?: unknown;
+  } = { deactivated: [], renamed: [] };
   const w: Worker = { id: ID, name: 'Ruan', badge: '26557', kind: 'Líder', active: true, userId: null, operationIds: [], ...worker };
   const repo = {
     async read() { return { data: { workers: [w, ...others] } } as never; },
@@ -17,6 +22,10 @@ function setup(worker: Partial<Worker> = {}, others: Worker[] = [], options: { l
     async linkWorkerUser(workerId: string, userId: string, badge: string) {
       if (options.linkFails) throw new OperationError('LINK_CONFLICT', 'O funcionário mudou enquanto o acesso era criado.', 409);
       calls.linked = [workerId, userId, badge]; return { data: { id: workerId } } as never;
+    },
+    async changeWorkerBadge(workerId: string, fromUserId: string, toUserId: string, badge: string) {
+      if (options.changeFails) throw new OperationError('LINK_CONFLICT', 'O funcionário mudou enquanto o crachá era trocado.', 409);
+      calls.changed = [workerId, fromUserId, toUserId, badge]; return { data: { id: workerId } } as never;
     },
   } as unknown as EngineeringRepository;
   const accounts: BadgeAccounts = {
@@ -26,6 +35,10 @@ function setup(worker: Partial<Worker> = {}, others: Worker[] = [], options: { l
       if (options.deactivateFails) throw new Error('Firestore indisponível');
       calls.deactivated.push(userId); return true;
     },
+    async describe(userId) { return options.accounts?.[userId] ?? null; },
+    async rename(userId, name) { calls.renamed.push([userId, name]); return true; },
+    async moveBadge(fromUserId, badge) { calls.moved = [fromUserId, badge]; return { userId: `cracha-${badge.toLowerCase()}` }; },
+    async undoMove(toUserId, fromUserId) { calls.undone = [toUserId, fromUserId]; },
   };
   return { ops: createEngineeringOperations(repo, accounts), calls };
 }
@@ -113,5 +126,63 @@ describe('o login pelo crachá acompanha o funcionário', () => {
     const { ops, calls } = setup({ userId: 'cracha-26557' }, [], { deactivateFails: true });
     await expect(ops.saveWorker(admin(), ID, workerInput({ active: false, userId: 'cracha-26557' }))).rejects.toMatchObject({ code: 'LOGIN_STILL_ACTIVE' });
     expect(calls.saved).toBeDefined();
+  });
+});
+
+describe('trocar o crachá de quem já tem login', () => {
+  it('leva o login para o código novo e grava crachá e login juntos no funcionário', async () => {
+    const { ops, calls } = setup({ badge: '012', userId: 'cracha-012' });
+    const result = await ops.changeBadgeLogin(admin(), ID, { badge: ' 0000012345 ' });
+    expect(result.data).toEqual({ userId: 'cracha-0000012345', badge: '0000012345' });
+    expect(calls.moved).toEqual(['cracha-012', '0000012345']);
+    expect(calls.changed).toEqual([ID, 'cracha-012', 'cracha-0000012345', '0000012345']);
+    expect(calls.undone).toBeUndefined();
+  });
+  it('se o cadastro não acompanha, o login volta para o crachá antigo', async () => {
+    const { ops, calls } = setup({ badge: '012', userId: 'cracha-012' }, [], { changeFails: true });
+    await expect(ops.changeBadgeLogin(admin(), ID, { badge: '013' })).rejects.toMatchObject({ code: 'LINK_CONFLICT' });
+    expect(calls.undone).toEqual(['cracha-013', 'cracha-012']);
+  });
+  it('recusa quem não entra pelo crachá, código igual, inválido ou de outro funcionário', async () => {
+    await expect(setup({ badge: '012' }).ops.changeBadgeLogin(admin(), ID, { badge: '013' })).rejects.toMatchObject({ code: 'NOT_BADGE' });
+    await expect(setup({ badge: '012', userId: 'cracha-012' }).ops.changeBadgeLogin(admin(), ID, { badge: '012' })).rejects.toMatchObject({ code: 'SAME_BADGE' });
+    await expect(setup({ badge: '012', userId: 'cracha-012' }).ops.changeBadgeLogin(admin(), ID, { badge: '12 3' })).rejects.toThrow(/Crachá inválido|String/);
+    const other: Worker = { id: OTHER, name: 'Outro', badge: '013', kind: 'Líder', active: true, userId: null, operationIds: [] };
+    const taken = setup({ badge: '012', userId: 'cracha-012' }, [other]);
+    await expect(taken.ops.changeBadgeLogin(admin(), ID, { badge: '013' })).rejects.toMatchObject({ code: 'DUPLICATE' });
+    expect(taken.calls.moved).toBeUndefined();
+    await expect(setup({ badge: '012', userId: 'cracha-012' }).ops.changeBadgeLogin(context('Operador'), ID, { badge: '013' })).rejects.toMatchObject({ code: 'FORBIDDEN' });
+  });
+});
+
+describe('vínculo escolhido à mão e nome do login', () => {
+  const accounts: Record<string, Account> = {
+    'conta-operador': { role: 'Operador', active: true, badge: null },
+    'conta-vendedor': { role: 'Vendedor', active: true, badge: null },
+    'conta-inativa': { role: 'Operador', active: false, badge: null },
+    'cracha-99999': { role: 'Produção', active: true, badge: '99999' },
+    'cracha-26557': { role: 'Produção', active: true, badge: '26557' },
+  };
+  it('só vincula login que existe, está ativo, age no Kanban e, se for de crachá, é do mesmo crachá', async () => {
+    const ops = () => setup({}, [], { accounts }).ops;
+    await expect(ops().saveWorker(admin(), ID, workerInput({ userId: 'sumiu' }))).rejects.toMatchObject({ code: 'LOGIN_NOT_FOUND' });
+    await expect(ops().saveWorker(admin(), ID, workerInput({ userId: 'conta-inativa' }))).rejects.toMatchObject({ code: 'LOGIN_INACTIVE' });
+    await expect(ops().saveWorker(admin(), ID, workerInput({ userId: 'conta-vendedor' }))).rejects.toMatchObject({ code: 'LOGIN_ROLE' });
+    await expect(ops().saveWorker(admin(), ID, workerInput({ userId: 'cracha-99999' }))).rejects.toMatchObject({ code: 'LOGIN_OTHER_BADGE' });
+    await expect(ops().saveWorker(admin(), null, workerInput({ userId: 'cracha-99999' }))).rejects.toMatchObject({ code: 'LOGIN_OTHER_BADGE' });
+    const ok = setup({}, [], { accounts });
+    await ok.ops.saveWorker(admin(), ID, workerInput({ userId: 'conta-operador' }));
+    expect((ok.calls.saved as [string, { userId: string }])[1].userId).toBe('conta-operador');
+    const sameBadge = setup({}, [], { accounts });
+    await sameBadge.ops.saveWorker(admin(), ID, workerInput({ userId: 'cracha-26557' }));
+    expect(sameBadge.calls.saved).toBeDefined();
+  });
+  it('o nome do login de crachá acompanha o cadastro do funcionário', async () => {
+    const { ops, calls } = setup({ userId: 'cracha-26557' }, [], { accounts });
+    await ops.saveWorker(admin(), ID, workerInput({ name: 'Ruan Silva', userId: 'cracha-26557' }));
+    expect(calls.renamed).toEqual([['cracha-26557', 'Ruan Silva']]);
+    const email = setup({ userId: 'conta-operador' }, [], { accounts });
+    await email.ops.saveWorker(admin(), ID, workerInput({ name: 'Ruan Silva', userId: 'conta-operador' }));
+    expect(email.calls.renamed).toEqual([]);
   });
 });

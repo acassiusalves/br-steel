@@ -114,7 +114,9 @@ export default function PerfilPageClient() {
                             <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
                                 <div className="space-y-2">
                                     <Label htmlFor="name">Nome</Label>
-                                    <Input id="name" name="name" maxLength={120} defaultValue={user?.name} required />
+                                    <Input id="name" name="name" maxLength={120} defaultValue={user?.name} required readOnly={!!user?.badge}
+                                        aria-describedby={user?.badge ? 'name-hint' : undefined} />
+                                    {user?.badge && <p id="name-hint" className="text-xs text-muted-foreground">O nome vem do cadastro de funcionários. Para corrigir, fale com o administrador.</p>}
                                 </div>
                                 <div className="space-y-2">
                                     <Label htmlFor="email">{user?.badge ? 'Crachá' : 'E-mail'}</Label>

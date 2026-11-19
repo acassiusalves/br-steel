@@ -8,7 +8,8 @@ import {
   verifyPassword,
 } from '@/lib/server-auth';
 import { adminDb } from '@/lib/firebase-admin';
-import { isKnownRole, publicUser } from '@/server/access/users';
+import { accountBlocked, publicUser } from '@/server/access/users';
+import { DEFAULT_INITIAL_PASSWORD, UNKNOWN_USER_CREDENTIAL } from '@/server/access/passwords';
 import { rejectCrossOrigin } from '@/server/access/request';
 import { recordAccessAudit } from '@/server/access/audit';
 import { BADGE_LOCK_MS, BADGE_MAX_FAILURES, badgeUserId, isBadgeUser, normalizeBadge } from '@/server/access/badges';
@@ -53,14 +54,22 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: false, error: 'E-mail e senha são obrigatórios.' }, { status: 400 });
     }
     user = await findUserByEmail(email);
+    // Sem conta, o scrypt roda do mesmo jeito: o tempo de resposta não revela quais e-mails existem.
+    const passwordOk = verifyPassword(password, user?.passwordHash ?? UNKNOWN_USER_CREDENTIAL.hash, user?.passwordSalt ?? UNKNOWN_USER_CREDENTIAL.salt);
     // Conta de crachá só entra pelo crachá, onde vale o bloqueio por tentativas.
-    if (!user || isBadgeUser(user) || user.active === false || !isKnownRole(user.role) || !verifyPassword(password, user.passwordHash, user.passwordSalt)) {
+    if (!user || isBadgeUser(user) || !passwordOk) {
       await recordLoginFailure(ip);
       return NextResponse.json({ ok: false, error: 'Usuário ou senha inválidos.' }, { status: 401 });
     }
+    const blocked = accountBlocked(user);
+    if (blocked) return NextResponse.json({ ok: false, error: blocked }, { status: 403 });
   }
 
-  await adminDb.collection('users').doc(user.id).update({ lastLogin: new Date().toISOString() });
+  // A senha padrão antiga, se ainda for a senha de alguém, obriga a troca já neste login. Com isso a sessão não
+  // precisa refazer o scrypt da senha padrão a cada requisição para descobrir isso.
+  const forceChange = password === DEFAULT_INITIAL_PASSWORD && !user.mustChangePassword;
+  await adminDb.collection('users').doc(user.id).update({ lastLogin: new Date().toISOString(), ...(forceChange ? { mustChangePassword: true } : {}) });
+  if (forceChange) user = { ...user, mustChangePassword: true };
   const token = createSessionToken(user, user.authVersion);
   const access = await loadAppAccessSettings();
   const response = NextResponse.json({
@@ -89,7 +98,7 @@ async function loginWithBadge(badge: string, password: string): Promise<{ user: 
     if (!snapshot.exists) return invalid;
     const data = snapshot.data()!;
     const user = storedUserFromDoc(snapshot.id, data);
-    if (user.badge !== badge || user.active === false || !isKnownRole(user.role)) return invalid;
+    if (user.badge !== badge) return invalid;
     const failedLogins = Number.isSafeInteger(data.failedLogins) ? data.failedLogins : 0;
     const lockedUntil = typeof data.lockedUntil === 'number' ? data.lockedUntil : 0;
     const now = Date.now();
@@ -108,6 +117,10 @@ async function loginWithBadge(badge: string, password: string): Promise<{ user: 
       return { error: 'O PIN de primeiro acesso venceu. Peça ao administrador para gerar um novo.', status: 403 };
     }
     if (failedLogins || lockedUntil) tx.update(ref, { failedLogins: 0, lockedUntil: 0 });
+    // Só depois da senha certa: a mensagem diz o motivo sem revelar a quem não sabe a senha que a conta existe.
+    if (typeof data.movedTo === 'string') return { error: 'Este crachá foi trocado. Entre com o código do crachá novo.', status: 403 };
+    const blocked = accountBlocked(user);
+    if (blocked) return { error: blocked, status: 403 };
     return { user };
   });
 }

@@ -268,6 +268,17 @@ export default function EngineeringClient() {
                           Resetar senha
                         </Button>
                       )}
+                      {isAdmin && w.userId && users.find(u => u.id === w.userId)?.badge && (
+                        <Button size="sm" variant="outline" className="ml-2" disabled={saving}
+                          onClick={() => {
+                            // Corrige o código de quem já tem login (ex.: o leitor emite outro formato): login e senha vão juntos.
+                            const next = window.prompt(`Novo código do crachá de ${w.name} (hoje: ${w.badge}). O login vai junto, com a mesma senha; as sessões abertas dele serão encerradas.`, w.badge);
+                            if (!next || next.trim().toUpperCase() === w.badge) return;
+                            void run(() => svc.changeBadgeLogin(w.id, next).then(loadUsers), 'Crachá trocado. Ele entra com o código novo e a mesma senha.');
+                          }}>
+                          Trocar crachá
+                        </Button>
+                      )}
                     </TableCell>
                   </TableRow>
                 ))}
