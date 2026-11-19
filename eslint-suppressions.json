@@ -37,7 +37,7 @@
       "count": 12
     },
     "@typescript-eslint/no-unused-vars": {
-      "count": 9
+      "count": 8
     }
   },
   "src/app/api/auth/login/route.ts": {

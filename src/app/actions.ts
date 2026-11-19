@@ -2,7 +2,7 @@
 "use server";
 
 import { getFullBlingCredentials, blingFetchWithRefresh, blingGetPaged } from '@/server/integrations/bling';
-import { beginBlingConnection } from '@/server/integrations/bling-oauth';
+import { beginBlingConnection, blingAppStatus } from '@/server/integrations/bling-oauth';
 import { requireWebContext } from '@/server/operations/context';
 import { requireOperation, documentIdSchema, dateRangeSchema } from '@/server/operations/common';
 import { requireCoreWritesEnabled } from '@/server/operations/maintenance';
@@ -197,6 +197,7 @@ export async function clearSyncProgress(): Promise<void> {
 }
 
 export async function startBlingOAuth() { return beginBlingConnection(); }
+export async function getBlingAppConfigStatus() { return blingAppStatus(); }
 
 export async function disconnectBling(): Promise<void> {
   await requireAdministrator();

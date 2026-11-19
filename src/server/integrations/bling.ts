@@ -4,9 +4,11 @@ type BlingCredentials = { clientId?: string; clientSecret?: string; accessToken?
 export async function getFullBlingCredentials(): Promise<BlingCredentials> {
   const snap = await adminDb.collection('appConfig').doc('blingCredentials').get();
   const saved = snap.exists ? (snap.data() as BlingCredentials) : {};
+  // O app do Bling vem das variáveis de ambiente; o Firestore só guarda os tokens (e, de contas antigas, um app salvo pela tela).
+  const fromEnv = Boolean(process.env.BLING_CLIENT_ID && process.env.BLING_CLIENT_SECRET);
   return {
-    clientId:     saved.clientId     || process.env.BLING_CLIENT_ID,
-    clientSecret: saved.clientSecret || process.env.BLING_CLIENT_SECRET,
+    clientId:     fromEnv ? process.env.BLING_CLIENT_ID     : saved.clientId,
+    clientSecret: fromEnv ? process.env.BLING_CLIENT_SECRET : saved.clientSecret,
     accessToken:  saved.accessToken,
     refreshToken: saved.refreshToken,
     expiresAt:    saved.expiresAt,
