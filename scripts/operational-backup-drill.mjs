@@ -9,7 +9,7 @@ import { Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import net from 'node:net';
 import { Pool } from 'pg';
-import { backupConnection, assertSameManifest, privateLocation, manifest, project, sourceProject, localDockerEndpoint, copyHash } from './lib/operational-backup.mjs';
+import { backupConnection, assertSameManifest, privateLocation, manifest, restoredManifest, project, sourceProject, localDockerEndpoint, copyHash } from './lib/operational-backup.mjs';
 
 const repo=resolve(dirname(fileURLToPath(import.meta.url)),'..');
 const image='public.ecr.aws/supabase/postgres:17.6.1.167';
@@ -144,7 +144,7 @@ async function run() {
       await new Promise(r=>setTimeout(r,500));
     }
     if(!ready)throw new Error('Local database unavailable');
-    for(const name of ['anon','authenticated','brsteel_ops_reader','brsteel_ops_importer','brsteel_ops_backup'])
+    for(const name of ['anon','authenticated','brsteel_ops_reader','brsteel_ops_importer','brsteel_ops_backup','brsteel_ops_writer'])
       await localQuery(`create role ${name} nologin nosuperuser nocreatedb nocreaterole noreplication nobypassrls`);
     // An altered authenticated ciphertext must fail and leave no partial schemas in a single-transaction restore.
     const bad=join(dir,'tampered.age');const bytes=await readFile(archive);bytes[Math.floor(bytes.length/2)]^=1;
@@ -157,7 +157,7 @@ async function run() {
     }finally{await unlink(bad);}
     const restoreStart=performance.now();await restore(archive,identity);report.restoreMs=performance.now()-restoreStart;
     progress('content-and-permission-verification');
-    const actual=await manifest(localQuery);assertSameManifest(expected,actual);
+    const actual=await restoredManifest(localQuery,expected);
     report.content={tables:actual.tables,totalRows:actual.tables.reduce((n,t)=>n+t.rows,0),catalogMatched:true,
       rlsTables:actual.catalog.tables.filter(t=>t[2]).length,foreignKeys:actual.catalog.constraints.filter(c=>c[3]==='f').length,indexes:actual.catalog.indexes.length};
     const privileges=(await localQuery(`select

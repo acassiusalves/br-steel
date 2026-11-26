@@ -5,7 +5,7 @@ import {
   IAPP_HEADER, componentQuantity, iappImportRows, orderStepsFromRoute, pickSheet, productionQueue, suggestOrders, suggestedQuantity, type SheetOption,
 } from '@/lib/pcp/op-generator';
 import type {
-  BatchInput, BatchSummary, GenerationPreview, OrderKind, OrderOrigin, OrderStatus, PreviewInput, ProducibleProduct, ProductionOrderRepository,
+  BatchInput, BatchSummary, GenerationPreview, OrderKind, OrderOrigin, OrderStatus, ProducibleProduct, ProductionOrderRepository,
   ProductionOrderRow, SalesOrderPreview,
 } from './pcp-orders-contract';
 import { planSalesOrder, type SheetDetail } from '@/lib/pcp/sales-order-plan';
@@ -15,7 +15,9 @@ import { invoiceDemand, weeksInRange } from '@/lib/pcp/invoice-demand';
 import { OFFICIAL_LINE_SKUS } from '@/lib/pcp/official-line';
 import { createBlingReader, type BlingReader } from '@/server/integrations/bling-catalog';
 import type { PlanningRow } from '@/lib/pcp/op-generator';
-import { recordWriteAudit, type WriteActor } from './write-audit';
+import { recordWriteAudit, replayIdempotent, storeIdempotent, type WriteActor } from './write-audit';
+import { previewBlingQueue } from './postgres-pcp-bling-queue';
+import { validateQueuePreview } from './pcp-queue-preview-token';
 import { withOperationalWrite } from './postgres-write';
 
 type Row = Record<string, unknown>;
@@ -34,6 +36,10 @@ function groupBySku(rows: Row[]): Map<string, SheetOption[]> {
 
 /** Origem, prioridade e pedido do Bling de uma OP; o padrão é a OP da fila de reposição. */
 type OrderExtra = { origin: OrderOrigin; urgent: boolean; notes: string | null; salesOrder: { blingId: number; number: string } | null };
+const BLING_QUEUE_BATCH_LOCK = 63891;
+const CREATE_BATCH_OPERATION = 'pcp.createOrderBatch';
+type CreatedBatch = { batchId: string; orderCount: number; childCount: number };
+
 const FROM_QUEUE: OrderExtra = { origin: 'fila', urgent: false, notes: null, salesOrder: null };
 
 /** Grava a OP e suas ordens de serviço copiadas do roteiro da ficha. */
@@ -109,7 +115,7 @@ const INVOICES_FRESH_MS = 3_600_000;
 const brt = (date: Date) => date.toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
 
 export function createPostgresProductionOrderRepository(pool: Pool, bling: BlingReader = createBlingReader(),
-  invoices: Pick<SalesInvoices, 'demand'> = createPostgresSalesInvoices(pool),
+  invoices: Pick<SalesInvoices, 'demand'> & Partial<Pick<SalesInvoices, 'queueDemand'>> = createPostgresSalesInvoices(pool),
   salesOrders: BlingSalesOrderReader = createBlingSalesOrderReader()): ProductionOrderRepository {
   // Uma releitura por vez nesta instância: cálculos simultâneos esperam a mesma leitura do Bling.
   let refreshing: Promise<unknown> | null = null;
@@ -167,8 +173,21 @@ export function createPostgresProductionOrderRepository(pool: Pool, bling: Bling
     const plan = planSalesOrder({ items: order.items, kits, sheetsBySku, sheetDetails });
     return { order, lines: plan.lines, warnings: [...warnings, ...plan.warnings] };
   }
+  async function openOrders(kind: OrderKind) {
+    const { rows } = await pool.query<{ sku: string; quantity: string }>(
+      `select sku, sum(quantity) as quantity from brsteel_pcp.production_orders
+       where parent_order_id is null and kind = $1 and status in ('a_produzir', 'produzindo', 'suspenso') group by sku`, [kind]);
+    return new Map(rows.map(r => [r.sku, Number(r.quantity)]));
+  }
+
   const repository: ProductionOrderRepository = {
-    async preview(input: PreviewInput, actor: WriteActor | null) {
+    async preview(input, actor, progress) {
+      if (input.policy === 'bling') {
+        return previewBlingQueue(pool, bling, invoices.queueDemand?.bind(invoices), async () => {
+          const [open, sheets] = await Promise.all([openOrders(input.kind), pool.query(SHEETS_SQL)]);
+          return { open, sheets: groupBySku(sheets.rows) };
+        }, input, actor, progress);
+      }
       const warnings: string[] = [];
       let catalogRows = await readCatalog();
       if (Date.now() - latestSync(catalogRows) > CATALOG_FRESH_MS) {
@@ -196,10 +215,7 @@ export function createPostgresProductionOrderRepository(pool: Pool, bling: Bling
       const invoiceRead = await invoices.demand(input.from, input.to);
       const { sold, missingCfop } = invoiceDemand(invoiceRead.items, invoiceRead.kits, new Set(OFFICIAL_LINE_SKUS));
       const weeks = weeksInRange(input.from, input.to);
-      const open = new Map(((await pool.query(
-        `select sku, sum(quantity) as quantity from brsteel_pcp.production_orders
-         where parent_order_id is null and kind = $1 and status in ('a_produzir', 'produzindo', 'suspenso') group by sku`,
-        [input.kind])).rows as Row[]).map(r => [String(r.sku), Number(r.quantity)]));
+      const open = await openOrders(input.kind);
       const rows: PlanningRow[] = [];
       const missingCatalog: string[] = [], missingLimits: string[] = [], kits: string[] = [];
       for (const sku of OFFICIAL_LINE_SKUS) {
@@ -246,7 +262,11 @@ export function createPostgresProductionOrderRepository(pool: Pool, bling: Bling
             `insert into brsteel_pcp.bling_products (sku, bling_id, name, format, stock_min, stock_max, synced_at)
              values ($1, $2, $3, $4, $5, $6, now())
              on conflict (sku) do update set bling_id = excluded.bling_id, name = excluded.name, format = excluded.format,
-               stock_min = excluded.stock_min, stock_max = excluded.stock_max, synced_at = now()`,
+               stock_min = excluded.stock_min, stock_max = excluded.stock_max, synced_at = now(),
+               queue_synced_at = case when
+                 (bling_products.bling_id, bling_products.format, bling_products.stock_min, bling_products.stock_max)
+                   is distinct from (excluded.bling_id, excluded.format, excluded.stock_min, excluded.stock_max)
+                 then null else bling_products.queue_synced_at end`,
             [p.sku, p.blingId, p.name?.slice(0, 300) ?? null, p.format?.slice(0, 5) ?? null, p.stockMin, p.stockMax]);
         }
         await recordWriteAudit(client, { operation: 'pcp.syncBlingCatalog', actor, target: { collection: 'pcp.blingProducts', id: 'linha-oficial' } });
@@ -256,7 +276,26 @@ export function createPostgresProductionOrderRepository(pool: Pool, bling: Bling
     },
 
     async createBatch(input: BatchInput, actor: WriteActor) {
+      const isBlingQueue = input.policy === 'bling';
+      const batchActor = isBlingQueue ? { ...actor, idempotencyKey: input.idempotencyKey ?? null } : actor;
+      const request = { kind: input.kind, from: input.from, to: input.to, factor: input.factor, policy: input.policy, items: input.items };
       return withOperationalWrite(pool, async client => {
+        if (isBlingQueue) {
+          if (!batchActor.idempotencyKey) throw new OperationError('QUEUE_PREVIEW_INVALID', 'Recalcule a prévia antes de gerar o lote.');
+          const previous = await replayIdempotent<CreatedBatch>(client, batchActor, CREATE_BATCH_OPERATION, request);
+          if (previous) return result(previous, 'postgres');
+          validateQueuePreview(input, actor);
+        }
+        const duplicate = await client.query(
+          `select 1 from brsteel_pcp.production_order_batches b
+           where b.kind = $1 and b.origin = 'fila' and b.params->>'from' = $2 and b.params->>'to' = $3
+             and ($4::boolean or b.params->>'policy' = 'bling')
+             and exists (select 1 from brsteel_pcp.production_orders o
+               where o.batch_id = b.id and o.status in ('a_produzir', 'produzindo', 'suspenso'))
+           limit 1`, [input.kind, input.from, input.to, isBlingQueue]);
+        if (duplicate.rows.length) {
+          throw new OperationError('DUPLICATE_QUEUE_BATCH', 'Já existe um lote deste tipo e período com OPs em aberto.', 409);
+        }
         const sheetRows = (await client.query(SHEETS_SQL)).rows as Row[];
         const byId = new Map(sheetRows.map(r => [String(r.id), r]));
         const bySku = groupBySku(sheetRows);
@@ -268,7 +307,7 @@ export function createPostgresProductionOrderRepository(pool: Pool, bling: Bling
         }
         const batchId = (await client.query(
           'insert into brsteel_pcp.production_order_batches (kind, params, created_by) values ($1, $2, $3) returning id',
-          [input.kind, JSON.stringify({ from: input.from, to: input.to, factor: input.factor }), actor.userId])).rows[0].id as string;
+          [input.kind, JSON.stringify({ from: input.from, to: input.to, factor: input.factor, policy: input.policy }), actor.userId])).rows[0].id as string;
         let childCount = 0;
         for (const item of input.items) {
           const parentId = await insertOrder(client, { batchId, parentId: null, kind: input.kind, sku: item.sku,
@@ -276,9 +315,11 @@ export function createPostgresProductionOrderRepository(pool: Pool, bling: Bling
           if (input.kind !== 'corte') continue;
           childCount += await insertParts(client, { batchId, parentId, sheet: byId.get(item.sheetId)!, quantity: item.quantity, bySku, createdBy: actor.userId });
         }
-        await recordWriteAudit(client, { operation: 'pcp.createOrderBatch', actor, target: { collection: 'pcp.orderBatches', id: batchId } });
-        return result({ batchId, orderCount: input.items.length, childCount }, 'postgres');
-      });
+        const response = { batchId, orderCount: input.items.length, childCount };
+        await recordWriteAudit(client, { operation: CREATE_BATCH_OPERATION, actor: batchActor, target: { collection: 'pcp.orderBatches', id: batchId } });
+        if (isBlingQueue) await storeIdempotent(client, batchActor, CREATE_BATCH_OPERATION, request, response);
+        return result(response, 'postgres');
+      }, { serializeOn: BLING_QUEUE_BATCH_LOCK });
     },
 
     async listBatches() {

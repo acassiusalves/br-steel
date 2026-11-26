@@ -10,6 +10,8 @@
  * de margem do tipo de OP, arredondada para cima.
  */
 
+import type { StockSource } from './bling-queue';
+
 export type OrderKind = 'semanal' | 'corte';
 
 /** Um SKU da linha oficial com o que o gerador precisa saber. Saldo e limites vêm do Bling. */
@@ -29,8 +31,10 @@ export type OrderSuggestion = {
   /** Quantidade da política mín/máx antiga (máx − saldo − em OP), só como referência. */
   minMaxQuantity: number;
   /** Faixa da fila: zerado, abaixo do mínimo ou entre o mínimo e o máximo. */
-  tier: QueueTier;
+  tier: QueueTier | 'sem_historico';
   sheet: SheetOption | null; quantity: number;
+  stockSource?: StockSource;
+  hasStructure?: boolean;
 };
 
 /**
