@@ -31,6 +31,15 @@ export function getQueueDefaults(mode: QueueMode, kind: OrderKind, now = new Dat
   return { kind, factor: 1, ...defaultBlingQueueRange(saoPauloDay(now)), policy: 'bling' };
 }
 
+export function parseQueueMargin(value: string, mode: QueueMode): number | null {
+  const decimal = value.trim();
+  if (!/^(?:\d+(?:[.,]\d+)?|[.,]\d+)$/.test(decimal)) return null;
+
+  const margin = Number(decimal.replace(',', '.'));
+  if (margin <= 0 || margin > 10 || (mode === 'legacy' && margin < 0.1)) return null;
+  return margin;
+}
+
 export function queueBlockers(row: OrderSuggestion, mode: QueueMode): string[] {
   const blockers: string[] = [];
   if (!row.sheet) blockers.push('Sem ficha com roteiro');
