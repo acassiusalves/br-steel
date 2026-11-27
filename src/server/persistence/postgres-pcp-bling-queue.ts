@@ -131,8 +131,6 @@ export async function previewBlingQueue(pool: Pool, bling: BlingReader, readDema
   }));
   const noStock = planningRows.filter(row => row.stockSource === 'total' || row.stockSource === 'ausente');
   if (noStock.length) warnings.push(`Saldo do depósito Estoque não confirmado. Fora da seleção do lote: ${noStock.map(row => row.sku).join(', ')}.`);
-  const noStructure = suggestions.filter(row => !row.hasStructure);
-  if (noStructure.length) warnings.push(`Sem estrutura no Bling: ${noStructure.map(row => row.sku).join(', ')}.`);
 
   const eligibleSheets = suggestions.flatMap(row => row.sheet && (row.stockSource === 'virtual' || row.stockSource === 'fisico')
     ? [row.sheet.id] : []);

@@ -21,7 +21,7 @@ import * as svc from '@/services/production-orders-service';
 import ManualOrderTab from './ManualOrderTab';
 import SalesOrderTab from './SalesOrderTab';
 import {
-  buildSuggestionWorkbook, getQueueDefaults, queueBlockers, queueTierLabel, STOCK_SOURCE_LABEL,
+  buildSuggestionWorkbook, getQueueDefaults, parseQueueMargin, queueBlockers, queueTierLabel, STOCK_SOURCE_LABEL,
   type QueueMode, type QueueReviewRows,
 } from './queue-review';
 import type { BatchSummary, GenerationPreview, ProductionOrderRow } from '@/server/persistence/pcp-orders-contract';
@@ -68,17 +68,19 @@ function Generator({ onCreated }: { onCreated: () => void }) {
   const mode = filters.policy ?? 'legacy';
   const preview = review?.preview;
   const selectedRows = preview?.suggestions.filter(row => review?.rows[row.sku]?.selected) ?? [];
+  const withoutStructure = preview?.suggestions.filter(row => row.hasStructure === false) ?? [];
   const invalidQuantity = selectedRows.some(row => !validQuantity(review?.rows[row.sku]?.quantity ?? ''));
   const canSend = mode === 'legacy' || Boolean(preview?.previewToken);
   const tooManySelected = selectedRows.length > MAX_BATCH_ITEMS;
   const canGenerate = canSend && selectedRows.length > 0 && !invalidQuantity && !tooManySelected;
   const today = saoPauloDay(new Date());
-  const margin = Number(factor);
+  const margin = parseQueueMargin(factor, mode);
+  const marginError = margin === null ? (mode === 'bling'
+    ? 'Use uma margem maior que zero e até 10, como 1,5.'
+    : 'Use uma margem entre 0,1 e 10, como 1,5.') : null;
   const filterError = !from || !to ? 'Informe as duas datas do período.'
     : from > to ? 'A data final deve ser igual ou posterior à data inicial.'
     : mode === 'bling' && to > today ? 'Informe uma data final até hoje.'
-    : !Number.isFinite(margin) || margin > 10 || margin <= 0 || (mode === 'legacy' && margin < 0.1)
-      ? (mode === 'bling' ? 'Informe uma margem maior que zero e até 10.' : 'Informe uma margem entre 0,1 e 10.')
     : null;
 
   const changeFilters = (changes: Partial<typeof filters>) => {
@@ -87,17 +89,17 @@ function Generator({ onCreated }: { onCreated: () => void }) {
   };
 
   const changeKind = (next: OrderKind) => {
-    if (next !== kind) changeFilters({ kind: next, factor: mode === 'bling' ? factor : String(DEFAULT_FACTORS[next]) });
+    if (next !== kind) changeFilters({ kind: next, factor: mode === 'bling' ? factor : fmt(DEFAULT_FACTORS[next]) });
   };
 
   const changeMode = (next: QueueMode) => {
     const defaults = getQueueDefaults(next, kind);
-    changeFilters({ ...defaults, factor: String(defaults.factor), policy: defaults.policy });
+    changeFilters({ ...defaults, factor: fmt(defaults.factor), policy: defaults.policy });
   };
 
   const calculate = async () => {
-    if (inFlight.current || filterError) return;
-    const input = { ...filters, factor: Number(factor) };
+    if (inFlight.current || filterError || margin === null) return;
+    const input = { ...filters, factor: margin };
     inFlight.current = true;
     setReview(null);
     setProgress(null);
@@ -209,13 +211,21 @@ function Generator({ onCreated }: { onCreated: () => void }) {
           </div>
           <div className="space-y-1">
             <Label htmlFor="ops-factor">Margem</Label>
-            <Input id="ops-factor" className="w-28" type="number" step="any" min={mode === 'bling' ? 0 : 0.1} max={10} value={factor} onChange={e => changeFilters({ factor: e.target.value })} />
+            <Input id="ops-factor" className="w-28" type="text" inputMode="decimal" autoComplete="off"
+              aria-invalid={Boolean(marginError)} aria-describedby={marginError ? 'ops-factor-help ops-factor-error' : 'ops-factor-help'}
+              value={factor} onChange={e => changeFilters({ factor: e.target.value })} />
           </div>
-          <Button type="button" onClick={calculate} disabled={busy !== null || Boolean(filterError)}>
+          <Button type="button" onClick={calculate} disabled={busy !== null || Boolean(filterError || marginError)}>
             {busy === 'preview' ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <Sparkles className="mr-1 h-4 w-4" />}
             {busy === 'preview' ? 'Calculando…' : 'Calcular sugestão'}
           </Button>
         </fieldset>
+        <div className="space-y-1 text-sm">
+          <p id="ops-factor-help" className="text-muted-foreground">
+            A margem multiplica a média semanal de vendas. Com margem 1,5, uma média de 10 vira 15 unidades.
+          </p>
+          {marginError && <p id="ops-factor-error" role="status" className="text-destructive">{marginError}</p>}
+        </div>
         {filterError && <p className="text-sm text-destructive">{filterError}</p>}
         {busy === 'preview' && (
           <p role="status" className="text-sm text-muted-foreground">
@@ -230,13 +240,13 @@ function Generator({ onCreated }: { onCreated: () => void }) {
             {mode === 'bling' ? (
               <>
                 <p>Considera as vendas por NF-e de produtos ativos da categoria Produtos Inox Marketplace e de suas subcategorias.</p>
-                <p>Prioriza estoque zerado ou negativo, depois saldo abaixo do mínimo. Em cada faixa, os mais vendidos vêm primeiro. A quantidade é a média semanal multiplicada pela margem, arredondada para cima, com sugestão mínima de 5.</p>
+                <p>Prioriza estoque zerado ou negativo, depois saldo abaixo do mínimo. Em cada faixa, os mais vendidos vêm primeiro. A quantidade é arredondada para cima, com lote mínimo de 5 unidades.</p>
                 <p>A coluna Em OP mostra o que já está em produção para ajudar na revisão.</p>
               </>
             ) : (
               <>
                 <p>Usa os SKUs da linha oficial e soma o estoque do Bling à quantidade em OP aberta. Quando não há nenhum zerado, também entram os itens entre o mínimo e o máximo.</p>
-                <p>Usa a média semanal de vendas por NF-e e a margem do tipo escolhido.</p>
+                <p>Calcula a média semanal a partir das vendas por NF-e e arredonda a quantidade sugerida para cima.</p>
               </>
             )}
             {preview?.notes.map((note, i) => <p key={i}>{note}</p>)}
@@ -256,6 +266,17 @@ function Generator({ onCreated }: { onCreated: () => void }) {
               </div>
             )}
             {preview.warnings.map((warning, i) => <p key={i} className="text-sm text-amber-700 dark:text-amber-400">{warning}</p>)}
+            {withoutStructure.length > 0 && (
+              <details className="text-sm text-muted-foreground">
+                <summary className="w-fit cursor-pointer select-none">
+                  {withoutStructure.length === 1 ? '1 produto sem estrutura no Bling' : `${fmt(withoutStructure.length)} produtos sem estrutura no Bling`}
+                </summary>
+                <p className="mt-2">A coluna Pendências indica o que precisa ser resolvido para gerar uma OP.</p>
+                <ul role="list" className="mt-2 flex flex-wrap gap-x-4 gap-y-1 font-mono text-xs">
+                  {withoutStructure.map(row => <li key={row.sku} className="break-all">{row.sku}</li>)}
+                </ul>
+              </details>
+            )}
             {Boolean(preview.ignored?.length) && (
               <details className="text-sm">
                 <summary className="cursor-pointer">Itens ignorados por quantidade ({preview.ignored?.length})</summary>
