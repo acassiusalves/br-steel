@@ -1,6 +1,7 @@
 import 'server-only';
 import crypto from 'node:crypto';
 import { NextResponse } from 'next/server';
+import { signServerPayload as sign } from './server-signature';
 import { adminDb } from '@/lib/firebase-admin';
 import { pagePermissions } from '@/lib/permissions';
 import { findUserById, isKnownRole, publicUser, validDocumentId } from '@/server/access/users';
@@ -14,13 +15,6 @@ const SESSION_TTL_MS = 8 * 60 * 60 * 1000;
 export interface SessionUser { id: string; name: string; email: string; role: string; }
 export interface SessionPayload { user: SessionUser; exp: number; authVersion: number; }
 
-function getSecret() {
-  const secret = process.env.AUTH_SESSION_SECRET?.trim() || process.env.NEXTAUTH_SECRET?.trim();
-  if (secret) return secret;
-  if (process.env.NODE_ENV === 'production') throw new Error('AUTH_SESSION_SECRET must be configured in production');
-  return 'brsteel-dev-session-secret';
-}
-function sign(value: string) { return crypto.createHmac('sha256', getSecret()).update(value).digest('base64url'); }
 export function createSessionToken(user: SessionUser, authVersion = 0) {
   const payload = Buffer.from(JSON.stringify({
     user: { id: user.id, name: user.name, email: user.email, role: user.role },

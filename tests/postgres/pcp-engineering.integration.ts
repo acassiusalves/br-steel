@@ -682,3 +682,148 @@ test('vínculo do login: só grava em funcionário sem login e com o mesmo crach
   assert.equal((await pool.query('select user_id from brsteel_pcp.workers where id = $1', [id])).rows[0].user_id, null);
   assert.equal((await pool.query("select count(*)::int n from brsteel_write.audit where operation = 'pcp.linkWorkerUser' and target_id = $1", [id])).rows[0].n, 1);
 });
+
+test('fila por categoria reproduz quantidades e protege a confirmação do lote', async () => {
+  const { createPostgresProductionOrderRepository } = await import('@/server/persistence/postgres-pcp-orders');
+  const product = (sku: string, blingId: number, extra = {}) => ({
+    sku, blingId, name: sku, format: 'S', stockMin: 7, stockMax: 40, active: true,
+    categoryId: '702', structureStockType: null, hasStructure: true, ...extra,
+  });
+  const bling = {
+    async products() { return []; },
+    async estoqueBalances() { return new Map(); },
+    async categories() { return [{ id: 701, descricao: 'Produtos Inox Marketplace' }, { id: 702, descricao: 'Ralos', categoriaPai: { id: 701 } }]; },
+    async queueProducts() { return [
+      product('FILACUBA', 11001, { format: 'E', structureStockType: 'F' }), product('FILARALO', 11002),
+      product('FILAGANCHO', 11003), product('FILAESTOQUE', 11004), product('FILAKIT', 11005, { format: 'E' }),
+      product('FILAREVENDA', 11006, { categoryId: '703' }), product('FILAINATIVO', 11007, { active: false }),
+      product('FILAPOSICAO', 11008),
+    ]; },
+    async queueBalances() { return new Map([
+      [11001, { value: 0, source: 'virtual' as const }], [11002, { value: 4, source: 'fisico' as const }],
+      [11003, { value: 0, source: 'virtual' as const }], [11004, { value: 2, source: 'total' as const }],
+      [11008, { value: 7, source: 'virtual' as const }],
+    ]); },
+  };
+  const invoices = {
+    async demand() { return { items: [], kits: new Map(), pendingInvoices: 0, listedAt: new Date() }; },
+    async queueDemand() { return {
+      sold: new Map([['FILACUBA', 120], ['FILARALO', 24], ['FILAGANCHO', 36], ['FILAESTOQUE', 7],
+        ['FILAKIT', 60], ['FILAREVENDA', 72], ['FILAINATIVO', 96], ['FILAPOSICAO', 24]]),
+      ignored: [{ invoice: '105', sku: 'FORA', quantity: 1001 }], invoiceCount: 5, pendingInvoices: 0,
+      listedAt: new Date(), coveredFrom: '2026-09-01', coveredTo: '2026-11-27',
+    }; },
+  };
+  const orders = createPostgresProductionOrderRepository(writerPool, bling, invoices);
+  const snapshot = (await repo.read()).data;
+  const operationId = snapshot.operations.find(o => o.name === 'Dobrar')!.id;
+  const saveSheet = async (sku: string, code: string) => (await repo.saveSheet(null, {
+    sku, code, name: sku, status: 'aberto', baseQuantity: 1, lineId: null, components: [],
+    steps: [{ operationId, predecessorOperationId: null, plannedMinutes: null, notes: null }],
+  }, actor)).data.id;
+  const sheetId = await saveSheet('FILACUBA', 'FILA-1');
+  const fallbackSheet = await saveSheet('FILAESTOQUE', 'FILA-2');
+  const input = { kind: 'semanal', policy: 'bling', factor: 1.7, from: '2026-09-04', to: '2026-11-26' } as const;
+  await pool.query("insert into brsteel_pcp.bling_products (sku, bling_id) values ('FILAANTIGA', 11001)");
+  const preview = (await orders.preview(input, actor)).data;
+  assert.equal((await pool.query('select sku from brsteel_pcp.bling_products where bling_id = 11001')).rows[0].sku, 'FILACUBA');
+  const cut = (await orders.preview({ ...input, kind: 'corte' }, actor)).data;
+  assert.deepEqual(cut.suggestions, preview.suggestions);
+  assert.deepEqual(preview.suggestions.map(s => [s.sku, s.quantity, s.tier]), [
+    ['FILACUBA', 17, 'zerado'], ['FILAGANCHO', 6, 'zerado'], ['FILARALO', 5, 'abaixo_minimo'], ['FILAESTOQUE', 5, 'abaixo_minimo'],
+  ]);
+  assert.equal(preview.suggestions.find(s => s.sku === 'FILAGANCHO')?.sheet, null);
+  assert.equal(preview.suggestions.find(s => s.sku === 'FILAESTOQUE')?.stockSource, 'total');
+  assert.deepEqual(preview.ignored, [{ invoice: '105', sku: 'FORA', quantity: 1001 }]);
+  assert.ok(preview.previewToken);
+  assert.equal((await orders.preview(input, null)).data.previewToken, undefined);
+  const incomplete = (await orders.preview({ ...input, from: '2026-08-01' }, actor)).data;
+  assert.equal(incomplete.previewToken, undefined);
+  assert.ok(incomplete.warnings.some(warning => warning.includes('cobre')));
+
+  const batch = {
+    ...input, items: [{ sku: 'FILACUBA', sheetId, quantity: 3, description: null }],
+    previewToken: preview.previewToken, idempotencyKey: 'b22d0a9f-c6f2-41ad-ad86-f94847de5217',
+  };
+  await assert.rejects(orders.createBatch({
+    ...batch, items: [{ sku: 'FILAESTOQUE', sheetId: fallbackSheet, quantity: 5, description: null }],
+  }, actor), /prévia|saldo/);
+  await assert.rejects(orders.createBatch({ ...batch, factor: 2 }, actor), /nova prévia/);
+  await assert.rejects(orders.createBatch(batch, { ...actor, userId: 'outro-operador' }), /nova prévia/);
+  const [first, retry] = await Promise.all([orders.createBatch(batch, actor), orders.createBatch(batch, actor)]);
+  assert.equal(first.data.batchId, retry.data.batchId);
+  assert.equal((await orders.listOrders(first.data.batchId)).data[0].quantity, 3);
+  await assert.rejects(orders.createBatch({
+    ...batch, idempotencyKey: 'f22d0a9f-c6f2-41ad-ad86-f94847de5217',
+  }, actor), /lote.*aberto/i);
+  await assert.rejects(orders.createBatch({
+    kind: 'semanal', factor: 1, from: input.from, to: input.to, items: batch.items,
+  }, actor), /lote.*aberto/i);
+  await assert.rejects(orders.createBatch({
+    ...batch, items: [{ ...batch.items[0], quantity: 9 }],
+  }, actor), /idempotência/i);
+});
+
+test('a demanda fiscal da fila corta por item, relê NF-e pendente e registra cobertura vazia', async () => {
+  const { createPostgresSalesInvoices, saoPauloDate } = await import('@/server/persistence/postgres-sales-invoices');
+  await pool.query('truncate brsteel_pcp.sales_invoices cascade');
+  const firstTime = Date.now() - 8 * 3_600_000;
+  const day = saoPauloDate(firstTime);
+  const invoice = { blingId: 12001, number: '000079', situation: 1, issuedAt: new Date(firstTime).toISOString() };
+  let detailFails = false;
+  let lines = [
+    { sku: 'FISCAL-A', cfop: '5102', quantity: 600 }, { sku: 'FISCAL-A', cfop: '6102', quantity: 600 },
+    { sku: 'FISCAL-A', cfop: '5102', quantity: 1001 }, { sku: 'FISCAL-A', cfop: '5915', quantity: 70 },
+    { sku: 'FISCAL-B', cfop: '7405', quantity: 1000 }, { sku: 'FISCAL-KIT', cfop: '5102', quantity: 3 },
+  ];
+  let exists = true;
+  const seen: number[] = [];
+  const reader = {
+    async listOutgoing({ cancelled }: { cancelled: boolean }) {
+      if (!exists) return [];
+      return cancelled ? [{ ...invoice, blingId: 12002, situation: 2 }] : [invoice];
+    },
+    async invoice(blingId: number) {
+      if (detailFails) throw new Error('temporarily unavailable');
+      seen.push(blingId);
+      return { ...invoice, items: lines };
+    },
+    async productsByCode() { return []; },
+    async kitStructure() { return []; },
+  };
+  const invoices = createPostgresSalesInvoices(writerPool, reader);
+  await invoices.sync(actor, { now: () => firstTime });
+  let read = await invoices.queueDemand(day, day);
+  assert.equal(read.sold.get('FISCAL-A'), 1200);
+  assert.equal(read.sold.get('FISCAL-B'), 1000);
+  assert.equal(read.sold.get('FISCAL-KIT'), 3);
+  assert.deepEqual(read.ignored, [{ invoice: '000079', sku: 'FISCAL-A', quantity: 1001 }]);
+  assert.equal(read.invoiceCount, 1);
+  assert.equal(read.pendingInvoices, 1);
+
+  lines = [{ sku: 'FISCAL-A', cfop: '5102', quantity: 9 }];
+  await invoices.sync(actor);
+  read = await invoices.queueDemand(day, day);
+  assert.deepEqual(seen, [12001, 12001]);
+  assert.equal(read.sold.get('FISCAL-A'), 9);
+  assert.equal(read.pendingInvoices, 0);
+
+  invoice.situation = 5;
+  detailFails = true;
+  await invoices.sync(actor, { now: () => Date.now() + 30_000 });
+  read = await invoices.queueDemand(day, day);
+  assert.equal(read.sold.has('FISCAL-A'), false);
+  assert.equal(read.pendingInvoices, 1);
+  assert.equal(read.coveredTo, saoPauloDate(Date.now() + 30_000));
+
+  exists = false;
+  await assert.rejects(invoices.sync(actor, { now: () => Date.now() + 60_000 }), /listagem vazia/i);
+  assert.equal((await invoices.queueDemand(day, day)).listedAt?.getTime(), read.listedAt?.getTime());
+  await pool.query('truncate brsteel_pcp.sales_invoices cascade');
+  await invoices.sync(actor, { now: () => Date.now() + 60_000 });
+  const empty = await invoices.queueDemand(day, day);
+  assert.equal(empty.invoiceCount, 0);
+  assert.ok(empty.coveredFrom && empty.coveredFrom <= day);
+  assert.ok(empty.coveredTo && empty.coveredTo >= day);
+  assert.ok(empty.listedAt);
+});

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, writeFile, chmod, symlink, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { backupConnection, assertSameManifest, privateLocation, localDockerEndpoint, copyHash } from '../../scripts/lib/operational-backup.mjs';
+import { backupConnection, assertSameManifest, privateLocation, localDockerEndpoint, copyHash, catalogSql, manifest, restoredManifest, tableManifestSql, tables } from '../../scripts/lib/operational-backup.mjs';
 
 const valid='postgresql://brsteel_backup_probe.mmewkphsrnttkzvpyddv:secret@aws-1-sa-east-1.pooler.supabase.com:5432/postgres';
 test('Docker restore rejects remote daemons and pins an absolute local socket',()=>{
@@ -49,4 +49,67 @@ test('private locations reject public permissions, repository contents and symli
     await mkdir(root,{mode:0o700});await mkdir(disguised,{mode:0o700});
     await assert.rejects(privateLocation(disguised,'directory',root));
   } finally { await rm(base,{recursive:true,force:true}); }
+});
+
+const coverageTable = 'brsteel_pcp.sales_invoice_sync_state';
+const previousTables = tables.filter(name => name !== coverageTable);
+
+function savedManifest(names: readonly string[]) {
+  return {
+    tables: names.map(name => ({ name, rows: 2, sha256: 'a'.repeat(64) })),
+    catalog: {
+      tables: names.map(name => [...name.split('.'), true, false, ['postgres=arwdDxt/postgres']]),
+      constraints: Array.from({ length: 55 }, (_, id) => ['brsteel_pcp', 'sales_invoices', `fk-${id}`, 'f']),
+      policies: [['brsteel_pcp', 'sales_invoices', 'backup_reader', 'PERMISSIVE', ['brsteel_ops_backup'], 'SELECT']],
+    },
+  };
+}
+
+function restoredQuery(backup: ReturnType<typeof savedManifest>) {
+  return async (sql: string) => {
+    if (sql.startsWith('set ')) return { rows: [] };
+    if (sql === catalogSql) return { rows: [{ catalog: backup.catalog }] };
+    const row = backup.tables.find(({ name }) => tableManifestSql(name) === sql);
+    assert.ok(row, 'only known tables may be queried');
+    return { rows: [{ rows: row.rows, sha256: row.sha256 }] };
+  };
+}
+
+test('new backups require the complete current table list, including fiscal coverage', async () => {
+  const current = savedManifest(tables);
+  assert.deepEqual(await manifest(restoredQuery(current)), current);
+  await assert.rejects(manifest(restoredQuery(savedManifest(previousTables))), /Unexpected operational catalog/);
+  current.catalog.tables[0][1] = 'foreign_runs';
+  await assert.rejects(manifest(restoredQuery(current)), /Unexpected operational catalog/);
+  assert.throws(() => tableManifestSql('brsteel_import.foreign_runs'), /Unexpected table/);
+});
+
+test('restore verifies the saved 40-table or current manifest without weakening comparisons', async () => {
+  assert.equal(previousTables.length, 40);
+  const previous = savedManifest(previousTables);
+  const current = savedManifest(tables);
+  assert.deepEqual(await restoredManifest(restoredQuery(previous), previous), previous);
+  assert.deepEqual(await restoredManifest(restoredQuery(current), current), current);
+  await assert.rejects(restoredManifest(restoredQuery(previous), current), /Unexpected operational catalog/);
+  await assert.rejects(restoredManifest(restoredQuery(current), previous), /Unexpected operational catalog/);
+
+  const reordered = structuredClone(previous);
+  reordered.tables.reverse();
+  await assert.rejects(restoredManifest(restoredQuery(previous), reordered), /Unexpected.*manifest/i);
+
+  const wrongTable = structuredClone(previous);
+  wrongTable.tables[0].name = 'brsteel_import.foreign_runs';
+  await assert.rejects(restoredManifest(restoredQuery(previous), wrongTable), /Unexpected.*manifest/i);
+
+  const changed = structuredClone(previous);
+  changed.tables[0].sha256 = 'b'.repeat(64);
+  await assert.rejects(restoredManifest(restoredQuery(changed), previous), /Restored manifest differs/);
+  changed.tables[0].sha256 = 'a'.repeat(64);
+  changed.catalog.policies[0][5] = 'ALL';
+  await assert.rejects(restoredManifest(restoredQuery(changed), previous), /Restored manifest differs/);
+  changed.catalog.tables[0][2] = false;
+  await assert.rejects(restoredManifest(restoredQuery(changed), changed), /Unexpected operational catalog/);
+  changed.catalog.tables[0][2] = true;
+  changed.catalog.constraints.pop();
+  await assert.rejects(restoredManifest(restoredQuery(changed), changed), /Unexpected operational catalog/);
 });

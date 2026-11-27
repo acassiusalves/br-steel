@@ -6,7 +6,8 @@ import type { WriteActor } from './write-audit';
 
 export type { OrderKind, OrderSuggestion, PlanLine };
 
-export type PreviewInput = { kind: OrderKind; from: string; to: string; factor: number };
+export type PreviewInput = { kind: OrderKind; from: string; to: string; factor: number; policy?: 'bling' };
+export type BlingQueueProgress = { stage: 'sales' | 'catalog' | 'stock' | 'sheets'; completed?: number; total?: number };
 export type GenerationPreview = PreviewInput & {
   suggestions: OrderSuggestion[];
   /** Avisos que pedem atenção ou ação (dados atrasados, cadastro incompleto). */
@@ -15,10 +16,15 @@ export type GenerationPreview = PreviewInput & {
   notes: string[];
   /** Quando o mín/máx foi copiado do Bling. */
   catalogSyncedAt: string;
+  weeks?: number;
+  invoiceCount?: number;
+  categories?: string[];
+  ignored?: { invoice: string; sku: string; quantity: number }[];
+  previewToken?: string;
 };
 
 export type BatchItem = { sku: string; sheetId: string; quantity: number; description: string | null };
-export type BatchInput = PreviewInput & { items: BatchItem[] };
+export type BatchInput = PreviewInput & { items: BatchItem[]; previewToken?: string; idempotencyKey?: string };
 
 export type OrderStatus = 'a_produzir' | 'produzindo' | 'concluido' | 'suspenso' | 'encerrado';
 /** Como a OP nasceu: fila de reposição, avulsa, pedido de venda do Bling ou carga do iApp. */
@@ -57,7 +63,7 @@ export interface ProductionOrderRepository {
    * Lê o mín/máx do Bling (reaproveita a leitura da última hora) e o saldo do depósito Estoque, e monta a fila.
    * `actor` nulo: quem só consulta não dispara a releitura do cadastro; usa a última, com aviso.
    */
-  preview(input: PreviewInput, actor: WriteActor | null): Promise<OperationResult<GenerationPreview>>;
+  preview(input: PreviewInput, actor: WriteActor | null, progress?: (step: BlingQueueProgress) => void): Promise<OperationResult<GenerationPreview>>;
   /** Copia do Bling o cadastro (mín/máx, formato) dos SKUs da linha oficial. Só lê o Bling. */
   syncBlingCatalog(actor: WriteActor): Promise<OperationResult<{ synced: number; missing: string[] }>>;
   createBatch(input: BatchInput, actor: WriteActor): Promise<OperationResult<{ batchId: string; orderCount: number; childCount: number }>>;

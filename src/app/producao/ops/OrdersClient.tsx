@@ -2,28 +2,33 @@
 
 import * as React from 'react';
 import * as XLSX from 'xlsx';
-import { format, subDays } from 'date-fns';
+import { format } from 'date-fns';
 import { Download, Loader2, Sparkles } from 'lucide-react';
 import DashboardLayout from '@/components/dashboard-layout';
 import { useToast } from '@/hooks/use-toast';
 import { subscribeOperation } from '@/lib/operation-client';
+import { saoPauloDay } from '@/lib/iso-week';
 import { DEFAULT_FACTORS, type OrderKind } from '@/lib/pcp/op-generator';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import * as svc from '@/services/production-orders-service';
 import ManualOrderTab from './ManualOrderTab';
 import SalesOrderTab from './SalesOrderTab';
+import {
+  buildSuggestionWorkbook, getQueueDefaults, queueBlockers, queueTierLabel, STOCK_SOURCE_LABEL,
+  type QueueMode, type QueueReviewRows,
+} from './queue-review';
 import type { BatchSummary, GenerationPreview, ProductionOrderRow } from '@/server/persistence/pcp-orders-contract';
 
 const KIND_LABEL: Record<OrderKind, string> = { semanal: 'Produção semanal (dobra)', corte: 'Corte' };
 const STATUS_LABEL: Record<string, string> = { a_produzir: 'A produzir', produzindo: 'Produzindo', concluido: 'Concluído', suspenso: 'Suspenso', encerrado: 'Encerrado' };
 const fmt = (n: number) => n.toLocaleString('pt-BR', { maximumFractionDigits: 2 });
-const TIER_LABEL: Record<string, string> = { zerado: 'Zerado', abaixo_minimo: 'No mínimo ou abaixo', entre_min_max: 'Entre mín. e máx.' };
 const opNumber = (n: number) => String(n).padStart(7, '0');
 const originLabel = (origin: string, salesOrderNumber: string | null) =>
   origin === 'pedido' ? `Pedido ${salesOrderNumber ?? ''}`.trim() : origin === 'avulsa' ? 'Avulsa' : origin === 'iapp' ? 'iApp' : 'Fila';
@@ -38,104 +43,309 @@ function downloadIapp(header: readonly string[], rows: (string | number)[][], ki
   XLSX.writeFile(book, `ops-iapp-${kind}-${format(new Date(), 'yyyy-MM-dd-HHmm')}.xlsx`);
 }
 
+const PROGRESS_LABEL: Record<svc.PreviewProgress['stage'], string> = {
+  sales: 'Conferindo notas fiscais',
+  catalog: 'Lendo categorias e produtos',
+  stock: 'Consultando estoque',
+  sheets: 'Conferindo fichas e OPs abertas',
+};
+
+type PreviewReview = { preview: GenerationPreview; rows: QueueReviewRows; idempotencyKey?: string };
+const MAX_BATCH_ITEMS = 300;
+const validQuantity = (value: string) => Number(value) > 0 && Number(value) <= 1_000_000;
+const formatAverage = new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format;
+
 function Generator({ onCreated }: { onCreated: () => void }) {
   const { toast } = useToast();
-  const [kind, setKind] = React.useState<OrderKind>('semanal');
-  const [factor, setFactor] = React.useState(DEFAULT_FACTORS.semanal);
-  const [from, setFrom] = React.useState(format(subDays(new Date(), 90), 'yyyy-MM-dd'));
-  const [to, setTo] = React.useState(format(new Date(), 'yyyy-MM-dd'));
-  const [preview, setPreview] = React.useState<GenerationPreview | null>(null);
-  const [selected, setSelected] = React.useState<Record<string, number | null>>({});
+  const [filters, setFilters] = React.useState(() => ({
+    ...getQueueDefaults('bling', 'semanal'), factor: '1',
+  }));
+  const [review, setReview] = React.useState<PreviewReview | null>(null);
   const [busy, setBusy] = React.useState<'preview' | 'create' | null>(null);
+  const [progress, setProgress] = React.useState<svc.PreviewProgress | null>(null);
+  const inFlight = React.useRef(false);
+  const { kind, from, to, factor } = filters;
+  const mode = filters.policy ?? 'legacy';
+  const preview = review?.preview;
+  const selectedRows = preview?.suggestions.filter(row => review?.rows[row.sku]?.selected) ?? [];
+  const invalidQuantity = selectedRows.some(row => !validQuantity(review?.rows[row.sku]?.quantity ?? ''));
+  const canSend = mode === 'legacy' || Boolean(preview?.previewToken);
+  const tooManySelected = selectedRows.length > MAX_BATCH_ITEMS;
+  const canGenerate = canSend && selectedRows.length > 0 && !invalidQuantity && !tooManySelected;
+  const today = saoPauloDay(new Date());
+  const margin = Number(factor);
+  const filterError = !from || !to ? 'Informe as duas datas do período.'
+    : from > to ? 'A data final deve ser igual ou posterior à data inicial.'
+    : mode === 'bling' && to > today ? 'Informe uma data final até hoje.'
+    : !Number.isFinite(margin) || margin > 10 || margin <= 0 || (mode === 'legacy' && margin < 0.1)
+      ? (mode === 'bling' ? 'Informe uma margem maior que zero e até 10.' : 'Informe uma margem entre 0,1 e 10.')
+    : null;
 
-  const changeKind = (next: OrderKind) => { setKind(next); setFactor(DEFAULT_FACTORS[next]); setPreview(null); };
-
-  const calculate = async () => {
-    setBusy('preview');
-    try {
-      const result = await svc.previewOrders({ kind, factor, from, to });
-      setPreview(result);
-      // Já vem marcado tudo o que tem ficha; quem não tem ficha não pode virar OP.
-      setSelected(Object.fromEntries(result.suggestions.filter(s => s.sheet).map(s => [s.sku, s.quantity])));
-    } catch (e) {
-      toast({ variant: 'destructive', title: 'Não foi possível calcular a fila', description: e instanceof Error ? e.message : undefined });
-    } finally { setBusy(null); }
+  const changeFilters = (changes: Partial<typeof filters>) => {
+    setFilters(current => ({ ...current, ...changes }));
+    setReview(null);
   };
 
-  const chosen = (preview?.suggestions ?? []).filter(s => s.sheet && selected[s.sku] != null && Number(selected[s.sku]) > 0);
+  const changeKind = (next: OrderKind) => {
+    if (next !== kind) changeFilters({ kind: next, factor: mode === 'bling' ? factor : String(DEFAULT_FACTORS[next]) });
+  };
+
+  const changeMode = (next: QueueMode) => {
+    const defaults = getQueueDefaults(next, kind);
+    changeFilters({ ...defaults, factor: String(defaults.factor), policy: defaults.policy });
+  };
+
+  const calculate = async () => {
+    if (inFlight.current || filterError) return;
+    const input = { ...filters, factor: Number(factor) };
+    inFlight.current = true;
+    setReview(null);
+    setProgress(null);
+    setBusy('preview');
+    try {
+      const result = await svc.previewOrders(input, setProgress);
+      const rules = input.policy ?? 'legacy';
+      setReview({
+        preview: { ...result, policy: input.policy },
+        rows: Object.fromEntries(result.suggestions.map(row => [row.sku, {
+          selected: !queueBlockers(row, rules).length, quantity: String(row.quantity),
+        }])),
+        idempotencyKey: input.policy === 'bling' ? crypto.randomUUID() : undefined,
+      });
+    } catch (e) {
+      toast({ variant: 'destructive', title: 'Não foi possível calcular a fila', description: e instanceof Error ? e.message : undefined });
+    } finally {
+      inFlight.current = false;
+      setBusy(null);
+    }
+  };
+
+  const changeRow = (sku: string, change: Partial<QueueReviewRows[string]>) => {
+    setReview(current => current && ({
+      ...current, rows: { ...current.rows, [sku]: { ...current.rows[sku], ...change } },
+    }));
+  };
+
+  const selectRows = (selected: boolean) => {
+    setReview(current => current && ({
+      ...current, rows: Object.fromEntries(current.preview.suggestions.map(row => [row.sku, {
+        ...current.rows[row.sku], selected: selected && !queueBlockers(row, mode).length,
+      }])),
+    }));
+  };
+
+  const downloadSuggestion = () => {
+    if (!review) return;
+    const { kind, from, to } = review.preview;
+    XLSX.writeFile(buildSuggestionWorkbook(review.preview, review.rows), `sugestao-ops-${kind}-${from}-a-${to}.xlsx`);
+  };
+
   const create = async () => {
-    if (!preview || !chosen.length) return;
+    if (inFlight.current || !review || !canGenerate) return;
+    const { kind, factor, from, to, policy, previewToken } = review.preview;
+    const items = selectedRows.flatMap(row => row.sheet && !queueBlockers(row, mode).length ? [{
+      sku: row.sku,
+      sheetId: row.sheet.id,
+      quantity: Number(review.rows[row.sku].quantity),
+      description: row.description,
+    }] : []);
+    if (!items.length) return;
+    inFlight.current = true;
     setBusy('create');
     try {
-      const created = await svc.createOrderBatch({ kind, factor, from, to,
-        items: chosen.map(s => ({ sku: s.sku, sheetId: s.sheet!.id, quantity: Number(selected[s.sku]), description: s.description })) });
-      toast({ title: `${created.orderCount} OP(s) geradas`, description: created.childCount ? `Mais ${created.childCount} OP(s) das partes para o corte.` : undefined });
-      setPreview(null);
+      const created = await svc.createOrderBatch({
+        kind, factor, from, to, items,
+        ...(policy === 'bling' ? { policy, previewToken, idempotencyKey: review.idempotencyKey } : {}),
+      });
+      toast({
+        title: created.orderCount === 1 ? '1 OP gerada' : `${created.orderCount} OPs geradas`,
+        description: created.childCount
+          ? created.childCount === 1 ? 'O lote também inclui 1 OP de parte.' : `O lote também inclui ${created.childCount} OPs de partes.`
+          : undefined,
+      });
+      setReview(null);
       onCreated();
     } catch (e) {
       toast({ variant: 'destructive', title: 'Não foi possível gerar as OPs', description: e instanceof Error ? e.message : undefined });
-    } finally { setBusy(null); }
+    } finally {
+      inFlight.current = false;
+      setBusy(null);
+    }
   };
 
   return (
     <Card>
       <CardHeader><CardTitle className="text-base">Gerar OPs pela fila de produção</CardTitle></CardHeader>
       <CardContent className="space-y-4">
-        <div className="flex flex-wrap items-end gap-3">
-          <div className="space-y-1"><Label>Tipo</Label>
-            <div className="flex gap-1">{(['semanal', 'corte'] as OrderKind[]).map(k => (
-              <Button key={k} type="button" size="sm" variant={kind === k ? 'default' : 'outline'} onClick={() => changeKind(k)}>{KIND_LABEL[k]}</Button>))}</div></div>
-          <div className="space-y-1"><Label htmlFor="ops-from">Vendas de</Label><Input id="ops-from" type="date" value={from} onChange={e => setFrom(e.target.value)} /></div>
-          <div className="space-y-1"><Label htmlFor="ops-to">até</Label><Input id="ops-to" type="date" value={to} onChange={e => setTo(e.target.value)} /></div>
-          <div className="space-y-1"><Label htmlFor="ops-factor">{kind === 'corte' ? 'Margem do corte' : 'Margem'}</Label>
-            <Input id="ops-factor" className="w-28" type="number" step="0.01" min={0.1} value={factor} onChange={e => setFactor(Number(e.target.value))} /></div>
-          <Button onClick={calculate} disabled={busy !== null}>{busy === 'preview' ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <Sparkles className="mr-1 h-4 w-4" />}{busy === 'preview' ? 'Lendo o Bling…' : 'Calcular sugestão'}</Button>
-        </div>
-        <p className="text-xs text-muted-foreground">
-          Zerados primeiro, depois os abaixo do mínimo, do mais vendido para o menos vendido. Quantidade = média semanal × margem.
-        </p>
+        <fieldset className="flex flex-wrap items-end gap-3" disabled={busy !== null}>
+          <div className="space-y-1">
+            <Label htmlFor="ops-policy">Cálculo da fila</Label>
+            <Select value={mode} onValueChange={changeMode} disabled={busy !== null}>
+              <SelectTrigger id="ops-policy"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="bling">Por categoria do Bling</SelectItem>
+                <SelectItem value="legacy">Regra anterior</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1">
+            <Label id="ops-kind">Tipo</Label>
+            <div className="flex gap-1" role="group" aria-labelledby="ops-kind">
+              {(['semanal', 'corte'] as const).map(value => (
+                <Button key={value} type="button" variant={kind === value ? 'default' : 'outline'}
+                  aria-pressed={kind === value} onClick={() => changeKind(value)}>
+                  {KIND_LABEL[value]}
+                </Button>
+              ))}
+            </div>
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor="ops-from">Vendas de</Label>
+            <Input id="ops-from" type="date" value={from} max={mode === 'bling' ? today : undefined} onChange={e => changeFilters({ from: e.target.value })} />
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor="ops-to">Vendas até</Label>
+            <Input id="ops-to" type="date" value={to} max={mode === 'bling' ? today : undefined} onChange={e => changeFilters({ to: e.target.value })} />
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor="ops-factor">Margem</Label>
+            <Input id="ops-factor" className="w-28" type="number" step="any" min={mode === 'bling' ? 0 : 0.1} max={10} value={factor} onChange={e => changeFilters({ factor: e.target.value })} />
+          </div>
+          <Button type="button" onClick={calculate} disabled={busy !== null || Boolean(filterError)}>
+            {busy === 'preview' ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <Sparkles className="mr-1 h-4 w-4" />}
+            {busy === 'preview' ? 'Calculando…' : 'Calcular sugestão'}
+          </Button>
+        </fieldset>
+        {filterError && <p className="text-sm text-destructive">{filterError}</p>}
+        {busy === 'preview' && (
+          <p role="status" className="text-sm text-muted-foreground">
+            {progress ? PROGRESS_LABEL[progress.stage] : 'Preparando consulta'}
+            {progress?.completed !== undefined && progress.total !== undefined && ` (${progress.completed} de ${progress.total})`}
+          </p>
+        )}
 
-        {preview && preview.warnings.map(w => <p key={w} className="text-sm text-amber-600">{w}</p>)}
-
-        <details className="text-xs text-muted-foreground">
+        <details className="text-sm text-muted-foreground">
           <summary className="cursor-pointer select-none">Como a fila é calculada</summary>
           <div className="mt-2 space-y-1">
-            <p>Fila dos 71 SKUs da linha oficial, pela posição: saldo no depósito Estoque do Bling mais o que já está em OP aberta. Quando não há nenhum zerado, entram também os que estão entre o mínimo e o máximo.</p>
-            <p>Margem: 1 na produção semanal; no corte, o pulmão de peças cortadas sobre a dobra.</p>
-            <p>Vendidos e média vêm das notas fiscais de saída do período (padrão 90 dias; pendentes contam, canceladas não; só CFOP de venda), copiadas do Bling a cada 15 minutos. O mínimo e o máximo são relidos do Bling a cada hora.</p>
-            {preview && <>
-              {preview.notes.map(n => <p key={n}>{n}</p>)}
-              <p>Mínimo e máximo lidos do Bling em {format(new Date(preview.catalogSyncedAt), 'dd/MM/yyyy HH:mm')}. Saldo do depósito Estoque lido agora.</p>
-            </>}
+            {mode === 'bling' ? (
+              <>
+                <p>Considera as vendas por NF-e de produtos ativos da categoria Produtos Inox Marketplace e de suas subcategorias.</p>
+                <p>Prioriza estoque zerado ou negativo, depois saldo abaixo do mínimo. Em cada faixa, os mais vendidos vêm primeiro. A quantidade é a média semanal multiplicada pela margem, arredondada para cima, com sugestão mínima de 5.</p>
+                <p>A coluna Em OP mostra o que já está em produção para ajudar na revisão.</p>
+              </>
+            ) : (
+              <>
+                <p>Usa os SKUs da linha oficial e soma o estoque do Bling à quantidade em OP aberta. Quando não há nenhum zerado, também entram os itens entre o mínimo e o máximo.</p>
+                <p>Usa a média semanal de vendas por NF-e e a margem do tipo escolhido.</p>
+              </>
+            )}
+            {preview?.notes.map((note, i) => <p key={i}>{note}</p>)}
+            {preview?.catalogSyncedAt && Number.isFinite(Date.parse(preview.catalogSyncedAt)) && (
+              <p>Cadastro do Bling atualizado em {new Date(preview.catalogSyncedAt).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })}.</p>
+            )}
           </div>
         </details>
 
-        {preview && <>
-          <Table>
-            <TableHeader><TableRow><TableHead className="w-8" /><TableHead>#</TableHead><TableHead>SKU</TableHead><TableHead>Produto</TableHead><TableHead className="text-right">Estoque</TableHead><TableHead className="text-right">Mín./Máx.</TableHead><TableHead className="text-right">Em OP</TableHead><TableHead className="text-right">Vendidos</TableHead><TableHead className="text-right">Média/sem.</TableHead><TableHead>Faixa</TableHead><TableHead>Ficha</TableHead><TableHead className="w-28">Quantidade</TableHead></TableRow></TableHeader>
-            <TableBody>
-              {preview.suggestions.map((s, i) => (
-                <TableRow key={s.sku} className={s.sheet ? '' : 'opacity-60'}>
-                  <TableCell><input type="checkbox" aria-label={`Incluir ${s.sku}`} disabled={!s.sheet} checked={selected[s.sku] != null}
-                    onChange={e => setSelected(cur => ({ ...cur, [s.sku]: e.target.checked ? s.quantity : null }))} /></TableCell>
-                  <TableCell className="text-muted-foreground">{i + 1}</TableCell>
-                  <TableCell className="font-mono text-xs">{s.sku}</TableCell><TableCell className="max-w-64 truncate" title={s.description}>{s.description}</TableCell>
-                  <TableCell className={`text-right ${s.stock === 0 ? 'font-semibold text-destructive' : ''}`}>{fmt(s.stock)}</TableCell>
-                  <TableCell className="text-right">{fmt(s.min)}/{fmt(s.max)}</TableCell><TableCell className="text-right">{s.openQuantity ? fmt(s.openQuantity) : '—'}</TableCell>
-                  <TableCell className="text-right">{fmt(s.sold)}</TableCell><TableCell className="text-right">{fmt(s.weeklyAverage)}</TableCell><TableCell className="whitespace-nowrap text-xs">{TIER_LABEL[s.tier]}</TableCell>
-                  <TableCell className="font-mono text-xs">{s.sheet ? s.sheet.code : <Badge variant="outline">Sem ficha</Badge>}</TableCell>
-                  <TableCell><Input className="h-8" type="number" min={1} aria-label={`Quantidade de ${s.sku}`} disabled={selected[s.sku] == null}
-                    value={selected[s.sku] ?? s.quantity} onChange={e => setSelected(cur => ({ ...cur, [s.sku]: Number(e.target.value) }))} /></TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-          {!preview.suggestions.length && <p className="text-sm text-muted-foreground">Nenhum SKU da linha oficial precisa de produção agora.</p>}
-          <div className="flex items-center justify-end gap-3">
-            <span className="text-sm text-muted-foreground">{chosen.length} item(ns) selecionado(s)</span>
-            <Button onClick={create} disabled={!chosen.length || busy !== null}>{busy === 'create' && <Loader2 className="mr-1 h-4 w-4 animate-spin" />}Gerar {chosen.length} OP(s)</Button>
-          </div>
-        </>}
+        {preview && review && (
+          <>
+            {(preview.weeks !== undefined || preview.invoiceCount !== undefined || Boolean(preview.categories?.length)) && (
+              <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-muted-foreground">
+                {preview.invoiceCount !== undefined && <span>{fmt(preview.invoiceCount)} NF-e no período</span>}
+                {preview.weeks !== undefined && <span>{fmt(preview.weeks)} {preview.weeks === 1 ? 'semana' : 'semanas'}</span>}
+                {Boolean(preview.categories?.length) && <span>{preview.categories?.join(', ')}</span>}
+              </div>
+            )}
+            {preview.warnings.map((warning, i) => <p key={i} className="text-sm text-amber-700 dark:text-amber-400">{warning}</p>)}
+            {Boolean(preview.ignored?.length) && (
+              <details className="text-sm">
+                <summary className="cursor-pointer">Itens ignorados por quantidade ({preview.ignored?.length})</summary>
+                <Table>
+                  <TableHeader><TableRow><TableHead>NF-e</TableHead><TableHead>SKU</TableHead><TableHead className="text-right">Quantidade</TableHead></TableRow></TableHeader>
+                  <TableBody>
+                    {preview.ignored?.map((item, i) => (
+                      <TableRow key={i}><TableCell>{item.invoice}</TableCell><TableCell>{item.sku}</TableCell><TableCell className="text-right">{fmt(item.quantity)}</TableCell></TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </details>
+            )}
+            {preview.suggestions.length ? (
+              <>
+                <div className="flex flex-wrap gap-2">
+                  <Button type="button" size="sm" variant="outline" disabled={busy !== null || !preview.suggestions.some(row => !queueBlockers(row, mode).length && !review.rows[row.sku].selected)} onClick={() => selectRows(true)}>Marcar disponíveis</Button>
+                  <Button type="button" size="sm" variant="outline" disabled={busy !== null || !selectedRows.length} onClick={() => selectRows(false)}>Desmarcar todos</Button>
+                  <Button type="button" size="sm" variant="outline" onClick={downloadSuggestion}><Download className="mr-1 h-4 w-4" />Baixar sugestão em XLSX</Button>
+                </div>
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="w-8"><span className="sr-only">Incluir no lote</span></TableHead>
+                      <TableHead>SKU</TableHead><TableHead>Produto</TableHead><TableHead>Faixa</TableHead>
+                      <TableHead className="text-right">Estoque</TableHead>
+                      <TableHead className="text-right">{mode === 'bling' ? 'Mínimo' : 'Mín./Máx.'}</TableHead>
+                      <TableHead className="text-right">Em OP</TableHead><TableHead className="text-right">Vendidos</TableHead>
+                      <TableHead className="text-right">Média/sem.</TableHead><TableHead>Ficha</TableHead>
+                      {mode === 'bling' && <TableHead>Estrutura no Bling</TableHead>}
+                      <TableHead className="w-32">Quantidade</TableHead><TableHead>Pendências</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {preview.suggestions.map((row, i) => {
+                      const { selected, quantity } = review.rows[row.sku];
+                      const blockers = queueBlockers(row, mode);
+                      const blocked = blockers.length > 0;
+                      return (
+                        <TableRow key={row.sku}>
+                          <TableCell>
+                            <input type="checkbox" aria-label={`Incluir ${row.sku}`}
+                              aria-describedby={blocked ? `ops-blockers-${i}` : undefined}
+                              disabled={blocked || busy !== null} checked={selected}
+                              onChange={e => changeRow(row.sku, { selected: e.target.checked })} />
+                          </TableCell>
+                          <TableCell className="font-mono text-xs">{row.sku}</TableCell>
+                          <TableCell className="max-w-64 truncate" title={row.description}>{row.description}</TableCell>
+                          <TableCell className="whitespace-nowrap text-xs">{queueTierLabel(row.tier, mode)}</TableCell>
+                          <TableCell className="text-right">
+                            <span className={row.stock <= 0 ? 'font-semibold text-destructive' : ''}>{fmt(row.stock)}</span>
+                            {row.stockSource && <span className="block whitespace-nowrap text-xs text-muted-foreground">{STOCK_SOURCE_LABEL[row.stockSource]}</span>}
+                          </TableCell>
+                          <TableCell className="text-right">{mode === 'bling' ? fmt(row.min) : `${fmt(row.min)}/${fmt(row.max)}`}</TableCell>
+                          <TableCell className="text-right">{row.openQuantity ? fmt(row.openQuantity) : '—'}</TableCell>
+                          <TableCell className="text-right">{fmt(row.sold)}</TableCell>
+                          <TableCell className="text-right">{mode === 'bling' ? formatAverage(row.weeklyAverage) : fmt(row.weeklyAverage)}</TableCell>
+                          <TableCell className="font-mono text-xs">{row.sheet?.code ?? '—'}</TableCell>
+                          {mode === 'bling' && <TableCell>{row.hasStructure === undefined ? '—' : row.hasStructure ? 'Sim' : 'Não'}</TableCell>}
+                          <TableCell>
+                            <Input className="h-8 min-w-24" type="number" step="any" max={1_000_000} aria-label={`Quantidade de ${row.sku}`}
+                              aria-invalid={selected && !validQuantity(quantity)} disabled={blocked || busy !== null}
+                              value={quantity} onChange={e => changeRow(row.sku, { quantity: e.target.value })} />
+                          </TableCell>
+                          <TableCell id={`ops-blockers-${i}`} className="text-xs text-muted-foreground">
+                            {blockers.length ? blockers.join(' · ') : '—'}
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+                {invalidQuantity && <p className="text-sm text-destructive">Informe quantidades maiores que zero e de até 1.000.000 para os itens selecionados.</p>}
+                {tooManySelected && <p className="text-sm text-destructive">Selecione até {MAX_BATCH_ITEMS} itens para gerar um lote.</p>}
+                {!canSend && <p className="text-sm text-muted-foreground">Esta prévia está disponível para consulta e download.</p>}
+                <div className="flex flex-wrap items-center justify-end gap-3">
+                  <span className="text-sm text-muted-foreground" role="status">
+                    {selectedRows.length === 1 ? '1 item selecionado' : `${selectedRows.length} itens selecionados`}
+                  </span>
+                  <Button type="button" onClick={create} disabled={!canGenerate || busy !== null}>
+                    {busy === 'create' && <Loader2 className="mr-1 h-4 w-4 animate-spin" />}
+                    {busy === 'create' ? 'Gerando lote…' : 'Gerar lote de OPs'}
+                  </Button>
+                </div>
+              </>
+            ) : (
+              <p className="text-sm text-muted-foreground">Nenhum SKU atende aos critérios da fila neste período.</p>
+            )}
+          </>
+        )}
       </CardContent>
     </Card>
   );

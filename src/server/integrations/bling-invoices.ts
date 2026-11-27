@@ -49,7 +49,8 @@ export function createBlingInvoiceReader(get: (url: string) => Promise<{ data?: 
       // Sem situação o Bling omite as canceladas; elas vêm numa listagem própria.
       if (cancelled) query.set('situacao', String(CANCELLED));
       const response = await get(`${BASE}/nfe?${query}`);
-      return ((response?.data as RawHeader[] | undefined) ?? []).map(header);
+      if (!Array.isArray(response?.data)) throw new Error('Listagem de NF-e inválida.');
+      return (response.data as RawHeader[]).map(header);
     },
     async invoice(blingId) {
       const raw = ((await get(`${BASE}/nfe/${blingId}`))?.data ?? {}) as RawHeader & { itens?: RawItem[] };

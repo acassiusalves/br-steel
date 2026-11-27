@@ -42,6 +42,7 @@ const tables = [
   'brsteel_pcp.production_orders',
   'brsteel_pcp.production_phases',
   'brsteel_pcp.sales_invoice_items',
+  'brsteel_pcp.sales_invoice_sync_state',
   'brsteel_pcp.sales_invoices',
   'brsteel_pcp.sales_item_products',
   'brsteel_pcp.work_periods',

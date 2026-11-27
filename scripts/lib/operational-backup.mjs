@@ -8,10 +8,11 @@ export const tables = ['brsteel_import.runs','brsteel_import.state',
   ...['inventory_movements','production_columns','production_comments','production_counters',
     'production_lot_items','production_lots','sales_order_items','sales_orders','sku_weekly_demand','stock_observation_log','stock_observations','supplies','supply_codes'].map(n=>'brsteel_ops.'+n),
   // Cadastros do PCP: nascem no PostgreSQL e só existem aqui, então o backup é a única cópia.
-  ...['bling_products','holidays','loss_reasons','product_sheet_components','product_sheet_steps','product_sheets','production_lines','production_operations','production_order_batches','production_order_events','production_order_losses','production_order_step_pauses','production_order_steps','production_orders','production_phases','sales_invoice_items','sales_invoices','sales_item_products','work_periods',
+  ...['bling_products','holidays','loss_reasons','product_sheet_components','product_sheet_steps','product_sheets','production_lines','production_operations','production_order_batches','production_order_events','production_order_losses','production_order_step_pauses','production_order_steps','production_orders','production_phases','sales_invoice_items','sales_invoice_sync_state','sales_invoices','sales_item_products','work_periods',
     'work_team_members','work_team_operations','work_teams','worker_operations','workers'].map(n=>'brsteel_pcp.'+n),
   // Chamados de erros e melhorias: nascem no PostgreSQL e só existem aqui.
   'brsteel_support.tickets'];
+const previousTables = tables.filter(name => name !== 'brsteel_pcp.sales_invoice_sync_state');
 
 export function backupConnection(value, ca) {
   const u=new URL(value);
@@ -78,12 +79,27 @@ export function tableManifestSql(table) {
     from (select encode(sha256(convert_to(to_jsonb(t)::text,'UTF8')),'hex') h from ${table} t) hashed`;
 }
 
-export async function manifest(query) {
+async function readManifest(query, knownTables) {
   await query("set timezone='UTC'; set extra_float_digits=3; set search_path=pg_catalog");
   const catalog=(await query(catalogSql)).rows[0].catalog;
-  if (catalog.tables?.length!==40 || catalog.tables.some(t=>!t[2]) || catalog.constraints.filter(c=>c[3]==='f').length!==55)
+  const found = new Set(catalog.tables?.map(([schema, table]) => `${schema}.${table}`));
+  if (catalog.tables?.length !== knownTables.length || knownTables.some(name => !found.has(name))
+      || catalog.tables.some(t => t[2] !== true) || catalog.constraints.filter(c => c[3] === 'f').length !== 55)
     throw new Error('Unexpected operational catalog');
   const rows=[];
-  for (const name of tables) rows.push({name,...(await query(tableManifestSql(name))).rows[0]});
+  for (const name of knownTables) rows.push({name,...(await query(tableManifestSql(name))).rows[0]});
   return {tables:rows,catalog};
+}
+
+export function manifest(query) {
+  return readManifest(query, tables);
+}
+
+export async function restoredManifest(query, expected) {
+  const names = Array.isArray(expected?.tables) ? expected.tables.map(table => table?.name) : [];
+  const knownTables = isDeepStrictEqual(names, previousTables) ? previousTables : tables;
+  if (!isDeepStrictEqual(names, knownTables)) throw new Error('Unexpected saved operational manifest');
+  const actual = await readManifest(query, knownTables);
+  assertSameManifest(expected, actual);
+  return actual;
 }
